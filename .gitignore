@@ -1,1 +1,9 @@
 node_modules/
+dist/
+src/ui/dist/
+data/
+.env
+.env.local
+*.log
+.DS_Store
+bun.lockb.bak

@@ -1,0 +1,2 @@
+# Bun runtime configuration. Test discovery is the default (src/**/*.test.ts).
+# See https://bun.sh/docs/runtime/bunfig for available options.
