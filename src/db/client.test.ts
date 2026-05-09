@@ -1,8 +1,43 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openDatabase } from "./client.ts";
+
+const REAL_MIGRATIONS = join(import.meta.dir, "migrations");
+
+interface JournalEntry {
+	idx: number;
+	version: string;
+	when: number;
+	tag: string;
+	breakpoints: boolean;
+}
+
+interface Journal {
+	version: string;
+	dialect: string;
+	entries: JournalEntry[];
+}
+
+/**
+ * Build a partial migrations folder containing the first `count` migrations
+ * from the real folder. Used to simulate "partial-state upgrade" — boot on an
+ * older build, accumulate data, then upgrade with new migrations added.
+ */
+function makePartialMigrations(count: number): string {
+	const dir = mkdtempSync(join(tmpdir(), "warren-mig-"));
+	mkdirSync(join(dir, "meta"));
+	const realJournal: Journal = JSON.parse(
+		readFileSync(join(REAL_MIGRATIONS, "meta", "_journal.json"), "utf8"),
+	);
+	const partialJournal: Journal = { ...realJournal, entries: realJournal.entries.slice(0, count) };
+	writeFileSync(join(dir, "meta", "_journal.json"), JSON.stringify(partialJournal, null, 2));
+	for (const entry of partialJournal.entries) {
+		copyFileSync(join(REAL_MIGRATIONS, `${entry.tag}.sql`), join(dir, `${entry.tag}.sql`));
+	}
+	return dir;
+}
 
 describe("openDatabase", () => {
 	test("runs migrations against a fresh in-memory db", async () => {
@@ -53,6 +88,52 @@ describe("openDatabase", () => {
 		} finally {
 			b.close();
 			rmSync(tmp, { recursive: true, force: true });
+		}
+	});
+
+	test("upgrades a populated db across an ALTER-rebuild migration without data loss", async () => {
+		// Regression for warren-b060: migration 0003 rebuilds runs via DROP TABLE,
+		// which fails with FK ON when events rows reference runs. Drizzle wraps the
+		// migration body in BEGIN/COMMIT, so the migration's own
+		// `PRAGMA foreign_keys=OFF` is a no-op — the toggle has to happen at the
+		// connection level before migrate() runs.
+		const tmp = mkdtempSync(join(tmpdir(), "warren-db-"));
+		const dbPath = join(tmp, "warren.db");
+		const partial = makePartialMigrations(3); // 0000-0002 only
+		try {
+			const a = await openDatabase({ path: dbPath, migrationsFolder: partial });
+			a.raw.exec(
+				"INSERT INTO agents (name, rendered_json, registered_at, last_refreshed) VALUES ('claude-code', '{}', '2026-05-09T00:00:00Z', '2026-05-09T00:00:00Z')",
+			);
+			a.raw.exec(
+				"INSERT INTO projects (id, git_url, local_path, default_branch, added_at) VALUES ('p1', 'https://github.com/x/y', '/data/projects/p1', 'main', '2026-05-09T00:00:00Z')",
+			);
+			a.raw.exec(
+				"INSERT INTO runs (id, agent_name, project_id, rendered_agent_json, state, prompt, trigger) VALUES ('r1', 'claude-code', 'p1', '{}', 'running', 'hi', 'manual')",
+			);
+			for (let seq = 0; seq < 5; seq++) {
+				a.raw.exec(
+					`INSERT INTO events (run_id, burrow_event_seq, ts, kind, payload_json) VALUES ('r1', ${seq}, '2026-05-09T00:00:00Z', 'message', '{}')`,
+				);
+			}
+			a.close();
+
+			// Re-open with the real migrations folder — 0003 must succeed despite
+			// FK-referencing rows in events.
+			const b = await openDatabase({ path: dbPath });
+			try {
+				const runs = b.raw.query<{ c: number }, []>("SELECT COUNT(*) as c FROM runs").get();
+				const events = b.raw.query<{ c: number }, []>("SELECT COUNT(*) as c FROM events").get();
+				expect(runs?.c).toBe(1);
+				expect(events?.c).toBe(5);
+				const fk = b.raw.query<{ foreign_keys: number }, []>("PRAGMA foreign_keys").get();
+				expect(fk?.foreign_keys).toBe(1);
+			} finally {
+				b.close();
+			}
+		} finally {
+			rmSync(tmp, { recursive: true, force: true });
+			rmSync(partial, { recursive: true, force: true });
 		}
 	});
 

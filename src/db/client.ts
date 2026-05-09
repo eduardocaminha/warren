@@ -45,10 +45,18 @@ export async function openDatabase(options: OpenDatabaseOptions): Promise<Warren
 	const db = drizzle(raw, { schema });
 
 	if (!options.skipMigrations) {
+		// FK must be OFF when migrations run so the canonical SQLite "12-step ALTER"
+		// pattern (CREATE __new / INSERT SELECT / DROP / RENAME) succeeds against
+		// tables referenced by other tables. Drizzle wraps each migration body in
+		// BEGIN/COMMIT, and SQLite silently ignores `PRAGMA foreign_keys` toggled
+		// inside a transaction — so the toggle has to happen on the connection
+		// before migrate() opens its transaction.
+		raw.exec("PRAGMA foreign_keys = OFF");
 		migrate(db, {
 			migrationsFolder: options.migrationsFolder ?? DEFAULT_MIGRATIONS_FOLDER,
 		});
 	}
+	raw.exec("PRAGMA foreign_keys = ON");
 
 	return {
 		drizzle: db,
@@ -62,7 +70,6 @@ function configurePragmas(raw: Database, inMemory: boolean): void {
 		raw.exec("PRAGMA journal_mode = WAL");
 		raw.exec("PRAGMA synchronous = NORMAL");
 	}
-	raw.exec("PRAGMA foreign_keys = ON");
 	raw.exec("PRAGMA busy_timeout = 5000");
 }
 
