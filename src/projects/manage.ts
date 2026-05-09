@@ -33,6 +33,7 @@ import {
 } from "./clone.ts";
 import type { ProjectsConfig } from "./config.ts";
 import { ProjectUnavailableError } from "./errors.ts";
+import { type RefreshProjectCloneResult, refreshProjectClone } from "./refresh.ts";
 import { parseGitHubUrl } from "./url.ts";
 
 export interface AddProjectInput {
@@ -75,6 +76,50 @@ export async function addProject(input: AddProjectInput): Promise<ProjectRow> {
 		defaultBranch: clone.defaultBranch,
 		now: input.now?.(),
 	});
+}
+
+export interface RefreshProjectInput {
+	readonly repo: ProjectsRepo;
+	readonly config: ProjectsConfig;
+	readonly id: string;
+	/** Branch, tag, or SHA. Defaults to the project row's tracked default_branch. */
+	readonly ref?: string;
+	readonly spawn: SpawnFn;
+	readonly timeoutMs?: number;
+	readonly now?: () => Date;
+	/** Inject the refresher; defaults to the live `refreshProjectClone`. */
+	readonly refresh?: typeof refreshProjectClone;
+}
+
+export interface RefreshProjectResult {
+	readonly project: ProjectRow;
+	readonly headSha: string;
+	readonly ref: string;
+}
+
+export async function refreshProject(input: RefreshProjectInput): Promise<RefreshProjectResult> {
+	const { repo, config, id } = input;
+	const row = repo.require(id);
+	const ref = input.ref ?? row.defaultBranch;
+	if (ref === "") {
+		throw new ValidationError("ref must be a non-empty string");
+	}
+
+	const refreshFn = input.refresh ?? refreshProjectClone;
+	const result: RefreshProjectCloneResult = await refreshFn({
+		config,
+		localPath: row.localPath,
+		ref,
+		spawn: input.spawn,
+		timeoutMs: input.timeoutMs ?? DEFAULT_GIT_TIMEOUT_MS,
+	});
+
+	const updated = repo.recordRefresh({
+		id: row.id,
+		headSha: result.headSha,
+		now: input.now?.(),
+	});
+	return { project: updated, headSha: result.headSha, ref: result.ref };
 }
 
 export interface DeleteProjectInput {

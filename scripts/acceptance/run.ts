@@ -149,6 +149,7 @@ async function main(): Promise<number> {
 				canopyRepoUrl: fixtures.canopyRepoUrl,
 				sampleProjectGitUrl: fixtures.sampleProjectGitUrl,
 				sampleProjectName: fixtures.sampleProjectName,
+				sampleProjectPath: fixtures.sampleProjectPath,
 				stubAgentName: fixtures.stubAgentName,
 				knownSeedTitle: fixtures.knownSeedTitle,
 				knownMulchDomain: fixtures.knownMulchDomain,

@@ -44,6 +44,9 @@ import { withTransportMapping } from "../burrow-client/client.ts";
 import { ValidationError } from "../core/errors.ts";
 import type { Repos } from "../db/repos/index.ts";
 import type { RunRow } from "../db/schema.ts";
+import type { SpawnFn as ProjectSpawnFn } from "../projects/clone.ts";
+import type { ProjectsConfig } from "../projects/config.ts";
+import { refreshProject } from "../projects/manage.ts";
 import {
 	type AgentDefinition,
 	parseRenderedAgent,
@@ -64,6 +67,22 @@ export interface SpawnRunInput {
 	/** Override the workspace seeder; defaults to `seedBurrowWorkspace`. */
 	readonly seedWorkspace?: (input: SeedBurrowWorkspaceInput) => Promise<unknown>;
 	readonly now?: () => Date;
+	/**
+	 * Refresh the project's on-disk clone before provisioning burrow.
+	 * Without this, every run reuses the registration-time commit
+	 * forever (warren-1bb6). Required for spawnRun to pick up new
+	 * commits without DELETE + POST /projects.
+	 *
+	 * Skipped if `projectsConfig` and `projectSpawn` aren't both wired.
+	 * Tests that don't care about refresh can leave them off; the HTTP
+	 * server passes both.
+	 */
+	readonly projectsConfig?: ProjectsConfig;
+	readonly projectSpawn?: ProjectSpawnFn;
+	/** Branch, tag, or SHA to refresh to. Defaults to the project's tracked default branch. */
+	readonly ref?: string;
+	/** Override the project refresher; defaults to `refreshProject`. */
+	readonly refreshProjectFn?: typeof refreshProject;
 }
 
 export interface SpawnRunResult {
@@ -83,9 +102,28 @@ export async function spawnRun(input: SpawnRunInput): Promise<SpawnRunResult> {
 	const agent = readCachedAgent(agentRow.renderedJson, agentRow.name);
 	const burrowConfig = parseBurrowConfig(agent.sections.burrow_config);
 
+	// Refresh the project clone to origin/<ref> so the run sees the
+	// latest commits. Skipped only when the caller didn't wire the
+	// projects-config + spawn seam (tests that pre-stage their own
+	// fixtures). Refresh failure aborts the spawn before we create a
+	// warren row — a stale workspace is worse than a clean error
+	// (warren-1bb6).
+	const refreshed =
+		input.projectsConfig !== undefined && input.projectSpawn !== undefined
+			? await (input.refreshProjectFn ?? refreshProject)({
+					repo: input.repos.projects,
+					config: input.projectsConfig,
+					id: project.id,
+					...(input.ref !== undefined ? { ref: input.ref } : {}),
+					spawn: input.projectSpawn,
+					...(input.now !== undefined ? { now: input.now } : {}),
+				})
+			: null;
+	const projectAfterRefresh = refreshed?.project ?? project;
+
 	const run = input.repos.runs.create({
 		agentName: agent.name,
-		projectId: project.id,
+		projectId: projectAfterRefresh.id,
 		prompt: input.prompt,
 		renderedAgentJson: agent,
 		trigger: input.trigger ?? "manual",
@@ -96,8 +134,8 @@ export async function spawnRun(input: SpawnRunInput): Promise<SpawnRunResult> {
 	try {
 		burrow = await provisionBurrow(
 			input.burrowClient,
-			project.localPath,
-			project.gitUrl,
+			projectAfterRefresh.localPath,
+			projectAfterRefresh.gitUrl,
 			burrowConfig.network,
 			agent.name,
 		);

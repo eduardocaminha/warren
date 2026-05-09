@@ -26,5 +26,13 @@ export {
 	type DeleteProjectInput,
 	deleteProject,
 	listProjects,
+	type RefreshProjectInput,
+	type RefreshProjectResult,
+	refreshProject,
 } from "./manage.ts";
+export {
+	type RefreshProjectCloneInput,
+	type RefreshProjectCloneResult,
+	refreshProjectClone,
+} from "./refresh.ts";
 export { type ParsedGitHubUrl, parseGitHubUrl } from "./url.ts";

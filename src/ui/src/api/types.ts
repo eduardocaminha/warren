@@ -21,6 +21,14 @@ export interface ProjectRow {
 	localPath: string;
 	defaultBranch: string;
 	addedAt: string;
+	lastFetchedAt: string | null;
+	lastHeadSha: string | null;
+}
+
+export interface RefreshProjectResponse {
+	project: ProjectRow;
+	headSha: string;
+	ref: string;
 }
 
 export interface RunRow {

@@ -23,6 +23,7 @@ export interface ScenarioCtx {
 		readonly canopyRepoUrl: string;
 		readonly sampleProjectGitUrl: string;
 		readonly sampleProjectName: string;
+		readonly sampleProjectPath: string;
 		readonly stubAgentName: string;
 		readonly knownSeedTitle: string;
 		readonly knownMulchDomain: string;

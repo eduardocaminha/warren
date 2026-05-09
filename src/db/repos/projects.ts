@@ -20,6 +20,12 @@ export interface CreateProjectInput {
 	now?: Date;
 }
 
+export interface RecordRefreshInput {
+	id: string;
+	headSha: string;
+	now?: Date;
+}
+
 export class ProjectsRepo {
 	constructor(private readonly db: DrizzleDb) {}
 
@@ -30,9 +36,21 @@ export class ProjectsRepo {
 			localPath: input.localPath,
 			defaultBranch: input.defaultBranch,
 			addedAt: (input.now ?? new Date()).toISOString(),
+			lastFetchedAt: null,
+			lastHeadSha: null,
 		};
 		this.db.insert(projects).values(row).run();
 		return row;
+	}
+
+	recordRefresh(input: RecordRefreshInput): ProjectRow {
+		const lastFetchedAt = (input.now ?? new Date()).toISOString();
+		this.db
+			.update(projects)
+			.set({ lastFetchedAt, lastHeadSha: input.headSha })
+			.where(eq(projects.id, input.id))
+			.run();
+		return this.require(input.id);
 	}
 
 	get(id: string): ProjectRow | null {

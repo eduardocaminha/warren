@@ -42,6 +42,8 @@ export const projects = sqliteTable(
 		localPath: text("local_path").notNull(),
 		defaultBranch: text("default_branch").notNull(),
 		addedAt: text("added_at").notNull(),
+		lastFetchedAt: text("last_fetched_at"),
+		lastHeadSha: text("last_head_sha"),
 	},
 	(t) => [index("projects_git_url_idx").on(t.gitUrl)],
 );

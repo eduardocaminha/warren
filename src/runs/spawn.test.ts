@@ -431,4 +431,107 @@ describe("spawnRun", () => {
 			}),
 		).rejects.toBeInstanceOf(RunSpawnError);
 	});
+
+	test("refreshes the project clone before provisioning burrow when projectsConfig + projectSpawn are wired", async () => {
+		const { client, calls } = makeBurrowClient();
+		let refreshCalled = false;
+		let refreshRef: string | undefined;
+		await spawnRun({
+			repos,
+			burrowClient: client,
+			agentName: "refactor-bot",
+			projectId: "prj_xxxxxxxxxxxx",
+			prompt: "p",
+			projectsConfig: { root: "/data/projects", gitBinary: "git" },
+			projectSpawn: async () => ({ stdout: "", stderr: "", exitCode: 0 }),
+			refreshProjectFn: async (input) => {
+				refreshCalled = true;
+				refreshRef = input.ref;
+				const updated = repos.projects.recordRefresh({
+					id: input.id,
+					headSha: "feedface".repeat(5),
+				});
+				return { project: updated, headSha: "feedface".repeat(5), ref: input.ref ?? "main" };
+			},
+			seedWorkspace: async () => undefined,
+		});
+
+		expect(refreshCalled).toBe(true);
+		expect(refreshRef).toBeUndefined(); // defaults to row's defaultBranch inside refreshProject
+		// Burrow was provisioned with the project's localPath after refresh
+		expect(calls[0]?.body).toMatchObject({ projectRoot: "/data/projects/x/y" });
+
+		// HEAD sha was persisted onto the project row
+		const persisted = repos.projects.require("prj_xxxxxxxxxxxx");
+		expect(persisted.lastHeadSha).toBe("feedface".repeat(5));
+		expect(persisted.lastFetchedAt).not.toBeNull();
+	});
+
+	test("forwards an explicit ref override into refreshProjectFn", async () => {
+		const { client } = makeBurrowClient();
+		let receivedRef: string | undefined;
+		await spawnRun({
+			repos,
+			burrowClient: client,
+			agentName: "refactor-bot",
+			projectId: "prj_xxxxxxxxxxxx",
+			prompt: "p",
+			ref: "feature/x",
+			projectsConfig: { root: "/data/projects", gitBinary: "git" },
+			projectSpawn: async () => ({ stdout: "", stderr: "", exitCode: 0 }),
+			refreshProjectFn: async (input) => {
+				receivedRef = input.ref;
+				const updated = repos.projects.recordRefresh({
+					id: input.id,
+					headSha: "abcd".repeat(10),
+				});
+				return { project: updated, headSha: "abcd".repeat(10), ref: input.ref ?? "" };
+			},
+			seedWorkspace: async () => undefined,
+		});
+		expect(receivedRef).toBe("feature/x");
+	});
+
+	test("aborts spawn when refresh fails — no warren row, no burrow", async () => {
+		const { client, calls } = makeBurrowClient();
+		await expect(
+			spawnRun({
+				repos,
+				burrowClient: client,
+				agentName: "refactor-bot",
+				projectId: "prj_xxxxxxxxxxxx",
+				prompt: "p",
+				projectsConfig: { root: "/data/projects", gitBinary: "git" },
+				projectSpawn: async () => ({ stdout: "", stderr: "", exitCode: 0 }),
+				refreshProjectFn: async () => {
+					throw new Error("git fetch failed");
+				},
+				seedWorkspace: async () => undefined,
+			}),
+		).rejects.toBeDefined();
+
+		expect(repos.runs.listAll()).toHaveLength(0);
+		expect(calls).toHaveLength(0);
+	});
+
+	test("skips refresh when projectsConfig is not wired (back-compat for tests)", async () => {
+		const { client, calls } = makeBurrowClient();
+		let refreshCalled = false;
+		await spawnRun({
+			repos,
+			burrowClient: client,
+			agentName: "refactor-bot",
+			projectId: "prj_xxxxxxxxxxxx",
+			prompt: "p",
+			refreshProjectFn: async () => {
+				refreshCalled = true;
+				return { project: repos.projects.require("prj_xxxxxxxxxxxx"), headSha: "x", ref: "main" };
+			},
+			seedWorkspace: async () => undefined,
+		});
+		expect(refreshCalled).toBe(false);
+		// Project row's lastHeadSha stays null
+		expect(repos.projects.require("prj_xxxxxxxxxxxx").lastHeadSha).toBeNull();
+		expect(calls.length).toBeGreaterThan(0);
+	});
 });

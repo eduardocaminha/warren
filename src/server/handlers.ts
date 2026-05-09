@@ -36,7 +36,7 @@ import {
 	type DiagnosticCheck,
 } from "../diagnostics/checks.ts";
 import type { SpawnFn, SpawnOptions, SpawnResult } from "../projects/clone.ts";
-import { addProject, deleteProject, listProjects } from "../projects/index.ts";
+import { addProject, deleteProject, listProjects, refreshProject } from "../projects/index.ts";
 import { CanopyClient } from "../registry/canopy.ts";
 import { refreshAgentRegistry } from "../registry/refresh.ts";
 import { cancelRun, spawnRun, steerRun, tailRunEvents } from "../runs/index.ts";
@@ -224,6 +224,27 @@ function deleteProjectHandler(deps: ServerDeps): RouteHandler {
 	};
 }
 
+function refreshProjectHandler(deps: ServerDeps): RouteHandler {
+	return async (ctx) => {
+		const id = requireParam(ctx, "id");
+		const body = await readJsonBodyOrEmpty(ctx);
+		const ref = body !== null ? optionalString(body, "ref") : undefined;
+		const result = await refreshProject({
+			repo: deps.repos.projects,
+			config: deps.projectsConfig,
+			id,
+			...(ref !== undefined ? { ref } : {}),
+			spawn: deps.spawn ?? defaultSpawn,
+			...(deps.now !== undefined ? { now: deps.now } : {}),
+		});
+		return jsonResponse(200, {
+			project: result.project,
+			headSha: result.headSha,
+			ref: result.ref,
+		});
+	};
+}
+
 /* ----------------------------------------------------------------------- */
 /* Runs (§8.1)                                                              */
 /* ----------------------------------------------------------------------- */
@@ -255,6 +276,7 @@ function getRunHandler(deps: ServerDeps): RouteHandler {
 function createRunHandler(deps: ServerDeps): RouteHandler {
 	return async (ctx) => {
 		const body = await readJsonBody(ctx);
+		const ref = optionalString(body, "ref");
 		const result = await spawnRun({
 			repos: deps.repos,
 			burrowClient: deps.burrowClient,
@@ -263,6 +285,9 @@ function createRunHandler(deps: ServerDeps): RouteHandler {
 			prompt: requireString(body, "prompt"),
 			...(body.metadata !== undefined ? { metadata: body.metadata } : {}),
 			...(deps.now !== undefined ? { now: deps.now } : {}),
+			projectsConfig: deps.projectsConfig,
+			projectSpawn: deps.spawn ?? defaultSpawn,
+			...(ref !== undefined ? { ref } : {}),
 		});
 		// Hand off to the bridge so events start flowing into warren.events
 		// — without this the dispatched run would emit events into burrow
@@ -480,6 +505,7 @@ const ROUTE_TABLE: readonly RouteEntry[] = [
 
 	{ method: "GET", pattern: "/projects", build: listProjectsHandler },
 	{ method: "POST", pattern: "/projects", build: createProjectHandler },
+	{ method: "POST", pattern: "/projects/:id/refresh", build: refreshProjectHandler },
 	{ method: "DELETE", pattern: "/projects/:id", build: deleteProjectHandler },
 
 	{ method: "GET", pattern: "/runs", build: listRunsHandler },

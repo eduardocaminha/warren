@@ -6,7 +6,7 @@ import { ProjectsRepo } from "../db/repos/projects.ts";
 import type { CloneProjectResult, SpawnFn } from "./clone.ts";
 import type { ProjectsConfig } from "./config.ts";
 import { ProjectUnavailableError } from "./errors.ts";
-import { addProject, deleteProject, listProjects } from "./manage.ts";
+import { addProject, deleteProject, listProjects, refreshProject } from "./manage.ts";
 
 const CFG: ProjectsConfig = {
 	root: "/data/projects",
@@ -289,6 +289,139 @@ describe("deleteProject", () => {
 				id: "prj_doesnotexist",
 				exists: () => false,
 				rmrf: async () => undefined,
+			}),
+		).rejects.toMatchObject({ code: "not_found" });
+	});
+});
+
+describe("refreshProject", () => {
+	let db: WarrenDb;
+	let repo: ProjectsRepo;
+
+	beforeEach(async () => {
+		db = await openDatabase({ path: ":memory:" });
+		repo = new ProjectsRepo(db.drizzle);
+	});
+
+	afterEach(() => {
+		db.close();
+	});
+
+	test("calls refresh with the row's localPath + default branch and stamps lastFetchedAt + lastHeadSha", async () => {
+		const row = await addProject({
+			repo,
+			config: CFG,
+			gitUrl: "https://github.com/x/y.git",
+			spawn: NOOP_SPAWN,
+			clone: fakeClone({ defaultBranch: "trunk" }),
+		});
+
+		let receivedRef: string | undefined;
+		let receivedPath: string | undefined;
+		const result = await refreshProject({
+			repo,
+			config: CFG,
+			id: row.id,
+			spawn: NOOP_SPAWN,
+			refresh: async (input) => {
+				receivedRef = input.ref;
+				receivedPath = input.localPath;
+				return { headSha: "abcd1234abcd1234abcd1234abcd1234abcd1234", ref: input.ref };
+			},
+			now: () => new Date("2026-05-09T19:00:00.000Z"),
+		});
+
+		expect(receivedRef).toBe("trunk");
+		expect(receivedPath).toBe(row.localPath);
+		expect(result.headSha).toBe("abcd1234abcd1234abcd1234abcd1234abcd1234");
+		expect(result.project.lastFetchedAt).toBe("2026-05-09T19:00:00.000Z");
+		expect(result.project.lastHeadSha).toBe("abcd1234abcd1234abcd1234abcd1234abcd1234");
+
+		const persisted = repo.require(row.id);
+		expect(persisted.lastFetchedAt).toBe("2026-05-09T19:00:00.000Z");
+		expect(persisted.lastHeadSha).toBe("abcd1234abcd1234abcd1234abcd1234abcd1234");
+	});
+
+	test("forwards an explicit ref override", async () => {
+		const row = await addProject({
+			repo,
+			config: CFG,
+			gitUrl: "https://github.com/x/y.git",
+			spawn: NOOP_SPAWN,
+			clone: fakeClone({ defaultBranch: "main" }),
+		});
+
+		let receivedRef: string | undefined;
+		await refreshProject({
+			repo,
+			config: CFG,
+			id: row.id,
+			ref: "feature/123",
+			spawn: NOOP_SPAWN,
+			refresh: async (input) => {
+				receivedRef = input.ref;
+				return { headSha: "deadbeef".repeat(5), ref: input.ref };
+			},
+		});
+
+		expect(receivedRef).toBe("feature/123");
+	});
+
+	test("does not stamp the row when refresh throws", async () => {
+		const row = await addProject({
+			repo,
+			config: CFG,
+			gitUrl: "https://github.com/x/y.git",
+			spawn: NOOP_SPAWN,
+			clone: fakeClone(),
+		});
+
+		await expect(
+			refreshProject({
+				repo,
+				config: CFG,
+				id: row.id,
+				spawn: NOOP_SPAWN,
+				refresh: async () => {
+					throw new ProjectUnavailableError("git fetch failed");
+				},
+			}),
+		).rejects.toBeInstanceOf(ProjectUnavailableError);
+
+		const persisted = repo.require(row.id);
+		expect(persisted.lastFetchedAt).toBeNull();
+		expect(persisted.lastHeadSha).toBeNull();
+	});
+
+	test("rejects an empty ref override with ValidationError", async () => {
+		const row = await addProject({
+			repo,
+			config: CFG,
+			gitUrl: "https://github.com/x/y.git",
+			spawn: NOOP_SPAWN,
+			clone: fakeClone(),
+		});
+
+		await expect(
+			refreshProject({
+				repo,
+				config: CFG,
+				id: row.id,
+				ref: "",
+				spawn: NOOP_SPAWN,
+				refresh: async () => ({ headSha: "x", ref: "" }),
+			}),
+		).rejects.toBeInstanceOf(ValidationError);
+	});
+
+	test("throws NotFoundError when the project id is unknown", async () => {
+		await expect(
+			refreshProject({
+				repo,
+				config: CFG,
+				id: "prj_nope",
+				spawn: NOOP_SPAWN,
+				refresh: async () => ({ headSha: "x", ref: "main" }),
 			}),
 		).rejects.toMatchObject({ code: "not_found" });
 	});

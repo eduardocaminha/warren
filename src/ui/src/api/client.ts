@@ -10,6 +10,7 @@ import type {
 	ProjectRow,
 	ReadyzResponse,
 	RefreshAgentsResponse,
+	RefreshProjectResponse,
 	RunEvent,
 	RunRow,
 	SpawnRunResponse,
@@ -120,6 +121,11 @@ export const projectsApi = {
 		request<ProjectRow>("/projects", { method: "POST", body: input }),
 	delete: (id: string) =>
 		request<ProjectRow>(`/projects/${encodeURIComponent(id)}`, { method: "DELETE" }),
+	refresh: (id: string, input: { ref?: string } = {}) =>
+		request<RefreshProjectResponse>(`/projects/${encodeURIComponent(id)}/refresh`, {
+			method: "POST",
+			body: input,
+		}),
 };
 
 /* ----------------------------------------------------------------------- */

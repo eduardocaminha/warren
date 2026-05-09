@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Trash2 } from "lucide-react";
+import { RefreshCw, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { projectsApi } from "@/api/client.ts";
 import type { ProjectRow } from "@/api/types.ts";
@@ -45,6 +45,10 @@ export function ProjectsPage() {
 			setConfirmDelete(null);
 		},
 	});
+	const refresh = useMutation({
+		mutationFn: (id: string) => projectsApi.refresh(id),
+		onSuccess: () => qc.invalidateQueries({ queryKey: ["projects"] }),
+	});
 
 	return (
 		<div className="space-y-6">
@@ -85,9 +89,10 @@ export function ProjectsPage() {
 									<TableHead>ID</TableHead>
 									<TableHead>Git URL</TableHead>
 									<TableHead>Default branch</TableHead>
-									<TableHead>Local path</TableHead>
+									<TableHead>HEAD</TableHead>
+									<TableHead>Last fetched</TableHead>
 									<TableHead>Added</TableHead>
-									<TableHead className="w-12" />
+									<TableHead className="w-24" />
 								</TableRow>
 							</TableHeader>
 							<TableBody>
@@ -100,21 +105,49 @@ export function ProjectsPage() {
 											{p.gitUrl}
 										</TableCell>
 										<TableCell>{p.defaultBranch}</TableCell>
-										<TableCell className="font-mono text-xs text-(--color-muted-foreground)">
-											{p.localPath}
+										<TableCell
+											className="font-mono text-xs"
+											title={p.lastHeadSha ?? "never fetched"}
+										>
+											{p.lastHeadSha !== null ? p.lastHeadSha.slice(0, 7) : "—"}
+										</TableCell>
+										<TableCell className="text-(--color-muted-foreground)">
+											{p.lastFetchedAt !== null
+												? formatTimestamp(p.lastFetchedAt)
+												: "never"}
 										</TableCell>
 										<TableCell className="text-(--color-muted-foreground)">
 											{formatTimestamp(p.addedAt)}
 										</TableCell>
 										<TableCell>
-											<Button
-												variant="ghost"
-												size="icon"
-												onClick={() => setConfirmDelete(p)}
-												aria-label={`Delete ${p.id}`}
-											>
-												<Trash2 className="h-4 w-4" />
-											</Button>
+											<div className="flex gap-1">
+												<Button
+													variant="ghost"
+													size="icon"
+													onClick={() => refresh.mutate(p.id)}
+													disabled={
+														refresh.isPending && refresh.variables === p.id
+													}
+													aria-label={`Refresh ${p.id}`}
+													title="git fetch + reset --hard origin/<branch>"
+												>
+													<RefreshCw
+														className={`h-4 w-4 ${
+															refresh.isPending && refresh.variables === p.id
+																? "animate-spin"
+																: ""
+														}`}
+													/>
+												</Button>
+												<Button
+													variant="ghost"
+													size="icon"
+													onClick={() => setConfirmDelete(p)}
+													aria-label={`Delete ${p.id}`}
+												>
+													<Trash2 className="h-4 w-4" />
+												</Button>
+											</div>
 										</TableCell>
 									</TableRow>
 								))}
