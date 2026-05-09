@@ -43,6 +43,16 @@ type ServeServer = ReturnType<typeof Bun.serve>;
 const DEFAULT_TRANSPORT: Transport = { kind: "tcp", hostname: "127.0.0.1", port: 0 };
 
 /**
+ * Bun.serve's per-request idleTimeout defaults to 10 seconds; that
+ * silently kills the long-lived NDJSON stream behind
+ * `GET /runs/:id/events?follow=1` whenever the agent has a quiet stretch
+ * (warren-b8fc). 0 disables the per-request timeout — every other route
+ * here completes in milliseconds, so a server-wide disable is safe and
+ * keeps the streaming surface honest.
+ */
+const DEFAULT_IDLE_TIMEOUT_SECONDS = 0;
+
+/**
  * Boot the wire layer for a fully-wired `ServerDeps`. The serving side
  * owns no state of its own beyond its `Bun.serve` instance — DB, repos,
  * broker, and bridges live in `deps` and outlive the server.
@@ -52,14 +62,15 @@ export function startServer(deps: ServerDeps, opts: ServeOptions = {}): ServeHan
 	const routes = opts.routes ?? buildAllRoutes(deps);
 	const auth = opts.auth ?? NO_AUTH;
 	const transport = opts.transport ?? DEFAULT_TRANSPORT;
+	const idleTimeout = opts.idleTimeout ?? DEFAULT_IDLE_TIMEOUT_SECONDS;
 
 	const fetchHandler = (request: Request): Promise<Response> =>
 		handleRequest(request, routes, auth, logger);
 
 	const server =
 		transport.kind === "unix"
-			? bindUnix(transport.path, fetchHandler)
-			: bindTcp(transport.hostname, transport.port, fetchHandler);
+			? bindUnix(transport.path, fetchHandler, idleTimeout)
+			: bindTcp(transport.hostname, transport.port, fetchHandler, idleTimeout);
 
 	const resolvedTransport: Transport =
 		transport.kind === "unix"
@@ -112,11 +123,16 @@ function bindTcp(
 	hostname: string,
 	port: number,
 	fetch: (req: Request) => Promise<Response>,
+	idleTimeout: number,
 ): ServeServer {
-	return Bun.serve({ hostname, port, fetch });
+	return Bun.serve({ hostname, port, fetch, idleTimeout });
 }
 
-function bindUnix(path: string, fetch: (req: Request) => Promise<Response>): ServeServer {
+function bindUnix(
+	path: string,
+	fetch: (req: Request) => Promise<Response>,
+	idleTimeout: number,
+): ServeServer {
 	if (existsSync(path)) {
 		try {
 			unlinkSync(path);
@@ -124,7 +140,12 @@ function bindUnix(path: string, fetch: (req: Request) => Promise<Response>): Ser
 			// Let Bun.serve produce the canonical error if the path can't be cleared.
 		}
 	}
-	return Bun.serve({ unix: path, fetch });
+	// bun-types' XOR(HostnamePortServeOptions, UnixServeOptions) declares
+	// `idleTimeout` only on the TCP variant; Bun's runtime accepts it on
+	// the unix variant too. Double cast keeps both transports honest
+	// under the same idleTimeout policy (warren-b8fc).
+	const opts = { unix: path, fetch, idleTimeout } as unknown as Parameters<typeof Bun.serve>[0];
+	return Bun.serve(opts);
 }
 
 function formatUrl(transport: Transport): string {

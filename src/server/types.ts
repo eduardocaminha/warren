@@ -135,6 +135,13 @@ export interface ServeOptions {
 	/** Override the route table (tests); defaults to `buildRoutes(deps)`. */
 	routes?: readonly Route[];
 	logger?: Logger;
+	/**
+	 * Per-request idle timeout in seconds passed to `Bun.serve`. Defaults
+	 * to 0 (disabled) so long-lived NDJSON streams aren't killed at the
+	 * Bun runtime default of 10s (warren-b8fc). Tests override to assert
+	 * the wire is plumbed.
+	 */
+	idleTimeout?: number;
 }
 
 export interface ServeHandle {

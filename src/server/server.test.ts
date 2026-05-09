@@ -237,6 +237,36 @@ describe("startServer — lifecycle", () => {
 		const res = await fetch(`${tcpUrl(handle)}/boom`);
 		expect(res.status).toBe(500);
 	});
+
+	test("default idleTimeout=0 keeps a >10s-quiet streaming response alive (warren-b8fc)", async () => {
+		// Bun.serve's default idleTimeout is 10s; without our override the
+		// per-request timer would close this connection mid-stream and the
+		// second chunk would never arrive. We pause 11s between chunks so
+		// the fix being plumbed (idleTimeout: 0 default) is what makes the
+		// assertion pass.
+		const routes: Route[] = [
+			{
+				method: "GET",
+				pattern: "/slow",
+				handler: () =>
+					new Response(
+						new ReadableStream({
+							async start(controller) {
+								controller.enqueue(new TextEncoder().encode("a\n"));
+								await new Promise((r) => setTimeout(r, 11_000));
+								controller.enqueue(new TextEncoder().encode("b\n"));
+								controller.close();
+							},
+						}),
+						{ headers: { "content-type": "application/x-ndjson" } },
+					),
+			},
+		];
+		handle = startServer(depsFor(repos), tcpOpts({ routes }));
+		const res = await fetch(`${tcpUrl(handle)}/slow`);
+		const body = await res.text();
+		expect(body).toBe("a\nb\n");
+	}, 15_000);
 });
 
 describe("startServer — routes", () => {

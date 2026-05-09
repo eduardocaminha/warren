@@ -100,6 +100,123 @@ describe("createBridgeRegistry", () => {
 		expect(abortObserved).toBe(true);
 		expect(registry.size()).toBe(0);
 	});
+
+	test("reconnects after errored=true while run is still non-terminal (warren-b8fc)", async () => {
+		repos.agents.upsert({ name: "refactor-bot", renderedJson: {} });
+		const project = repos.projects.create({
+			gitUrl: "https://github.com/x/y.git",
+			localPath: "/data/projects/x/y",
+			defaultBranch: "main",
+		});
+		const run = repos.runs.create({
+			agentName: "refactor-bot",
+			projectId: project.id,
+			prompt: "p",
+			renderedAgentJson: {},
+			trigger: "manual",
+			burrowId: "bur_a",
+			burrowRunId: "rb_a",
+		});
+
+		let calls = 0;
+		const registry = createBridgeRegistry({
+			repos,
+			broker: new RunEventBroker(),
+			burrowClient: makeBurrowClient(),
+			bridge: async () => {
+				calls += 1;
+				// First two attempts fail mid-stream (e.g., burrow's 10s
+				// idleTimeout drops the connection). Third reconnect lands
+				// after burrow has finished and ends naturally.
+				return calls < 3
+					? { written: 1, skipped: 0, errored: true }
+					: { written: 1, skipped: 0, errored: false };
+			},
+			reconnectBackoffMs: [0],
+		});
+
+		registry.start(run.id, "rb_a");
+		while (registry.size() > 0) await new Promise((r) => setTimeout(r, 0));
+		expect(calls).toBe(3);
+	});
+
+	test("stops reconnecting once warren has finalized the run (mx-fadaa2)", async () => {
+		repos.agents.upsert({ name: "refactor-bot", renderedJson: {} });
+		const project = repos.projects.create({
+			gitUrl: "https://github.com/x/y.git",
+			localPath: "/data/projects/x/y",
+			defaultBranch: "main",
+		});
+		const run = repos.runs.create({
+			agentName: "refactor-bot",
+			projectId: project.id,
+			prompt: "p",
+			renderedAgentJson: {},
+			trigger: "manual",
+			burrowId: "bur_a",
+			burrowRunId: "rb_a",
+		});
+
+		let calls = 0;
+		const registry = createBridgeRegistry({
+			repos,
+			broker: new RunEventBroker(),
+			burrowClient: makeBurrowClient(),
+			bridge: async () => {
+				calls += 1;
+				// Simulate the reaper finalizing between the first errored
+				// bridge and the next reconnect attempt.
+				if (calls === 1) {
+					repos.runs.markRunning(run.id);
+					repos.runs.finalize(run.id, "succeeded");
+				}
+				return { written: 0, skipped: 0, errored: true };
+			},
+			reconnectBackoffMs: [0],
+		});
+
+		registry.start(run.id, "rb_a");
+		while (registry.size() > 0) await new Promise((r) => setTimeout(r, 0));
+		expect(calls).toBe(1);
+		expect(repos.runs.require(run.id).state).toBe("succeeded");
+	});
+
+	test("stopAll() aborts a reconnect sleep so the loop exits promptly", async () => {
+		repos.agents.upsert({ name: "refactor-bot", renderedJson: {} });
+		const project = repos.projects.create({
+			gitUrl: "https://github.com/x/y.git",
+			localPath: "/data/projects/x/y",
+			defaultBranch: "main",
+		});
+		const run = repos.runs.create({
+			agentName: "refactor-bot",
+			projectId: project.id,
+			prompt: "p",
+			renderedAgentJson: {},
+			trigger: "manual",
+			burrowId: "bur_a",
+			burrowRunId: "rb_a",
+		});
+
+		let calls = 0;
+		const registry = createBridgeRegistry({
+			repos,
+			broker: new RunEventBroker(),
+			burrowClient: makeBurrowClient(),
+			bridge: async () => {
+				calls += 1;
+				return { written: 0, skipped: 0, errored: true };
+			},
+			// Long sleep we abort before it elapses.
+			reconnectBackoffMs: [60_000],
+		});
+
+		registry.start(run.id, "rb_a");
+		await new Promise((r) => setTimeout(r, 5));
+		await registry.stopAll();
+		expect(calls).toBe(1);
+		expect(registry.size()).toBe(0);
+	});
 });
 
 describe("bootBridges", () => {
