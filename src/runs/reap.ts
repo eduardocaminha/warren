@@ -29,14 +29,25 @@
  * reap promotes queued → running first when the outcome is succeeded
  * or failed.
  *
- * Failure-cause discriminator (warren-3c40). When `outcome === "failed"`,
- * reap records *why* it failed in `runs.failure_reason` and on the
- * `reap.completed` event. The state on entry is the signal: still
- * `queued` ⇒ no events ever flowed from burrow ⇒ `never_started` (an
- * under-specified agent prompt is the typical cause); `running` ⇒ the
- * bridge claimed it on a real event ⇒ `crashed`. Callers may pass
- * `failureReason` explicitly to override (e.g. a future deadline-based
- * reaper passing `timed_out`).
+ * Failure-cause discriminator (warren-3c40, warren-5165). When
+ * `outcome === "failed"`, reap records *why* it failed in
+ * `runs.failure_reason` and on the `reap.completed` event. Inputs to the
+ * inference: state on entry plus the event log.
+ *
+ *   - `queued` on entry ⇒ no events ever flowed from burrow ⇒
+ *     `never_started` (an under-specified agent prompt is the typical
+ *     cause).
+ *   - `running` on entry, no model-turn events ever observed
+ *     (`kind=text|thinking|tool_use` on `stream=stdout`) ⇒
+ *     `no_model_response`. Original warren-5165 symptom: claude-code
+ *     emitted an init system event, then printed "Not logged in" and
+ *     exited before any assistant turn. Generalizes to credential
+ *     failures, rate-limit denials, and provider-network failures.
+ *   - `running` on entry with model output ⇒ `crashed` (agent ran and
+ *     hit an unrecoverable error mid-conversation).
+ *
+ * Callers may pass `failureReason` explicitly to override (e.g. a future
+ * deadline-based reaper passing `timed_out`).
  *
  * Reap errors never fail the run — each sub-step is wrapped, and any
  * thrown error is recorded as a `reap_failed` event on the run with
@@ -100,11 +111,13 @@ export interface ReapRunInput {
 	readonly now?: () => Date;
 	readonly logger?: BridgeLogger;
 	/**
-	 * Override the inferred failure reason (warren-3c40). Reap normally
-	 * infers the reason from the warren state on entry: still `queued` ⇒
-	 * `never_started`, `running` ⇒ `crashed`. Pass an explicit value when
-	 * a higher-level caller has better information (e.g. a deadline-based
-	 * reaper passing `timed_out`). Ignored when `outcome !== "failed"`.
+	 * Override the inferred failure reason (warren-3c40, warren-5165). Reap
+	 * normally infers from state-on-entry plus the event log: `queued` ⇒
+	 * `never_started`, `running` with no assistant output ⇒
+	 * `no_model_response`, `running` with assistant output ⇒ `crashed`.
+	 * Pass an explicit value when a higher-level caller has better
+	 * information (e.g. a deadline-based reaper passing `timed_out`).
+	 * Ignored when `outcome !== "failed"`.
 	 */
 	readonly failureReason?: RunFailureReason;
 }
@@ -120,11 +133,13 @@ export type ReapStep = "workspace_lookup" | "mulch_merge" | "seeds_close" | "bra
 export interface ReapRunResult {
 	readonly state: RunTerminalState;
 	/**
-	 * Failure-cause discriminator (warren-3c40). Set only when
-	 * `state === "failed"`; null on succeeded/cancelled. Distinguishes
+	 * Failure-cause discriminator (warren-3c40, warren-5165). Set only
+	 * when `state === "failed"`; null on succeeded/cancelled. Distinguishes
 	 * "burrow accepted dispatch but never started the run" (`never_started`)
-	 * from "agent ran and crashed" (`crashed`) — the same observable shape
-	 * before this field existed.
+	 * from "agent started but produced no model output before exiting"
+	 * (`no_model_response`, typically credential/runtime failure) from
+	 * "agent ran and crashed mid-conversation" (`crashed`) — all three
+	 * shared an observable shape before this field existed.
 	 */
 	readonly failureReason: RunFailureReason | null;
 	readonly mulchUpdated: number;
@@ -257,7 +272,7 @@ export async function reapRun(input: ReapRunInput): Promise<ReapRunResult> {
 
 	const failureReason: RunFailureReason | null =
 		input.outcome === "failed"
-			? (input.failureReason ?? (stateOnEntry === "queued" ? "never_started" : "crashed"))
+			? (input.failureReason ?? inferFailureReason(input.repos, run.id, stateOnEntry))
 			: null;
 
 	const finalState = transitionToTerminal(
@@ -559,6 +574,35 @@ function parseSeeds(body: string): SeedRow[] {
 /* ----------------------------------------------------------------------- */
 /* State machine bridge                                                     */
 /* ----------------------------------------------------------------------- */
+
+/**
+ * Infer failure_reason from state-on-entry plus the event log
+ * (warren-3c40, warren-5165). Only consulted when `outcome === "failed"`
+ * and the caller didn't override.
+ *
+ *   queued on entry  → never_started (bridge never claimed the row)
+ *   running, no model-turn output observed → no_model_response
+ *   running, model-turn output observed   → crashed
+ *
+ * "Model-turn output" = any event with `kind` in {text, thinking,
+ * tool_use} on `stream=stdout`. burrow's jsonl-claude parser maps a
+ * claude-code `assistant` envelope into one of those shapes per content
+ * block (see burrow `src/runtime/parsers/jsonl-claude.ts`); a run that
+ * dies before producing any assistant turn has none of them. The catch-
+ * all on unparseable stdout lines also lands as `kind=text` — a known
+ * minor false-negative in the rare case where claude-code prints non-
+ * JSON to stdout before exiting.
+ */
+function inferFailureReason(repos: Repos, runId: string, stateOnEntry: string): RunFailureReason {
+	if (stateOnEntry === "queued") return "never_started";
+	const events = repos.events.listByRun(runId);
+	const sawModelTurn = events.some(
+		(ev) =>
+			ev.stream === "stdout" &&
+			(ev.kind === "text" || ev.kind === "thinking" || ev.kind === "tool_use"),
+	);
+	return sawModelTurn ? "crashed" : "no_model_response";
+}
 
 function transitionToTerminal(
 	repos: Repos,

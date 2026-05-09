@@ -8,8 +8,12 @@ export type RunState = "queued" | "running" | "succeeded" | "failed" | "cancelle
 
 export const RUN_TERMINAL_STATES: readonly RunState[] = ["succeeded", "failed", "cancelled"];
 
-/** Failure-cause discriminator for `state:failed` rows (warren-3c40). */
-export type RunFailureReason = "never_started" | "crashed" | "timed_out";
+/** Failure-cause discriminator for `state:failed` rows (warren-3c40, warren-5165). */
+export type RunFailureReason =
+	| "never_started"
+	| "no_model_response"
+	| "crashed"
+	| "timed_out";
 
 export interface AgentRow {
 	name: string;

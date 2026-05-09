@@ -25,17 +25,31 @@ export const RUN_TERMINAL_STATES = [
 export type RunTerminalState = (typeof RUN_TERMINAL_STATES)[number];
 
 /**
- * Failure-cause discriminator for a `failed` run (warren-3c40). `state:failed`
- * alone can't tell "burrow accepted the dispatch but never started the run"
- * (config/runtime issue) from "agent ran and crashed". Reap infers this from
- * the warren state on entry: still `queued` ⇒ no events ever flowed from
- * burrow ⇒ `never_started`; `running` ⇒ bridge claimed it on a real event ⇒
- * `crashed`. `timed_out` is reserved for a future deadline-based reaper —
- * burrow doesn't currently report a separate timeout state.
+ * Failure-cause discriminator for a `failed` run (warren-3c40, warren-5165).
+ * `state:failed` alone can't tell several different failure shapes apart.
+ * Reap infers from the warren state on entry plus event content:
+ *
+ *   - still `queued` on entry ⇒ no events ever flowed from burrow ⇒
+ *     `never_started` (config/runtime issue, e.g. under-specified prompt).
+ *   - `running` on entry but events table holds no model-turn output
+ *     (`text` / `thinking` / `tool_use` on stdout) ⇒ `no_model_response`
+ *     (typically a credential/auth failure — the original warren-5165
+ *     symptom was claude-code emitting an init system event then exiting
+ *     with "Not logged in" before any assistant turn — but also covers
+ *     rate-limit and provider-network failures).
+ *   - `running` on entry with model output ⇒ `crashed` (agent ran and
+ *     hit an unrecoverable error mid-conversation).
+ *   - `timed_out` is reserved for a future deadline-based reaper — burrow
+ *     doesn't currently report a separate timeout state.
  *
  * Null on succeeded/cancelled rows.
  */
-export const RUN_FAILURE_REASONS = ["never_started", "crashed", "timed_out"] as const;
+export const RUN_FAILURE_REASONS = [
+	"never_started",
+	"no_model_response",
+	"crashed",
+	"timed_out",
+] as const;
 export type RunFailureReason = (typeof RUN_FAILURE_REASONS)[number];
 
 export const EVENT_STREAMS = ["stdout", "stderr", "system"] as const;

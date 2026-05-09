@@ -450,10 +450,20 @@ describe("reapRun", () => {
 		expect(completed?.payloadJson).toMatchObject({ failureReason: "never_started" });
 	});
 
-	test("classifies a running-on-entry failure as crashed (warren-3c40)", async () => {
-		// ctx.runId was already markRunning'd in setup() — that's the bridge
-		// having claimed it on a real event, the "agent ran and crashed"
-		// shape.
+	test("classifies running-on-entry with model output as crashed (warren-3c40)", async () => {
+		// ctx.runId was already markRunning'd in setup(). Seed an assistant
+		// text event so the discriminator sees a real model turn — that's
+		// the "agent ran and crashed mid-conversation" shape, distinct from
+		// the warren-5165 no-output shape.
+		ctx.repos.events.append({
+			runId: ctx.runId,
+			burrowEventSeq: 1,
+			ts: new Date().toISOString(),
+			kind: "text",
+			stream: "stdout",
+			payload: { text: "I'll start by reading the file." },
+		});
+
 		const result = await reapRun({
 			runId: ctx.runId,
 			outcome: "failed",
@@ -466,6 +476,62 @@ describe("reapRun", () => {
 		expect(result.failureReason).toBe("crashed");
 		const row = ctx.repos.runs.require(ctx.runId);
 		expect(row.failureReason).toBe("crashed");
+	});
+
+	test("classifies running-on-entry with no model output as no_model_response (warren-5165)", async () => {
+		// Bridge claimed the run on a non-model-turn event (e.g. the
+		// claude-code init system event), then the agent exited before
+		// producing any assistant turn — the "Not logged in / credential"
+		// shape from run_hkkm35bcckc4. Seed a state_change/system event
+		// to simulate the init, but no text/thinking/tool_use stdout
+		// events.
+		ctx.repos.events.append({
+			runId: ctx.runId,
+			burrowEventSeq: 1,
+			ts: new Date().toISOString(),
+			kind: "state_change",
+			stream: "system",
+			payload: { type: "system", subtype: "init", apiKeySource: "/login managed key" },
+		});
+
+		const result = await reapRun({
+			runId: ctx.runId,
+			outcome: "failed",
+			repos: ctx.repos,
+			burrowClient: fakeBurrowClient(makeBurrow()),
+			fs: fakeFs().fs,
+			exec: fakeExec().exec,
+		});
+
+		expect(result.failureReason).toBe("no_model_response");
+		const row = ctx.repos.runs.require(ctx.runId);
+		expect(row.failureReason).toBe("no_model_response");
+	});
+
+	test("thinking and tool_use events also count as model-turn output (warren-5165)", async () => {
+		// burrow's jsonl-claude parser maps assistant content blocks into
+		// kind=text, kind=thinking, or kind=tool_use. Any one of them is
+		// proof the run reached at least one assistant turn → crashed,
+		// not no_model_response.
+		ctx.repos.events.append({
+			runId: ctx.runId,
+			burrowEventSeq: 1,
+			ts: new Date().toISOString(),
+			kind: "tool_use",
+			stream: "stdout",
+			payload: { type: "tool_use", name: "Read", input: { path: "/x" } },
+		});
+
+		const result = await reapRun({
+			runId: ctx.runId,
+			outcome: "failed",
+			repos: ctx.repos,
+			burrowClient: fakeBurrowClient(makeBurrow()),
+			fs: fakeFs().fs,
+			exec: fakeExec().exec,
+		});
+
+		expect(result.failureReason).toBe("crashed");
 	});
 
 	test("succeeded runs carry no failureReason", async () => {
@@ -496,6 +562,17 @@ describe("reapRun", () => {
 	});
 
 	test("idempotent reap surfaces the previously-stored failureReason", async () => {
+		// Seed a model-turn event so the first reap classifies as crashed
+		// (warren-5165 discriminator: bare running-on-entry with no model
+		// output would now classify as no_model_response).
+		ctx.repos.events.append({
+			runId: ctx.runId,
+			burrowEventSeq: 1,
+			ts: new Date().toISOString(),
+			kind: "text",
+			stream: "stdout",
+			payload: { text: "ok" },
+		});
 		// First reap: classify as crashed and persist.
 		await reapRun({
 			runId: ctx.runId,
