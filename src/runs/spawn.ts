@@ -99,6 +99,7 @@ export async function spawnRun(input: SpawnRunInput): Promise<SpawnRunResult> {
 			project.localPath,
 			project.gitUrl,
 			burrowConfig.network,
+			agent.name,
 		);
 		input.repos.runs.attachBurrow(run.id, { burrowId: burrow.id });
 
@@ -133,11 +134,19 @@ async function provisionBurrow(
 	projectRoot: string,
 	originUrl: string,
 	network: NetworkPolicy | undefined,
+	agentId: string,
 ): Promise<Burrow> {
+	// Warren's canopy agent name is the burrow runtime id by convention
+	// (claude-code → claude-code). Forwarding it as a `[[agents]]` patch row
+	// at up-time lets burrow mount the runtime's binary into the sandbox
+	// even when the project clone has no burrow.toml — without this,
+	// collectToolchainPaths returns [] and bwrap fails `execvp claude`
+	// (warren-8526 / burrow-55e3).
 	return withTransportMapping(client.config, () =>
 		client.http.burrows.up({
 			projectRoot,
 			originUrl,
+			agents: [agentId],
 			...(network !== undefined ? { network } : {}),
 		}),
 	);

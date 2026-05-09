@@ -236,7 +236,9 @@ describe("spawnRun", () => {
 		expect(stored.name).toBe("refactor-bot");
 		expect(stored.sections.system).toBe("be a refactor agent");
 
-		// Burrow provisioning + dispatch
+		// Burrow provisioning + dispatch — agents: ["refactor-bot"] is forwarded
+		// at up-time so burrow can mount the runtime's binary into the sandbox
+		// even when the project clone has no burrow.toml (warren-8526).
 		expect(calls).toEqual([
 			{
 				method: "POST",
@@ -244,6 +246,7 @@ describe("spawnRun", () => {
 				body: {
 					projectRoot: "/data/projects/x/y",
 					originUrl: "https://github.com/x/y.git",
+					agents: ["refactor-bot"],
 				},
 			},
 			{
@@ -290,6 +293,7 @@ describe("spawnRun", () => {
 				projectRoot: "/data/projects/x/y",
 				originUrl: "https://github.com/x/y.git",
 				network: "restricted",
+				agents: ["refactor-bot"],
 			},
 		});
 		expect(calls[1]).toMatchObject({
