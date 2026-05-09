@@ -7,6 +7,14 @@
 
 export { backoffMs, RestartBudget } from "./budget.ts";
 export {
+	defaultGitCredentialsRun,
+	type GitCredentialsDeps,
+	type GitCredentialsOpts,
+	type GitCredentialsResult,
+	type GitCredentialsRun,
+	installGitCredentials,
+} from "./git-credentials.ts";
+export {
 	DEFAULT_BURROW_RESTART_BUDGET,
 	DEFAULT_BURROW_RESTART_WINDOW_MS,
 	DEFAULT_BURROW_SOCKET,

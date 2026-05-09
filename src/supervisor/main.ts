@@ -23,6 +23,7 @@
  */
 
 import { backoffMs, RestartBudget } from "./budget.ts";
+import { defaultGitCredentialsRun, installGitCredentials } from "./git-credentials.ts";
 import { waitForSocket } from "./socket.ts";
 
 export interface SupervisedChild {
@@ -373,6 +374,21 @@ if (import.meta.main) {
 		level: process.env.WARREN_LOG_LEVEL ?? "info",
 	});
 	const cmd = resolveCommandFromEnv();
+	try {
+		await installGitCredentials(
+			{ run: defaultGitCredentialsRun, logger },
+			{
+				githubToken: process.env.GITHUB_TOKEN,
+				gitBinary: process.env.WARREN_GIT_BINARY,
+			},
+		);
+	} catch (err) {
+		logger.error(
+			{ err: err instanceof Error ? err.message : String(err) },
+			"supervisor: failed to install git insteadOf rule",
+		);
+		process.exit(1);
+	}
 	runSupervisor(productionDeps({ logger }), {
 		socketPath: cmd.socketPath,
 		burrowCmd: cmd.burrowCmd,
