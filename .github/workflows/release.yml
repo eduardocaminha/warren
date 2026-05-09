@@ -49,6 +49,8 @@ jobs:
         if: steps.version-check.outputs.release == 'true'
         run: |
           VERSION="${{ steps.version-check.outputs.version }}"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
           if git rev-parse --verify "v$VERSION" >/dev/null 2>&1; then
             echo "Tag v$VERSION already exists locally; skipping create"
           else
