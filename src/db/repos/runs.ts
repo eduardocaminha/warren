@@ -14,7 +14,13 @@ import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { NotFoundError, StateTransitionError, ValidationError } from "../../core/errors.ts";
 import { generateId } from "../../core/ids.ts";
 import type { DrizzleDb } from "../client.ts";
-import { type RunRow, type RunState, type RunTerminalState, runs } from "../schema.ts";
+import {
+	type RunFailureReason,
+	type RunRow,
+	type RunState,
+	type RunTerminalState,
+	runs,
+} from "../schema.ts";
 
 const ALLOWED_TRANSITIONS: Record<RunState, readonly RunState[]> = {
 	queued: ["running", "cancelled"],
@@ -59,6 +65,7 @@ export class RunsRepo {
 			burrowRunId: input.burrowRunId ?? null,
 			renderedAgentJson: input.renderedAgentJson,
 			state: "queued",
+			failureReason: null,
 			startedAt: null,
 			endedAt: null,
 			prompt: input.prompt,
@@ -141,12 +148,18 @@ export class RunsRepo {
 		return { ...current, ...patch };
 	}
 
-	finalize(id: string, terminal: RunTerminalState, now: Date = new Date()): RunRow {
+	finalize(
+		id: string,
+		terminal: RunTerminalState,
+		now: Date = new Date(),
+		failureReason: RunFailureReason | null = null,
+	): RunRow {
 		const current = this.require(id);
 		assertRunTransition(current.state, terminal);
 		const patch = {
 			state: terminal,
 			endedAt: now.toISOString(),
+			failureReason: terminal === "failed" ? failureReason : null,
 		};
 		this.db.update(runs).set(patch).where(eq(runs.id, id)).run();
 		return { ...current, ...patch };

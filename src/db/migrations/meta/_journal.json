@@ -15,6 +15,13 @@
 			"when": 1778354370739,
 			"tag": "0001_add_project_refresh_columns",
 			"breakpoints": true
+		},
+		{
+			"idx": 2,
+			"version": "6",
+			"when": 1778356711191,
+			"tag": "0002_add_run_failure_reason",
+			"breakpoints": true
 		}
 	]
 }

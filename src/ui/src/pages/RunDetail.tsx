@@ -57,6 +57,11 @@ export function RunDetailPage() {
 					<div className="flex items-center gap-3">
 						<h1 className="font-mono text-xl font-semibold">{r.id}</h1>
 						<StateBadge state={r.state} />
+						{r.state === "failed" && r.failureReason !== null ? (
+							<Badge variant="cancelled" className="font-mono text-xs">
+								{r.failureReason}
+							</Badge>
+						) : null}
 					</div>
 					<p className="mt-1 text-sm text-(--color-muted-foreground)">
 						<span className="font-medium">{r.agentName}</span> ·{" "}

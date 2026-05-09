@@ -8,6 +8,9 @@ export type RunState = "queued" | "running" | "succeeded" | "failed" | "cancelle
 
 export const RUN_TERMINAL_STATES: readonly RunState[] = ["succeeded", "failed", "cancelled"];
 
+/** Failure-cause discriminator for `state:failed` rows (warren-3c40). */
+export type RunFailureReason = "never_started" | "crashed" | "timed_out";
+
 export interface AgentRow {
 	name: string;
 	renderedJson: unknown;
@@ -39,6 +42,7 @@ export interface RunRow {
 	burrowRunId: string | null;
 	renderedAgentJson: unknown;
 	state: RunState;
+	failureReason: RunFailureReason | null;
 	startedAt: string | null;
 	endedAt: string | null;
 	prompt: string;

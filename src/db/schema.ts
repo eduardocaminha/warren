@@ -24,6 +24,20 @@ export const RUN_TERMINAL_STATES = [
 ] as const satisfies readonly RunState[];
 export type RunTerminalState = (typeof RUN_TERMINAL_STATES)[number];
 
+/**
+ * Failure-cause discriminator for a `failed` run (warren-3c40). `state:failed`
+ * alone can't tell "burrow accepted the dispatch but never started the run"
+ * (config/runtime issue) from "agent ran and crashed". Reap infers this from
+ * the warren state on entry: still `queued` ⇒ no events ever flowed from
+ * burrow ⇒ `never_started`; `running` ⇒ bridge claimed it on a real event ⇒
+ * `crashed`. `timed_out` is reserved for a future deadline-based reaper —
+ * burrow doesn't currently report a separate timeout state.
+ *
+ * Null on succeeded/cancelled rows.
+ */
+export const RUN_FAILURE_REASONS = ["never_started", "crashed", "timed_out"] as const;
+export type RunFailureReason = (typeof RUN_FAILURE_REASONS)[number];
+
 export const EVENT_STREAMS = ["stdout", "stderr", "system"] as const;
 export type EventStream = (typeof EVENT_STREAMS)[number];
 
@@ -62,6 +76,7 @@ export const runs = sqliteTable(
 		burrowRunId: text("burrow_run_id"),
 		renderedAgentJson: text("rendered_agent_json", { mode: "json" }).notNull(),
 		state: text("state", { enum: RUN_STATES }).notNull(),
+		failureReason: text("failure_reason", { enum: RUN_FAILURE_REASONS }),
 		startedAt: text("started_at"),
 		endedAt: text("ended_at"),
 		prompt: text("prompt").notNull(),

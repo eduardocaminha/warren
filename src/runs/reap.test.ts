@@ -413,6 +413,112 @@ describe("reapRun", () => {
 		expect(consumed).toContain("reap.completed");
 	});
 
+	test("classifies a queued-on-entry failure as never_started (warren-3c40)", async () => {
+		// New run is created in `queued`; no bridge event ever fired, so it
+		// stays `queued` — that's the "burrow accepted dispatch but never
+		// started the run" shape.
+		const repos = ctx.repos;
+		const project = repos.projects.listAll()[0];
+		expect(project).toBeDefined();
+		const stuck = repos.runs.create({
+			agentName: "refactor-bot",
+			projectId: (project as { id: string }).id,
+			prompt: "p",
+			renderedAgentJson: {},
+			trigger: "manual",
+			burrowId: "bur_aaaaaaaaaaaa",
+			burrowRunId: "run_neverstarted",
+		});
+
+		const result = await reapRun({
+			runId: stuck.id,
+			outcome: "failed",
+			repos,
+			burrowClient: fakeBurrowClient(makeBurrow()),
+			fs: fakeFs().fs,
+			exec: fakeExec().exec,
+		});
+
+		expect(result.state).toBe("failed");
+		expect(result.failureReason).toBe("never_started");
+		const row = repos.runs.require(stuck.id);
+		expect(row.state).toBe("failed");
+		expect(row.failureReason).toBe("never_started");
+
+		const events = repos.events.listByRun(stuck.id);
+		const completed = events.find((e) => e.kind === "reap.completed");
+		expect(completed?.payloadJson).toMatchObject({ failureReason: "never_started" });
+	});
+
+	test("classifies a running-on-entry failure as crashed (warren-3c40)", async () => {
+		// ctx.runId was already markRunning'd in setup() — that's the bridge
+		// having claimed it on a real event, the "agent ran and crashed"
+		// shape.
+		const result = await reapRun({
+			runId: ctx.runId,
+			outcome: "failed",
+			repos: ctx.repos,
+			burrowClient: fakeBurrowClient(makeBurrow()),
+			fs: fakeFs().fs,
+			exec: fakeExec().exec,
+		});
+
+		expect(result.failureReason).toBe("crashed");
+		const row = ctx.repos.runs.require(ctx.runId);
+		expect(row.failureReason).toBe("crashed");
+	});
+
+	test("succeeded runs carry no failureReason", async () => {
+		const result = await reapRun({
+			runId: ctx.runId,
+			outcome: "succeeded",
+			repos: ctx.repos,
+			burrowClient: fakeBurrowClient(makeBurrow()),
+			fs: fakeFs().fs,
+			exec: fakeExec().exec,
+		});
+		expect(result.failureReason).toBeNull();
+		expect(ctx.repos.runs.require(ctx.runId).failureReason).toBeNull();
+	});
+
+	test("explicit failureReason override wins over inference (warren-3c40)", async () => {
+		const result = await reapRun({
+			runId: ctx.runId,
+			outcome: "failed",
+			failureReason: "timed_out",
+			repos: ctx.repos,
+			burrowClient: fakeBurrowClient(makeBurrow()),
+			fs: fakeFs().fs,
+			exec: fakeExec().exec,
+		});
+		expect(result.failureReason).toBe("timed_out");
+		expect(ctx.repos.runs.require(ctx.runId).failureReason).toBe("timed_out");
+	});
+
+	test("idempotent reap surfaces the previously-stored failureReason", async () => {
+		// First reap: classify as crashed and persist.
+		await reapRun({
+			runId: ctx.runId,
+			outcome: "failed",
+			repos: ctx.repos,
+			burrowClient: fakeBurrowClient(makeBurrow()),
+			fs: fakeFs().fs,
+			exec: fakeExec().exec,
+		});
+		// Second reap on the now-terminal row should report the same reason
+		// (idempotency for restart-recovery sweeps).
+		const second = await reapRun({
+			runId: ctx.runId,
+			outcome: "failed",
+			repos: ctx.repos,
+			burrowClient: fakeBurrowClient(makeBurrow()),
+			fs: fakeFs().fs,
+			exec: fakeExec().exec,
+		});
+		expect(second.alreadyTerminal).toBe(true);
+		expect(second.failureReason).toBe("crashed");
+	});
+
 	test("assigns burrow_event_seq above MAX(seq) so reap events sort after stream events", async () => {
 		ctx.repos.events.append({
 			runId: ctx.runId,

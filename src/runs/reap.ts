@@ -29,6 +29,15 @@
  * reap promotes queued → running first when the outcome is succeeded
  * or failed.
  *
+ * Failure-cause discriminator (warren-3c40). When `outcome === "failed"`,
+ * reap records *why* it failed in `runs.failure_reason` and on the
+ * `reap.completed` event. The state on entry is the signal: still
+ * `queued` ⇒ no events ever flowed from burrow ⇒ `never_started` (an
+ * under-specified agent prompt is the typical cause); `running` ⇒ the
+ * bridge claimed it on a real event ⇒ `crashed`. Callers may pass
+ * `failureReason` explicitly to override (e.g. a future deadline-based
+ * reaper passing `timed_out`).
+ *
  * Reap errors never fail the run — each sub-step is wrapped, and any
  * thrown error is recorded as a `reap_failed` event on the run with
  * the failing step name. The state transition still runs regardless,
@@ -49,7 +58,7 @@ import { promisify } from "node:util";
 import type { BurrowClient } from "../burrow-client/client.ts";
 import { withTransportMapping } from "../burrow-client/client.ts";
 import type { Repos } from "../db/repos/index.ts";
-import type { EventRow, RunTerminalState } from "../db/schema.ts";
+import type { EventRow, RunFailureReason, RunTerminalState } from "../db/schema.ts";
 import type { RunEventBroker } from "./events.ts";
 import type { BridgeLogger } from "./stream.ts";
 
@@ -90,6 +99,14 @@ export interface ReapRunInput {
 	readonly exec?: ReapExec;
 	readonly now?: () => Date;
 	readonly logger?: BridgeLogger;
+	/**
+	 * Override the inferred failure reason (warren-3c40). Reap normally
+	 * infers the reason from the warren state on entry: still `queued` ⇒
+	 * `never_started`, `running` ⇒ `crashed`. Pass an explicit value when
+	 * a higher-level caller has better information (e.g. a deadline-based
+	 * reaper passing `timed_out`). Ignored when `outcome !== "failed"`.
+	 */
+	readonly failureReason?: RunFailureReason;
 }
 
 export interface ReapStepError {
@@ -102,6 +119,14 @@ export type ReapStep = "workspace_lookup" | "mulch_merge" | "seeds_close" | "bra
 
 export interface ReapRunResult {
 	readonly state: RunTerminalState;
+	/**
+	 * Failure-cause discriminator (warren-3c40). Set only when
+	 * `state === "failed"`; null on succeeded/cancelled. Distinguishes
+	 * "burrow accepted dispatch but never started the run" (`never_started`)
+	 * from "agent ran and crashed" (`crashed`) — the same observable shape
+	 * before this field existed.
+	 */
+	readonly failureReason: RunFailureReason | null;
 	readonly mulchUpdated: number;
 	readonly mulchSkipped: number;
 	readonly mulchAppended: number;
@@ -129,6 +154,7 @@ export async function reapRun(input: ReapRunInput): Promise<ReapRunResult> {
 		);
 		return {
 			state: run.state as RunTerminalState,
+			failureReason: run.failureReason,
 			mulchUpdated: 0,
 			mulchSkipped: 0,
 			mulchAppended: 0,
@@ -138,6 +164,11 @@ export async function reapRun(input: ReapRunInput): Promise<ReapRunResult> {
 			alreadyTerminal: true,
 		};
 	}
+
+	// State on entry is the discriminator: still `queued` means the bridge
+	// never claimed it (no events ever flowed from burrow), so this is a
+	// "burrow never started the run" failure rather than a real crash.
+	const stateOnEntry = run.state;
 
 	const project = input.repos.projects.require(run.projectId);
 	const seq = createSeqAllocator(input.repos.events.maxSeqForRun(run.id) ?? 0);
@@ -212,10 +243,23 @@ export async function reapRun(input: ReapRunInput): Promise<ReapRunResult> {
 		}
 	}
 
-	const finalState = transitionToTerminal(input.repos, run.id, run.state, input.outcome, now());
+	const failureReason: RunFailureReason | null =
+		input.outcome === "failed"
+			? (input.failureReason ?? (stateOnEntry === "queued" ? "never_started" : "crashed"))
+			: null;
+
+	const finalState = transitionToTerminal(
+		input.repos,
+		run.id,
+		stateOnEntry,
+		input.outcome,
+		now(),
+		failureReason,
+	);
 
 	emit("reap.completed", {
 		state: finalState,
+		failureReason,
 		mulch: { updated: mulchUpdated, skipped: mulchSkipped, appended: mulchAppended },
 		seeds: { closed: seedsClosed },
 		branchPushed,
@@ -228,6 +272,7 @@ export async function reapRun(input: ReapRunInput): Promise<ReapRunResult> {
 		{
 			runId: run.id,
 			state: finalState,
+			failureReason,
 			mulchUpdated,
 			mulchSkipped,
 			mulchAppended,
@@ -240,6 +285,7 @@ export async function reapRun(input: ReapRunInput): Promise<ReapRunResult> {
 
 	return {
 		state: finalState,
+		failureReason,
 		mulchUpdated,
 		mulchSkipped,
 		mulchAppended,
@@ -508,11 +554,12 @@ function transitionToTerminal(
 	currentState: string,
 	outcome: RunTerminalState,
 	now: Date,
+	failureReason: RunFailureReason | null,
 ): RunTerminalState {
 	if (currentState === "queued" && outcome !== "cancelled") {
 		repos.runs.markRunning(runId, now);
 	}
-	const finalized = repos.runs.finalize(runId, outcome, now);
+	const finalized = repos.runs.finalize(runId, outcome, now, failureReason);
 	return finalized.state as RunTerminalState;
 }
 

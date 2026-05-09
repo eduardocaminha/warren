@@ -1,0 +1,345 @@
+{
+	"version": "6",
+	"dialect": "sqlite",
+	"id": "419e6f08-d36c-4937-8d72-90db6e02a17b",
+	"prevId": "9410e82a-bd4d-47ab-9e5b-c1dd6c06674d",
+	"tables": {
+		"agents": {
+			"name": "agents",
+			"columns": {
+				"name": {
+					"name": "name",
+					"type": "text",
+					"primaryKey": true,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"rendered_json": {
+					"name": "rendered_json",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"registered_at": {
+					"name": "registered_at",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"last_refreshed": {
+					"name": "last_refreshed",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				}
+			},
+			"indexes": {},
+			"foreignKeys": {},
+			"compositePrimaryKeys": {},
+			"uniqueConstraints": {},
+			"checkConstraints": {}
+		},
+		"events": {
+			"name": "events",
+			"columns": {
+				"id": {
+					"name": "id",
+					"type": "integer",
+					"primaryKey": true,
+					"notNull": true,
+					"autoincrement": true
+				},
+				"run_id": {
+					"name": "run_id",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"burrow_event_seq": {
+					"name": "burrow_event_seq",
+					"type": "integer",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"ts": {
+					"name": "ts",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"kind": {
+					"name": "kind",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"stream": {
+					"name": "stream",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": false,
+					"autoincrement": false
+				},
+				"payload_json": {
+					"name": "payload_json",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				}
+			},
+			"indexes": {
+				"events_run_seq_idx": {
+					"name": "events_run_seq_idx",
+					"columns": ["run_id", "burrow_event_seq"],
+					"isUnique": false
+				},
+				"events_run_ts_idx": {
+					"name": "events_run_ts_idx",
+					"columns": ["run_id", "ts"],
+					"isUnique": false
+				}
+			},
+			"foreignKeys": {
+				"events_run_id_runs_id_fk": {
+					"name": "events_run_id_runs_id_fk",
+					"tableFrom": "events",
+					"tableTo": "runs",
+					"columnsFrom": ["run_id"],
+					"columnsTo": ["id"],
+					"onDelete": "no action",
+					"onUpdate": "no action"
+				}
+			},
+			"compositePrimaryKeys": {},
+			"uniqueConstraints": {},
+			"checkConstraints": {}
+		},
+		"projects": {
+			"name": "projects",
+			"columns": {
+				"id": {
+					"name": "id",
+					"type": "text",
+					"primaryKey": true,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"git_url": {
+					"name": "git_url",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"local_path": {
+					"name": "local_path",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"default_branch": {
+					"name": "default_branch",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"added_at": {
+					"name": "added_at",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"last_fetched_at": {
+					"name": "last_fetched_at",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": false,
+					"autoincrement": false
+				},
+				"last_head_sha": {
+					"name": "last_head_sha",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": false,
+					"autoincrement": false
+				}
+			},
+			"indexes": {
+				"projects_git_url_idx": {
+					"name": "projects_git_url_idx",
+					"columns": ["git_url"],
+					"isUnique": false
+				}
+			},
+			"foreignKeys": {},
+			"compositePrimaryKeys": {},
+			"uniqueConstraints": {},
+			"checkConstraints": {}
+		},
+		"runs": {
+			"name": "runs",
+			"columns": {
+				"id": {
+					"name": "id",
+					"type": "text",
+					"primaryKey": true,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"agent_name": {
+					"name": "agent_name",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"project_id": {
+					"name": "project_id",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"burrow_id": {
+					"name": "burrow_id",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": false,
+					"autoincrement": false
+				},
+				"burrow_run_id": {
+					"name": "burrow_run_id",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": false,
+					"autoincrement": false
+				},
+				"rendered_agent_json": {
+					"name": "rendered_agent_json",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"state": {
+					"name": "state",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"failure_reason": {
+					"name": "failure_reason",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": false,
+					"autoincrement": false
+				},
+				"started_at": {
+					"name": "started_at",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": false,
+					"autoincrement": false
+				},
+				"ended_at": {
+					"name": "ended_at",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": false,
+					"autoincrement": false
+				},
+				"prompt": {
+					"name": "prompt",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"trigger": {
+					"name": "trigger",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				}
+			},
+			"indexes": {
+				"runs_state_idx": {
+					"name": "runs_state_idx",
+					"columns": ["state"],
+					"isUnique": false
+				},
+				"runs_project_started_idx": {
+					"name": "runs_project_started_idx",
+					"columns": ["project_id", "\"started_at\" DESC"],
+					"isUnique": false
+				},
+				"runs_agent_started_idx": {
+					"name": "runs_agent_started_idx",
+					"columns": ["agent_name", "\"started_at\" DESC"],
+					"isUnique": false
+				}
+			},
+			"foreignKeys": {
+				"runs_agent_name_agents_name_fk": {
+					"name": "runs_agent_name_agents_name_fk",
+					"tableFrom": "runs",
+					"tableTo": "agents",
+					"columnsFrom": ["agent_name"],
+					"columnsTo": ["name"],
+					"onDelete": "no action",
+					"onUpdate": "no action"
+				},
+				"runs_project_id_projects_id_fk": {
+					"name": "runs_project_id_projects_id_fk",
+					"tableFrom": "runs",
+					"tableTo": "projects",
+					"columnsFrom": ["project_id"],
+					"columnsTo": ["id"],
+					"onDelete": "no action",
+					"onUpdate": "no action"
+				}
+			},
+			"compositePrimaryKeys": {},
+			"uniqueConstraints": {},
+			"checkConstraints": {}
+		}
+	},
+	"views": {},
+	"enums": {},
+	"_meta": {
+		"schemas": {},
+		"tables": {},
+		"columns": {}
+	},
+	"internal": {
+		"indexes": {
+			"runs_project_started_idx": {
+				"columns": {
+					"\"started_at\" DESC": {
+						"isExpression": true
+					}
+				}
+			},
+			"runs_agent_started_idx": {
+				"columns": {
+					"\"started_at\" DESC": {
+						"isExpression": true
+					}
+				}
+			}
+		}
+	}
+}
