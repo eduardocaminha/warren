@@ -4,8 +4,24 @@ import { BurrowClient, BurrowUnreachableError } from "../burrow-client/index.ts"
 import { NotFoundError, ValidationError } from "../core/errors.ts";
 import { openDatabase, type WarrenDb } from "../db/client.ts";
 import { createRepos, type Repos } from "../db/repos/index.ts";
+import type { RunTerminalState } from "../db/schema.ts";
 import { cancelRun } from "./cancel.ts";
 import { RunEventBroker } from "./events.ts";
+import type { ReapRunResult } from "./reap.ts";
+
+function reapStub(outcome: RunTerminalState): ReapRunResult {
+	return {
+		state: outcome,
+		failureReason: null,
+		mulchUpdated: 0,
+		mulchSkipped: 0,
+		mulchAppended: 0,
+		seedsClosed: 0,
+		branchPushed: false,
+		errors: [],
+		alreadyTerminal: false,
+	};
+}
 
 function stub(
 	impl: (input: URL | RequestInfo, init?: RequestInit) => Promise<Response>,
@@ -133,11 +149,16 @@ describe("cancelRun", () => {
 	test("forwards the cancel to burrow and emits a cancel.requested event", async () => {
 		const runId = createRun({ state: "running" });
 		const { client, calls } = makeBurrowClient();
+		const reapCalls: { runId: string; outcome: string }[] = [];
 		const result = await cancelRun({
 			runId,
 			reason: "operator changed their mind",
 			repos,
 			burrowClient: client,
+			reap: async (input) => {
+				reapCalls.push({ runId: input.runId, outcome: input.outcome });
+				return reapStub(input.outcome);
+			},
 		});
 		expect(result.alreadyTerminal).toBe(false);
 		expect(result.burrowRun?.state).toBe("cancelled");
@@ -162,12 +183,74 @@ describe("cancelRun", () => {
 		expect(payload.mode).toBe("forwarded");
 		expect(payload.reason).toBe("operator changed their mind");
 		expect(payload.burrowRunId).toBe("run_zzzzzzzzzzzz");
+		expect(reapCalls).toEqual([{ runId, outcome: "cancelled" }]);
 	});
 
-	test("does not modify the warren run state — reap owns the terminal transition", async () => {
+	test("warren-a69a: terminal burrow state triggers reap inline", async () => {
 		const runId = createRun({ state: "running" });
 		const { client } = makeBurrowClient();
-		await cancelRun({ runId, repos, burrowClient: client });
+		const reapCalls: { runId: string; outcome: string }[] = [];
+		const result = await cancelRun({
+			runId,
+			repos,
+			burrowClient: client,
+			reap: async (input) => {
+				reapCalls.push({ runId: input.runId, outcome: input.outcome });
+				return reapStub(input.outcome);
+			},
+		});
+		expect(reapCalls).toEqual([{ runId, outcome: "cancelled" }]);
+		expect(result.state).toBe("cancelled");
+	});
+
+	test("warren-a69a: succeeded burrow state also triggers reap (graceful exit during cancel)", async () => {
+		const runId = createRun({ state: "running" });
+		const { client } = makeBurrowClient({ run: { state: "succeeded" } });
+		const reapCalls: { runId: string; outcome: string }[] = [];
+		await cancelRun({
+			runId,
+			repos,
+			burrowClient: client,
+			reap: async (input) => {
+				reapCalls.push({ runId: input.runId, outcome: input.outcome });
+				return reapStub(input.outcome);
+			},
+		});
+		expect(reapCalls).toEqual([{ runId, outcome: "succeeded" }]);
+	});
+
+	test("warren-a69a: non-terminal burrow state does not trigger reap", async () => {
+		const runId = createRun({ state: "running" });
+		const { client } = makeBurrowClient({ run: { state: "running" } });
+		const reapCalls: { runId: string }[] = [];
+		const result = await cancelRun({
+			runId,
+			repos,
+			burrowClient: client,
+			reap: async (input) => {
+				reapCalls.push({ runId: input.runId });
+				return reapStub("cancelled");
+			},
+		});
+		expect(reapCalls).toEqual([]);
+		expect(result.state).toBe("running");
+		expect(repos.runs.require(runId).state).toBe("running");
+	});
+
+	test("warren-a69a: reap throwing does not escape; cancel still returns the burrow run", async () => {
+		const runId = createRun({ state: "running" });
+		const { client } = makeBurrowClient();
+		const result = await cancelRun({
+			runId,
+			repos,
+			burrowClient: client,
+			reap: async () => {
+				throw new Error("disk full");
+			},
+		});
+		expect(result.burrowRun?.state).toBe("cancelled");
+		// reap was attempted but threw — warren state is unchanged.
+		expect(result.state).toBe("running");
 		expect(repos.runs.require(runId).state).toBe("running");
 	});
 

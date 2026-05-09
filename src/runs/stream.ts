@@ -27,6 +27,17 @@
  * actively working. Terminal transitions still belong to Phase 7
  * (reap); the bridge never finalizes a run.
  *
+ * Terminal detection (warren-a69a). Burrow's run-stream is an infinite
+ * poll on the events table — it never auto-closes when the burrow run
+ * reaches a terminal state. Without an in-stream signal, the bridge
+ * would keep polling forever and warren's run would stay 'running' even
+ * after the agent exited. So the bridge inspects each persisted event
+ * for a runtime-terminal shape (claude-code: `kind=state_change`,
+ * `stream=system`, `payload.type=result`); on a match, it sets
+ * `terminalDetected` on the result and breaks. The registry layer
+ * (server/bridges.ts) reads `terminalDetected` and calls `reapRun` —
+ * the bridge does not transition warren state itself (mx-fadaa2).
+ *
  * Restart recovery. `recoverActiveRunStreams` walks the runs table for
  * rows in {queued, running} that already have a `burrow_run_id`, and
  * starts a bridge for each. It returns the in-flight bridges so the
@@ -37,7 +48,7 @@ import type { RunEvent } from "@os-eco/burrow-cli";
 import type { BurrowClient } from "../burrow-client/client.ts";
 import { withTransportMapping } from "../burrow-client/client.ts";
 import type { Repos } from "../db/repos/index.ts";
-import type { EventStream } from "../db/schema.ts";
+import type { EventStream, RunTerminalState } from "../db/schema.ts";
 import { EVENT_STREAMS } from "../db/schema.ts";
 import type { RunEventBroker } from "./events.ts";
 
@@ -71,6 +82,13 @@ export interface BridgeRunStreamResult {
 	readonly skipped: number;
 	/** True when the bridge ended because of an error (logged but not thrown). */
 	readonly errored: boolean;
+	/**
+	 * Set when the bridge broke out of the poll loop because it observed a
+	 * runtime-terminal event (warren-a69a). The registry layer uses this
+	 * as the signal to call `reapRun` with the inferred outcome. Absent
+	 * for bridges that ended via abort, error, or natural source close.
+	 */
+	readonly terminalDetected?: { readonly outcome: RunTerminalState };
 }
 
 /**
@@ -98,6 +116,7 @@ export async function bridgeRunStream(input: BridgeRunStreamInput): Promise<Brid
 	let skipped = 0;
 	let errored = false;
 	let claimed = false;
+	let terminalDetected: { outcome: RunTerminalState } | undefined;
 
 	try {
 		for await (const event of source(ctrl.signal)) {
@@ -123,6 +142,16 @@ export async function bridgeRunStream(input: BridgeRunStreamInput): Promise<Brid
 			});
 			written += 1;
 			broker.publish(runId, row);
+
+			const outcome = detectRuntimeTerminal(event);
+			if (outcome !== null) {
+				terminalDetected = { outcome };
+				input.logger?.info?.(
+					{ runId, burrowRunId, outcome, seq: event.seq },
+					"bridge observed runtime-terminal event; reap will finalize",
+				);
+				break;
+			}
 		}
 	} catch (err) {
 		errored = true;
@@ -146,7 +175,37 @@ export async function bridgeRunStream(input: BridgeRunStreamInput): Promise<Brid
 		{ runId, burrowRunId, written, skipped, errored },
 		"run stream bridge ended",
 	);
-	return { written, skipped, errored };
+	return terminalDetected !== undefined
+		? { written, skipped, errored, terminalDetected }
+		: { written, skipped, errored };
+}
+
+/**
+ * Inspect a burrow event for a runtime-terminal shape (warren-a69a).
+ * Returns the warren-side outcome to reap with, or `null` if the event
+ * doesn't carry a terminal signal.
+ *
+ * The only runtime warren currently dispatches to is claude-code, which
+ * emits a `result` envelope as its final stream-json line. burrow's
+ * jsonl-claude parser surfaces that as `kind=state_change`,
+ * `stream=system`, with `payload.type === "result"`. The `is_error`
+ * field on that payload distinguishes a clean exit from a crash; we map
+ * `is_error: true` → `failed`, anything else → `succeeded`. burrow's
+ * own cancel path emits a different terminal shape; that case is
+ * handled by `cancelRun` which already has the burrow run state in
+ * hand, so the bridge doesn't need to detect it here.
+ *
+ * Future runtimes (sapling, etc.) extend this dispatch by adding their
+ * runtime-specific terminal shape.
+ */
+function detectRuntimeTerminal(event: RunEvent): RunTerminalState | null {
+	if (event.kind !== "state_change") return null;
+	if (event.stream !== "system") return null;
+	const payload = event.payload;
+	if (payload === null || typeof payload !== "object") return null;
+	const env = payload as Record<string, unknown>;
+	if (env.type !== "result") return null;
+	return env.is_error === true ? "failed" : "succeeded";
 }
 
 /**

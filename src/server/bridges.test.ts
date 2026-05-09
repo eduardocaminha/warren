@@ -2,12 +2,28 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { BurrowClient } from "../burrow-client/index.ts";
 import { openDatabase, type WarrenDb } from "../db/client.ts";
 import { createRepos, type Repos } from "../db/repos/index.ts";
+import type { RunTerminalState } from "../db/schema.ts";
 import {
 	type BridgeRunStreamInput,
 	type BridgeRunStreamResult,
+	type ReapRunResult,
 	RunEventBroker,
 } from "../runs/index.ts";
 import { bootBridges, createBridgeRegistry } from "./bridges.ts";
+
+function reapStub(outcome: RunTerminalState): ReapRunResult {
+	return {
+		state: outcome,
+		failureReason: null,
+		mulchUpdated: 0,
+		mulchSkipped: 0,
+		mulchAppended: 0,
+		seedsClosed: 0,
+		branchPushed: false,
+		errors: [],
+		alreadyTerminal: false,
+	};
+}
 
 function stub(
 	impl: (input: URL | RequestInfo, init?: RequestInit) => Promise<Response>,
@@ -179,6 +195,90 @@ describe("createBridgeRegistry", () => {
 		while (registry.size() > 0) await new Promise((r) => setTimeout(r, 0));
 		expect(calls).toBe(1);
 		expect(repos.runs.require(run.id).state).toBe("succeeded");
+	});
+
+	test("warren-a69a: bridge terminalDetected triggers reap and stops reconnect loop", async () => {
+		repos.agents.upsert({ name: "refactor-bot", renderedJson: {} });
+		const project = repos.projects.create({
+			gitUrl: "https://github.com/x/y.git",
+			localPath: "/data/projects/x/y",
+			defaultBranch: "main",
+		});
+		const run = repos.runs.create({
+			agentName: "refactor-bot",
+			projectId: project.id,
+			prompt: "p",
+			renderedAgentJson: {},
+			trigger: "manual",
+			burrowId: "bur_a",
+			burrowRunId: "rb_a",
+		});
+
+		let bridgeCalls = 0;
+		const reapCalls: { runId: string; outcome: string }[] = [];
+		const registry = createBridgeRegistry({
+			repos,
+			broker: new RunEventBroker(),
+			burrowClient: makeBurrowClient(),
+			bridge: async () => {
+				bridgeCalls += 1;
+				return {
+					written: 1,
+					skipped: 0,
+					errored: false,
+					terminalDetected: { outcome: "failed" },
+				};
+			},
+			reap: async (input) => {
+				reapCalls.push({ runId: input.runId, outcome: input.outcome });
+				return reapStub(input.outcome);
+			},
+			reconnectBackoffMs: [0],
+		});
+
+		registry.start(run.id, "rb_a");
+		while (registry.size() > 0) await new Promise((r) => setTimeout(r, 0));
+		expect(bridgeCalls).toBe(1);
+		expect(reapCalls).toEqual([{ runId: run.id, outcome: "failed" }]);
+	});
+
+	test("warren-a69a: reap throwing inside the registry does not crash the registry", async () => {
+		repos.agents.upsert({ name: "refactor-bot", renderedJson: {} });
+		const project = repos.projects.create({
+			gitUrl: "https://github.com/x/y.git",
+			localPath: "/data/projects/x/y",
+			defaultBranch: "main",
+		});
+		const run = repos.runs.create({
+			agentName: "refactor-bot",
+			projectId: project.id,
+			prompt: "p",
+			renderedAgentJson: {},
+			trigger: "manual",
+			burrowId: "bur_a",
+			burrowRunId: "rb_a",
+		});
+
+		const registry = createBridgeRegistry({
+			repos,
+			broker: new RunEventBroker(),
+			burrowClient: makeBurrowClient(),
+			bridge: async () => ({
+				written: 1,
+				skipped: 0,
+				errored: false,
+				terminalDetected: { outcome: "succeeded" },
+			}),
+			reap: async () => {
+				throw new Error("disk full");
+			},
+			reconnectBackoffMs: [0],
+		});
+
+		registry.start(run.id, "rb_a");
+		while (registry.size() > 0) await new Promise((r) => setTimeout(r, 0));
+		// No reconnect after terminalDetected even when reap throws.
+		expect(registry.size()).toBe(0);
 	});
 
 	test("stopAll() aborts a reconnect sleep so the loop exits promptly", async () => {

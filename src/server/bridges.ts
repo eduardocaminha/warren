@@ -38,7 +38,10 @@ import {
 	type BridgeRunStreamInput,
 	type BridgeRunStreamResult,
 	bridgeRunStream,
+	type ReapRunInput,
+	type ReapRunResult,
 	type RunEventBroker,
+	reapRun,
 } from "../runs/index.ts";
 import type { BridgeRegistry } from "./types.ts";
 
@@ -66,6 +69,12 @@ export interface CreateBridgeRegistryInput {
 	 */
 	readonly bridge?: (input: BridgeRunStreamInput) => Promise<BridgeRunStreamResult>;
 	/**
+	 * Override reap (tests). Defaults to the live `reapRun`. Fired when
+	 * the bridge returns `terminalDetected` (warren-a69a) so the warren
+	 * row finalizes without depending on an external reap scheduler.
+	 */
+	readonly reap?: (input: ReapRunInput) => Promise<ReapRunResult>;
+	/**
 	 * Backoff schedule (ms) for reconnecting after `errored: true`. Index
 	 * `min(attempt, schedule.length-1)`. Tests pass `[0]` to disable
 	 * sleep; production uses `DEFAULT_RECONNECT_BACKOFF_MS`.
@@ -78,6 +87,7 @@ export interface CreateBridgeRegistryInput {
 export function createBridgeRegistry(input: CreateBridgeRegistryInput): BridgeRegistry {
 	const live = new Map<string, BridgeEntry>();
 	const bridge = input.bridge ?? bridgeRunStream;
+	const reap = input.reap ?? reapRun;
 	const backoff = input.reconnectBackoffMs ?? DEFAULT_RECONNECT_BACKOFF_MS;
 	const sleep = input.sleep ?? defaultSleep;
 
@@ -92,6 +102,7 @@ export function createBridgeRegistry(input: CreateBridgeRegistryInput): BridgeRe
 			burrowClient: input.burrowClient,
 			signal: abort.signal,
 			bridge,
+			reap,
 			backoff,
 			sleep,
 			...(input.logger !== undefined ? { logger: input.logger } : {}),
@@ -125,6 +136,7 @@ interface RunWithReconnectInput {
 	readonly burrowClient: BurrowClient;
 	readonly signal: AbortSignal;
 	readonly bridge: (input: BridgeRunStreamInput) => Promise<BridgeRunStreamResult>;
+	readonly reap: (input: ReapRunInput) => Promise<ReapRunResult>;
 	readonly backoff: readonly number[];
 	readonly sleep: (ms: number, signal: AbortSignal) => Promise<void>;
 	readonly logger?: BridgeLogger;
@@ -153,6 +165,34 @@ async function runWithReconnect(input: RunWithReconnectInput): Promise<BridgeRun
 		const result = await input.bridge(bridgeInput);
 		totalWritten += result.written;
 		totalSkipped += result.skipped;
+
+		if (result.terminalDetected !== undefined) {
+			// warren-a69a: bridge observed a runtime-terminal event. Reap
+			// inline so the warren row finalizes without depending on an
+			// external scheduler. reap is idempotent + best-effort, so
+			// errors land as `reap.completed`/`reap_failed` events on the
+			// run rather than escaping back up the registry.
+			try {
+				await input.reap({
+					runId: input.runId,
+					outcome: result.terminalDetected.outcome,
+					repos: input.repos,
+					burrowClient: input.burrowClient,
+					broker: input.broker,
+					...(input.logger !== undefined ? { logger: input.logger } : {}),
+				});
+			} catch (err) {
+				input.logger?.error?.(
+					{
+						runId: input.runId,
+						burrowRunId: input.burrowRunId,
+						err: err instanceof Error ? err.message : String(err),
+					},
+					"reap threw out of bridge terminal-detect path",
+				);
+			}
+			return { written: totalWritten, skipped: totalSkipped, errored: result.errored };
+		}
 
 		if (input.signal.aborted) {
 			return { written: totalWritten, skipped: totalSkipped, errored: result.errored };

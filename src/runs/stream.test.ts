@@ -276,6 +276,61 @@ describe("bridgeRunStream", () => {
 		expect(after.startedAt).toBe(before.startedAt);
 	});
 
+	test("warren-a69a: claude-code result event sets terminalDetected and breaks the loop", async () => {
+		const claudeResult = evt(burrowRunId, 1, {
+			kind: "state_change",
+			stream: "system",
+			payload: { type: "result", subtype: "result", is_error: false, terminal_reason: "completed" },
+		});
+		const trailing = evt(burrowRunId, 2, { kind: "text", payload: { text: "post-terminal" } });
+		const result = await bridgeRunStream({
+			runId,
+			burrowRunId,
+			repos,
+			broker,
+			burrowClient: makeBurrowClient(),
+			source: source([claudeResult, trailing]),
+		});
+		expect(result.terminalDetected).toEqual({ outcome: "succeeded" });
+		// The trailing event after terminal must NOT be persisted — bridge breaks.
+		const seqs = repos.events.listByRun(runId).map((e) => e.burrowEventSeq);
+		expect(seqs).toEqual([1]);
+	});
+
+	test("warren-a69a: claude-code result with is_error=true maps to failed", async () => {
+		const claudeFail = evt(burrowRunId, 1, {
+			kind: "state_change",
+			stream: "system",
+			payload: { type: "result", subtype: "result", is_error: true, terminal_reason: "completed" },
+		});
+		const result = await bridgeRunStream({
+			runId,
+			burrowRunId,
+			repos,
+			broker,
+			burrowClient: makeBurrowClient(),
+			source: source([claudeFail]),
+		});
+		expect(result.terminalDetected).toEqual({ outcome: "failed" });
+	});
+
+	test("warren-a69a: non-terminal state_change events do not set terminalDetected", async () => {
+		const init = evt(burrowRunId, 1, {
+			kind: "state_change",
+			stream: "system",
+			payload: { type: "system", subtype: "init" },
+		});
+		const result = await bridgeRunStream({
+			runId,
+			burrowRunId,
+			repos,
+			broker,
+			burrowClient: makeBurrowClient(),
+			source: source([init]),
+		});
+		expect(result.terminalDetected).toBeUndefined();
+	});
+
 	test("bridge end calls broker.close so live subscribers return", async () => {
 		const sub = broker.subscribe(runId);
 		const out: number[] = [];
