@@ -9,13 +9,9 @@
  * git clones it (insteadOf rewrites the fake URL to the local fixture),
  * shells `cn list --tag agent` against the clone, and renders each.
  */
+
+import { AcceptanceError, assertEqual, assertTrue, type Scenario } from "../lib/assert.ts";
 import { WarrenHttp } from "../lib/http.ts";
-import {
-	type Scenario,
-	assertEqual,
-	assertTrue,
-	AcceptanceError,
-} from "../lib/assert.ts";
 
 interface AgentRow {
 	readonly name: string;
@@ -41,10 +37,7 @@ export const scenario: Scenario = {
 			"/agents/refresh",
 			200,
 		);
-		assertTrue(
-			Array.isArray(refresh.registered),
-			"refresh response is missing 'registered' array",
-		);
+		assertTrue(Array.isArray(refresh.registered), "refresh response is missing 'registered' array");
 		const registeredNames = refresh.registered.map((a) => a.name);
 		if (!registeredNames.includes(ctx.fixtures.stubAgentName)) {
 			throw new AcceptanceError(
@@ -55,7 +48,10 @@ export const scenario: Scenario = {
 		// Listing now returns the stub agent.
 		const after = await http.expectJson<{ agents: AgentRow[] }>("GET", "/agents", 200);
 		const found = after.agents.find((a) => a.name === ctx.fixtures.stubAgentName);
-		assertTrue(found !== undefined, `${ctx.fixtures.stubAgentName} missing from /agents after refresh`);
+		assertTrue(
+			found !== undefined,
+			`${ctx.fixtures.stubAgentName} missing from /agents after refresh`,
+		);
 
 		// Detail route returns the AgentRow ({name, renderedJson, ...}).
 		// `renderedJson` carries the parsed AgentDefinition with sections.

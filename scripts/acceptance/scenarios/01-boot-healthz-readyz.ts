@@ -12,8 +12,9 @@
  *   - /readyz returns 503 before the canopy clone exists, 200 after
  *     a successful POST /agents/refresh.
  */
+
+import { assertEqual, assertTrue, type Scenario } from "../lib/assert.ts";
 import { WarrenHttp } from "../lib/http.ts";
-import { type Scenario, assertEqual, assertTrue } from "../lib/assert.ts";
 
 export const scenario: Scenario = {
 	id: "01",
@@ -38,8 +39,6 @@ export const scenario: Scenario = {
 			typeof beforeBody.ok === "boolean",
 			`/readyz returned malformed body: ${JSON.stringify(beforeBody)}`,
 		);
-		ctx.logger.debug(
-			`/readyz before refresh: status=${beforeRefresh.status} ok=${beforeBody.ok}`,
-		);
+		ctx.logger.debug(`/readyz before refresh: status=${beforeRefresh.status} ok=${beforeBody.ok}`);
 	},
 };

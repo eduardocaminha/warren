@@ -23,14 +23,14 @@ import { join } from "node:path";
 
 import {
 	type BootMode,
+	formatOutcomes,
+	runScenarios,
 	type Scenario,
 	type ScenarioCtx,
 	type ScenarioLogger,
-	formatOutcomes,
-	runScenarios,
 } from "./lib/assert.ts";
-import { type BootHandle, bootInProc } from "./lib/inproc.ts";
 import { type BuiltFixtures, buildFixtures } from "./lib/fixtures.ts";
+import { type BootHandle, bootInProc } from "./lib/inproc.ts";
 
 import { scenario as scenario01 } from "./scenarios/01-boot-healthz-readyz.ts";
 import { scenario as scenario02 } from "./scenarios/02-agents-refresh.ts";
@@ -65,7 +65,12 @@ function parseArgs(argv: readonly string[]): ParsedArgs {
 			case "--only": {
 				const next = argv[++i];
 				if (next === undefined) throw new Error("--only requires a comma-separated id list");
-				only = new Set(next.split(",").map((s) => s.trim()).filter((s) => s !== ""));
+				only = new Set(
+					next
+						.split(",")
+						.map((s) => s.trim())
+						.filter((s) => s !== ""),
+				);
 				break;
 			}
 			case "--stop-on-failure":
@@ -81,6 +86,7 @@ function parseArgs(argv: readonly string[]): ParsedArgs {
 			case "-h":
 				printHelp();
 				process.exit(0);
+				break;
 			default:
 				throw new Error(`unknown flag: ${JSON.stringify(arg)}`);
 		}

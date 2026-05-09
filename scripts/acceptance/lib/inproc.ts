@@ -26,8 +26,9 @@
  * up does." Boot here mirrors the supervisor's contract: spawn burrow
  * → wait for socket → spawn warren.
  */
-import { mkdir, rm, writeFile } from "node:fs/promises";
+
 import { existsSync } from "node:fs";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 export interface InProcBootOptions {
@@ -238,7 +239,9 @@ async function waitForHealthz(baseUrl: string, timeoutMs: number): Promise<void>
 		}
 		await sleep(POLL_INTERVAL_MS);
 	}
-	throw new Error(`warren /healthz did not respond 200 within ${timeoutMs}ms: ${lastErr ?? "unknown"}`);
+	throw new Error(
+		`warren /healthz did not respond 200 within ${timeoutMs}ms: ${lastErr ?? "unknown"}`,
+	);
 }
 
 function sleep(ms: number): Promise<void> {

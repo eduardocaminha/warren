@@ -25,8 +25,8 @@
  * Cleanup: the in-proc launcher removes `tmpRoot` recursively on stop.
  * Builders here just write files; lifecycle is the launcher's problem.
  */
-import { copyFile, mkdir, writeFile, appendFile } from "node:fs/promises";
-import { join, dirname } from "node:path";
+import { copyFile, mkdir, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 
 export interface FixtureRoots {
 	readonly tmpRoot: string;
@@ -186,8 +186,7 @@ async function buildSampleProject(repoPath: string): Promise<void> {
 	// Seed the project's .seeds/issues.jsonl with one open seed the stub
 	// agent will close — gives reap's seeds-close-mirror sub-step
 	// something to mirror.
-	const initialSeed =
-		`{"id":"${KNOWN_SEED_ID}","title":"${KNOWN_SEED_TITLE}","status":"open","type":"task","priority":3,"createdAt":"2026-05-08T00:00:00.000Z","updatedAt":"2026-05-08T00:00:00.000Z"}\n`;
+	const initialSeed = `{"id":"${KNOWN_SEED_ID}","title":"${KNOWN_SEED_TITLE}","status":"open","type":"task","priority":3,"createdAt":"2026-05-08T00:00:00.000Z","updatedAt":"2026-05-08T00:00:00.000Z"}\n`;
 	await mkdir(join(repoPath, ".seeds"), { recursive: true });
 	await writeFile(join(repoPath, ".seeds", "issues.jsonl"), initialSeed);
 
