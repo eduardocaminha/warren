@@ -2,9 +2,9 @@
 #
 # Two-stage build:
 #   1. ui-builder — build the React/Vite SPA into src/ui/dist.
-#   2. runtime    — bun + bwrap + uidmap (from burrow-base), warren source,
-#                   the four os-eco CLIs warren shells out to, and the SPA
-#                   bundle copied from stage 1.
+#   2. runtime    — bun + bwrap + uidmap, warren source, the four os-eco
+#                   CLIs warren shells out to plus burrow itself, and the
+#                   SPA bundle copied from stage 1.
 #
 # The supervisor (src/supervisor/main.ts) is the ENTRYPOINT — it owns
 # spawning + signal-forwarding + restart policy for `burrow serve` and
@@ -16,7 +16,7 @@
 # and burrow's DEPLOY.md for the rationale.
 
 # ---------- stage 1: build the UI ----------
-FROM oven/bun:1.1 AS ui-builder
+FROM oven/bun:1.2 AS ui-builder
 WORKDIR /ui-build
 COPY src/ui/package.json src/ui/bun.lock src/ui/tsconfig.json ./
 COPY src/ui/tsconfig.app.json src/ui/tsconfig.node.json ./
@@ -26,23 +26,36 @@ RUN bun install --frozen-lockfile
 RUN bun run build
 
 # ---------- stage 2: runtime ----------
-FROM ghcr.io/jayminwest/burrow-base:0.2.0
+FROM oven/bun:1.2
+
+# bubblewrap is the sandbox primitive burrow uses (see burrow DEPLOY.md);
+# uidmap provides newuidmap/newgidmap for the userns nesting. ca-certificates
+# is needed by git over https.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        bubblewrap \
+        uidmap \
+        git \
+        ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
 # os-eco CLIs warren shells out to during run setup, reap, and project
-# management. Versions track each tool's current release; bumping them
-# is a deliberate image-rebuild decision.
+# management, plus burrow itself (the supervisor execs `burrow serve`).
+# Versions track each tool's current release; bumping them is a deliberate
+# image-rebuild decision.
 RUN bun install -g \
-    @os-eco/canopy-cli@0.7.0 \
-    @os-eco/seeds-cli@0.4.0 \
+    @os-eco/burrow-cli@0.2.1 \
+    @os-eco/canopy-cli@0.2.3 \
+    @os-eco/seeds-cli@0.4.1 \
     @os-eco/mulch-cli@0.8.0 \
-    @os-eco/sapling-cli@0.3.0
+    @os-eco/sapling-cli@0.3.1
 
 WORKDIR /app
 
 # Server-side dependencies. Copy lockfiles first so a code-only edit
 # doesn't bust the bun install layer.
 COPY package.json bun.lock ./
-RUN bun install --frozen-lockfile --production=false
+RUN bun install --frozen-lockfile
 
 # Source. Excludes are listed in .dockerignore (node_modules, data, .env,
 # src/ui/node_modules, src/ui/dist) so we don't ship dev artefacts.

@@ -39,6 +39,11 @@ services:
 
     volumes:
       - warren_data:/data
+      # Local-dev bind mount so warren can clone a host-side canopy repo
+      # via `CANOPY_REPO_URL=file:///canopy-source`. Read-only — warren
+      # only ever reads from this path; clones land under /data.
+      # Set CANOPY_SOURCE_DIR in .env (host path to a real canopy repo).
+      - ${CANOPY_SOURCE_DIR}:/canopy-source:ro
 
 volumes:
   warren_data:
