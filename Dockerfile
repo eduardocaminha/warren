@@ -30,13 +30,15 @@ FROM oven/bun:1.2
 
 # bubblewrap is the sandbox primitive burrow uses (see burrow DEPLOY.md);
 # uidmap provides newuidmap/newgidmap for the userns nesting. ca-certificates
-# is needed by git over https.
+# is needed by git over https. curl is kept around for first-run diagnostics
+# against the burrow socket (saves having to bun -e fetch() workarounds).
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         bubblewrap \
         uidmap \
         git \
         ca-certificates \
+        curl \
     && rm -rf /var/lib/apt/lists/*
 
 # os-eco CLIs warren shells out to during run setup, reap, and project
