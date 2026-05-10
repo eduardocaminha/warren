@@ -8,7 +8,7 @@ import { createRepos, type Repos } from "../db/repos/index.ts";
 import type { AgentDefinition } from "../registry/schema.ts";
 import { RunSpawnError } from "./errors.ts";
 import type { SeedBurrowWorkspaceInput } from "./seed.ts";
-import { spawnRun } from "./spawn.ts";
+import { composeDispatchPrompt, spawnRun } from "./spawn.ts";
 
 // `typeof fetch` requires a `preconnect` method we don't exercise in tests; cast
 // each stub so callers can pass a plain async function.
@@ -254,7 +254,7 @@ describe("spawnRun", () => {
 				path: "/burrows/bur_aaaaaaaaaaaa/runs",
 				body: {
 					agentId: "refactor-bot",
-					prompt: "fix the flaky test",
+					prompt: "be a refactor agent\n\n---\n\nfix the flaky test",
 				},
 			},
 		]);
@@ -301,7 +301,7 @@ describe("spawnRun", () => {
 			path: "/burrows/bur_aaaaaaaaaaaa/runs",
 			body: {
 				agentId: "refactor-bot",
-				prompt: "p",
+				prompt: "s\n\n---\n\np",
 				metadata: { runByOperator: "alice" },
 			},
 		});
@@ -533,5 +533,23 @@ describe("spawnRun", () => {
 		// Project row's lastHeadSha stays null
 		expect(repos.projects.require("prj_xxxxxxxxxxxx").lastHeadSha).toBeNull();
 		expect(calls.length).toBeGreaterThan(0);
+	});
+});
+
+describe("composeDispatchPrompt", () => {
+	test("prepends the system body with a horizontal-rule delimiter", () => {
+		expect(composeDispatchPrompt("be a refactor agent", "fix it")).toBe(
+			"be a refactor agent\n\n---\n\nfix it",
+		);
+	});
+
+	test("trims trailing whitespace on the system body before joining", () => {
+		expect(composeDispatchPrompt("system\n\n\n", "task")).toBe("system\n\n---\n\ntask");
+	});
+
+	test("returns the user prompt verbatim when system is empty or whitespace", () => {
+		expect(composeDispatchPrompt("", "task")).toBe("task");
+		expect(composeDispatchPrompt("   \n\t", "task")).toBe("task");
+		expect(composeDispatchPrompt(undefined, "task")).toBe("task");
 	});
 });

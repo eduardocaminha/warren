@@ -156,7 +156,7 @@ export async function spawnRun(input: SpawnRunInput): Promise<SpawnRunResult> {
 			input.burrowClient,
 			burrow.id,
 			agent.name,
-			input.prompt,
+			composeDispatchPrompt(agent.sections.system, input.prompt),
 			input.metadata,
 		);
 		const updated = input.repos.runs.attachBurrow(run.id, { burrowRunId: burrowRun.id });
@@ -205,6 +205,23 @@ async function dispatchRun(
 			...(metadata !== undefined ? { metadata } : {}),
 		}),
 	);
+}
+
+/**
+ * Prefix the user's run prompt with the agent's `system` section so the
+ * canopy-defined operating contract (workspace map, rituals, expectations)
+ * actually reaches claude. Burrow's claude-code runtime feeds the dispatch
+ * prompt to the agent as a single user turn — it never reads
+ * `.canopy/agent.json` itself, so without this prepend the canopy `system`
+ * body is dead text on disk.
+ *
+ * `runs.prompt` (warren-side) keeps the user-typed input verbatim; only
+ * the body sent on POST /burrows/:id/runs is composed.
+ */
+export function composeDispatchPrompt(systemBody: string | undefined, userPrompt: string): string {
+	const trimmed = (systemBody ?? "").trim();
+	if (trimmed === "") return userPrompt;
+	return `${trimmed}\n\n---\n\n${userPrompt}`;
 }
 
 async function rollback(input: SpawnRunInput, runId: string, burrow: Burrow | null): Promise<void> {
