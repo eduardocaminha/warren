@@ -190,9 +190,12 @@ control plane.
   a `defaultRole` that matches a registered agent, the picker auto-fills
   to that role until the user manually overrides. CLI `warren run`
   consumption is still deferred to R-04.
-- `defaults.defaultPrompt` is parsed but no template substitution path
-  consumes it. R-04 (issue → run dispatch) and R-06 (scheduled runs) are
-  the natural consumers.
+- `defaults.defaultPrompt` is wired into the NewRun prompt textarea
+  (warren-af38): when a selected project's `.warren/defaults.json`
+  declares a `defaultPrompt`, the textarea pre-fills with that string
+  until the user types into it. Scheduled-run fallback (R-06: a
+  `triggers.yaml` entry that omits its own `prompt:` falls back to
+  `defaultPrompt`) and any template substitution remain deferred.
 - `triggers` are parsed and exposed but not dispatched. R-06 reads them.
 - Bootstrap UX: `warren add-project` does not auto-create an empty
   `.warren/`. Lazy is fine; no point in empty files.

@@ -25,22 +25,27 @@ export function NewRunPage() {
 	const [agentTouched, setAgentTouched] = useState(false);
 	const [project, setProject] = useState("");
 	const [prompt, setPrompt] = useState("");
+	const [promptTouched, setPromptTouched] = useState(false);
 	const [ref, setRef] = useState("");
 
 	// Per-project defaults from `.warren/defaults.json` (R-02). When the project
 	// declares a `defaultRole` that matches a registered agent, auto-fill the
-	// agent picker — unless the user has already taken control of it.
+	// agent picker; when it declares a `defaultPrompt`, pre-fill the prompt
+	// textarea — unless the user has already taken control of either.
 	const warrenConfig = useQuery({
 		queryKey: ["projects", project, "warren-config"],
 		queryFn: ({ signal }) => projectsApi.warrenConfig(project, signal),
 		enabled: project.length > 0,
 	});
 	const defaultRole = warrenConfig.data?.defaults?.defaultRole;
+	const defaultPrompt = warrenConfig.data?.defaults?.defaultPrompt;
 	const registeredAgents = agents.data?.agents ?? [];
 	const defaultRoleRegistered =
 		defaultRole !== undefined && registeredAgents.some((a) => a.name === defaultRole);
 	const agentFromDefault =
 		!agentTouched && defaultRoleRegistered && agent === defaultRole;
+	const promptFromDefault =
+		!promptTouched && defaultPrompt !== undefined && prompt === defaultPrompt;
 
 	useEffect(() => {
 		if (agentTouched) return;
@@ -48,6 +53,13 @@ export function NewRunPage() {
 		if (agent === defaultRole) return;
 		setAgent(defaultRole as string);
 	}, [agentTouched, defaultRoleRegistered, defaultRole, agent]);
+
+	useEffect(() => {
+		if (promptTouched) return;
+		if (defaultPrompt === undefined) return;
+		if (prompt === defaultPrompt) return;
+		setPrompt(defaultPrompt);
+	}, [promptTouched, defaultPrompt, prompt]);
 
 	const spawn = useMutation({
 		mutationFn: (input: CreateRunInput) => runsApi.create(input),
@@ -183,9 +195,18 @@ export function NewRunPage() {
 								required
 								rows={6}
 								value={prompt}
-								onChange={(e) => setPrompt(e.target.value)}
+								onChange={(e) => {
+									setPrompt(e.target.value);
+									setPromptTouched(true);
+								}}
 								placeholder="What should the agent do?"
 							/>
+							{promptFromDefault ? (
+								<p className="text-xs text-(--color-muted-foreground)">
+									Defaulted from this project's{" "}
+									<code className="font-mono">.warren/defaults.json</code>.
+								</p>
+							) : null}
 						</div>
 
 						{spawn.isError ? (

@@ -13,9 +13,10 @@
  * Triggers are parsed and exposed by this module but NOT dispatched here —
  * R-06 (cron scheduler) is the consumer. Defaults are parsed; the NewRun
  * UI consumes `defaultRole` (warren-fd14) by auto-filling its agent picker
- * when the project declares one; CLI `warren run` consumption of
- * `defaultRole` and any `defaultPrompt` template substitution are deferred
- * to R-04 / R-06.
+ * and `defaultPrompt` (warren-af38) by pre-filling its prompt textarea
+ * when the project declares one. CLI `warren run` consumption of
+ * `defaultRole`, scheduled-run prompt fallback for `defaultPrompt`, and
+ * any template substitution are deferred to R-04 / R-06.
  *
  * `parseTriggersConfig` and `parseDefaultsConfig` return discriminated
  * results — the loader collects `{ ok: false }` shapes into the per-file
