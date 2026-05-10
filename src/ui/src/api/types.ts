@@ -106,6 +106,24 @@ export interface RunEvent {
 	payload: unknown;
 }
 
+/**
+ * Payload shape of the `reap.completed` system event (warren-f3bb,
+ * warren-3c40). Fields are typed loosely because the wire is JSON; use
+ * narrow guards before reading. `commitsAhead` is null when reap could
+ * not compute the count (no `baseBranch`, rev-list failed, or push
+ * failed); `0` is the silent-no-op shape (`branchPushed: true` but
+ * agent never committed); positive means real work shipped.
+ */
+export interface ReapCompletedPayload {
+	state?: RunState;
+	failureReason?: RunFailureReason | null;
+	branchPushed?: boolean;
+	commitsAhead?: number | null;
+	mulch?: { updated?: number; skipped?: number; appended?: number };
+	seeds?: { closed?: number };
+	errors?: { step: string; message: string; path?: string }[];
+}
+
 export interface ApiErrorEnvelope {
 	error: { code: string; message: string; hint?: string };
 }

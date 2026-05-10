@@ -22,6 +22,14 @@
  *   3. Branch push — `git -C <workspacePath> push origin HEAD` so the
  *      agent's commits (code, test edits, sd sync output, etc.) land on
  *      the project's remote. Branch name comes from burrow's record.
+ *      After a successful push, reap counts commits ahead of `baseBranch`
+ *      with `git rev-list --count <baseBranch>..HEAD` and surfaces it as
+ *      `commitsAhead`. When the count is 0, an extra `reap.empty_push`
+ *      event fires (warren-f3bb): the push command exit-0'd but landed
+ *      no work — the silent twin of warren-67cc / warren-a69a where the
+ *      agent never ran `git commit` (or its commit failed). `branchPushed`
+ *      keeps its "push command exited zero" semantics; `commitsAhead`
+ *      is the load-bearing observability field.
  *
  * Then warren's run row transitions to the burrow-observed outcome
  * (queued/running → succeeded|failed|cancelled). queued → succeeded is
@@ -147,6 +155,17 @@ export interface ReapRunResult {
 	readonly mulchAppended: number;
 	readonly seedsClosed: number;
 	readonly branchPushed: boolean;
+	/**
+	 * Commits the pushed branch is ahead of its base (warren-f3bb). `null`
+	 * when the count couldn't be computed — burrow returned no `baseBranch`,
+	 * `git rev-list` failed, or the push itself failed. `0` means the push
+	 * landed no new work (silent no-op shape). Positive means real commits
+	 * shipped. Distinguishes the `branchPushed: true, ahead_by: 0` shape
+	 * (agent never committed) from the `branchPushed: true, ahead_by: N`
+	 * shape (agent shipped real work) — the two are visually identical
+	 * without this field.
+	 */
+	readonly commitsAhead: number | null;
 	readonly errors: readonly ReapStepError[];
 	/** True when the row was already terminal on entry — sub-steps were skipped. */
 	readonly alreadyTerminal: boolean;
@@ -175,6 +194,7 @@ export async function reapRun(input: ReapRunInput): Promise<ReapRunResult> {
 			mulchAppended: 0,
 			seedsClosed: 0,
 			branchPushed: false,
+			commitsAhead: null,
 			errors: [],
 			alreadyTerminal: true,
 		};
@@ -221,6 +241,7 @@ export async function reapRun(input: ReapRunInput): Promise<ReapRunResult> {
 	let mulchAppended = 0;
 	let seedsClosed = 0;
 	let branchPushed = false;
+	let commitsAhead: number | null = null;
 
 	let workspacePath: string | null = null;
 	let branch: string | null = null;
@@ -237,6 +258,14 @@ export async function reapRun(input: ReapRunInput): Promise<ReapRunResult> {
 			fail("workspace_lookup", err);
 		}
 	}
+	// Base branch for the empty-push count comes from the project row, not
+	// burrow: burrow's `BurrowRow` does not expose `baseBranch` at the top
+	// level (it's tucked into `providerStateJson`), and warren's projects
+	// table already pins `defaultBranch` (notNull) at clone time. For V1
+	// the primary flow always carves the workspace branch off
+	// `project.defaultBranch`, so this is the correct reference for
+	// `git rev-list --count <baseBranch>..HEAD`.
+	const baseBranch: string | null = project?.defaultBranch ?? null;
 
 	if (workspacePath !== null && project !== null) {
 		try {
@@ -262,6 +291,37 @@ export async function reapRun(input: ReapRunInput): Promise<ReapRunResult> {
 			branchPushed = true;
 		} catch (err) {
 			fail("branch_push", err, workspacePath);
+		}
+
+		// Empty-push observability (warren-f3bb): branchPushed alone can't
+		// tell apart a real-work push from a no-op against an unchanged
+		// HEAD (the agent never `git commit`-ed). Count commits ahead of
+		// the project's defaultBranch; surface zero as `reap.empty_push`
+		// and pin the count on `commitsAhead`. rev-list failures are
+		// non-fatal — a missing base ref or transient git error degrades
+		// to `commitsAhead: null` rather than failing the reap step.
+		if (branchPushed && baseBranch !== null) {
+			try {
+				const out = await exec.run("git", ["rev-list", "--count", `${baseBranch}..HEAD`], {
+					cwd: workspacePath,
+					timeoutMs: 10_000,
+				});
+				const parsed = Number.parseInt(out.stdout.trim(), 10);
+				commitsAhead = Number.isFinite(parsed) ? parsed : null;
+			} catch (err) {
+				input.logger?.info?.(
+					{ runId: run.id, err: err instanceof Error ? err.message : String(err) },
+					"reap commits-ahead count failed; continuing",
+				);
+			}
+			if (commitsAhead === 0) {
+				emit("reap.empty_push", {
+					branch,
+					baseBranch,
+					message:
+						"git push exited zero but the branch landed no new commits — agent did not commit",
+				});
+			}
 		}
 	} else if (workspacePath !== null && project === null) {
 		emit("reap.orphaned", {
@@ -290,6 +350,7 @@ export async function reapRun(input: ReapRunInput): Promise<ReapRunResult> {
 		mulch: { updated: mulchUpdated, skipped: mulchSkipped, appended: mulchAppended },
 		seeds: { closed: seedsClosed },
 		branchPushed,
+		commitsAhead,
 		errors,
 	});
 
@@ -305,6 +366,7 @@ export async function reapRun(input: ReapRunInput): Promise<ReapRunResult> {
 			mulchAppended,
 			seedsClosed,
 			branchPushed,
+			commitsAhead,
 			errored: errors.length > 0,
 		},
 		"reap completed",
@@ -318,6 +380,7 @@ export async function reapRun(input: ReapRunInput): Promise<ReapRunResult> {
 		mulchAppended,
 		seedsClosed,
 		branchPushed,
+		commitsAhead,
 		errors,
 		alreadyTerminal: false,
 	};

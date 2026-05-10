@@ -20,6 +20,7 @@ function reapStub(outcome: RunTerminalState): ReapRunResult {
 		mulchAppended: 0,
 		seedsClosed: 0,
 		branchPushed: false,
+		commitsAhead: null,
 		errors: [],
 		alreadyTerminal: false,
 	};

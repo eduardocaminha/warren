@@ -44,12 +44,32 @@ interface FakeExec {
 	readonly fail: { reason: string } | null;
 }
 
-function fakeExec(opts: { fail?: string } = {}): FakeExec {
+interface FakeExecOpts {
+	/** Throw on every git push call (default: succeed). */
+	fail?: string;
+	/** Throw on git rev-list calls (default: succeed). */
+	failRevList?: string;
+	/**
+	 * Stdout for `git rev-list --count <ref>..HEAD`. Default `"1"` so
+	 * existing tests with `branchPushed: true` see commitsAhead=1 (real
+	 * work shipped) rather than the empty-push shape (warren-f3bb).
+	 */
+	revListCount?: string;
+}
+
+function fakeExec(opts: FakeExecOpts = {}): FakeExec {
 	const calls: { cmd: string; args: readonly string[]; cwd: string }[] = [];
 	const fail = opts.fail !== undefined ? { reason: opts.fail } : null;
+	const failRevList = opts.failRevList ?? null;
+	const revListCount = opts.revListCount ?? "1";
 	const exec: ReapExec = {
 		run: async (cmd, args, opt) => {
 			calls.push({ cmd, args, cwd: opt.cwd });
+			const isRevList = cmd === "git" && args[0] === "rev-list";
+			if (isRevList) {
+				if (failRevList !== null) throw new Error(failRevList);
+				return { stdout: `${revListCount}\n`, stderr: "" };
+			}
 			if (fail !== null) throw new Error(fail.reason);
 			return { stdout: "", stderr: "" };
 		},
@@ -248,14 +268,124 @@ describe("reapRun", () => {
 		expect(result.state).toBe("succeeded");
 		expect(result.mulchUpdated).toBe(1);
 		expect(result.branchPushed).toBe(true);
+		expect(result.commitsAhead).toBe(1);
 		expect(result.errors).toEqual([]);
 		expect(f.files.get("/data/projects/x/y/.mulch/expertise/build.jsonl")).toContain(
 			'"content":"new"',
 		);
-		expect(e.calls).toHaveLength(1);
+		// Reap runs `git push` then `git rev-list --count <base>..HEAD`
+		// (warren-f3bb).
+		expect(e.calls).toHaveLength(2);
 		expect(e.calls[0]?.cmd).toBe("git");
 		expect(e.calls[0]?.args).toEqual(["push", "origin", "HEAD:agent/refactor-bot/run-1"]);
 		expect(e.calls[0]?.cwd).toBe("/data/burrow/ws");
+		expect(e.calls[1]?.cmd).toBe("git");
+		expect(e.calls[1]?.args).toEqual(["rev-list", "--count", "main..HEAD"]);
+	});
+
+	test("emits reap.empty_push when push lands zero commits (warren-f3bb)", async () => {
+		const f = fakeFs();
+		const e = fakeExec({ revListCount: "0" });
+
+		const result = await reapRun({
+			runId: ctx.runId,
+			outcome: "succeeded",
+			repos: ctx.repos,
+			burrowClient: fakeBurrowClient(makeBurrow()),
+			broker: ctx.broker,
+			fs: f.fs,
+			exec: e.exec,
+		});
+
+		expect(result.branchPushed).toBe(true);
+		expect(result.commitsAhead).toBe(0);
+		const events = ctx.repos.events.listByRun(ctx.runId);
+		const empty = events.find((ev) => ev.kind === "reap.empty_push");
+		expect(empty).toBeDefined();
+		expect(empty?.payloadJson).toMatchObject({
+			branch: "agent/refactor-bot/run-1",
+			baseBranch: "main",
+		});
+		const completed = events.find((ev) => ev.kind === "reap.completed");
+		expect(completed?.payloadJson).toMatchObject({ branchPushed: true, commitsAhead: 0 });
+	});
+
+	test("does not emit reap.empty_push when push lands real commits", async () => {
+		const e = fakeExec({ revListCount: "3" });
+
+		const result = await reapRun({
+			runId: ctx.runId,
+			outcome: "succeeded",
+			repos: ctx.repos,
+			burrowClient: fakeBurrowClient(makeBurrow()),
+			fs: fakeFs().fs,
+			exec: e.exec,
+		});
+
+		expect(result.commitsAhead).toBe(3);
+		const events = ctx.repos.events.listByRun(ctx.runId);
+		expect(events.find((ev) => ev.kind === "reap.empty_push")).toBeUndefined();
+	});
+
+	test("rev-list failure degrades commitsAhead to null without failing reap", async () => {
+		const e = fakeExec({ failRevList: "fatal: bad revision 'main..HEAD'" });
+
+		const result = await reapRun({
+			runId: ctx.runId,
+			outcome: "succeeded",
+			repos: ctx.repos,
+			burrowClient: fakeBurrowClient(makeBurrow()),
+			fs: fakeFs().fs,
+			exec: e.exec,
+		});
+
+		expect(result.branchPushed).toBe(true);
+		expect(result.commitsAhead).toBeNull();
+		// Non-fatal: not a reap_failed step.
+		expect(result.errors.map((x) => x.step)).not.toContain("branch_push");
+		const events = ctx.repos.events.listByRun(ctx.runId);
+		expect(events.find((ev) => ev.kind === "reap.empty_push")).toBeUndefined();
+	});
+
+	test("uses project.defaultBranch as the rev-list base", async () => {
+		// Override the project's defaultBranch to verify reap reads it
+		// (not a hardcoded `main`) when computing the empty-push count.
+		const customDb = await openDatabase({ path: ":memory:" });
+		const customRepos = createRepos(customDb);
+		customRepos.agents.upsert({
+			name: "refactor-bot",
+			renderedJson: { sections: { system: "x" } },
+		});
+		const project = customRepos.projects.create({
+			gitUrl: "https://github.com/x/y.git",
+			localPath: "/data/projects/x/y",
+			defaultBranch: "develop",
+		});
+		const run = customRepos.runs.create({
+			agentName: "refactor-bot",
+			projectId: project.id,
+			prompt: "p",
+			renderedAgentJson: {},
+			trigger: "manual",
+			burrowId: "bur_aaaaaaaaaaaa",
+			burrowRunId: "run_zzzzzzzzzzzz",
+		});
+		customRepos.runs.markRunning(run.id);
+
+		const e = fakeExec({ revListCount: "2" });
+		const result = await reapRun({
+			runId: run.id,
+			outcome: "succeeded",
+			repos: customRepos,
+			burrowClient: fakeBurrowClient(makeBurrow()),
+			fs: fakeFs().fs,
+			exec: e.exec,
+		});
+
+		expect(result.commitsAhead).toBe(2);
+		const revList = e.calls.find((c) => c.args[0] === "rev-list");
+		expect(revList?.args).toEqual(["rev-list", "--count", "develop..HEAD"]);
+		customDb.close();
 	});
 
 	test("transitions warren run state to the supplied terminal outcome", async () => {

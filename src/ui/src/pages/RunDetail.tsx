@@ -3,7 +3,7 @@ import { CircleStop, Send } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { runsApi } from "@/api/client.ts";
-import type { CancelRunResponse, RunEvent } from "@/api/types.ts";
+import type { CancelRunResponse, ReapCompletedPayload, RunEvent } from "@/api/types.ts";
 import { RUN_TERMINAL_STATES } from "@/api/types.ts";
 import { StateBadge } from "@/components/StateBadge.tsx";
 import { Badge } from "@/components/ui/badge.tsx";
@@ -90,6 +90,7 @@ export function RunDetailPage() {
 	}
 	if (!run.data) return null;
 	const r = run.data;
+	const reap = extractReapSummary(stream.events);
 
 	return (
 		<div className="space-y-6">
@@ -101,6 +102,23 @@ export function RunDetailPage() {
 						{r.state === "failed" && r.failureReason !== null ? (
 							<Badge variant="cancelled" className="font-mono text-xs">
 								{r.failureReason}
+							</Badge>
+						) : null}
+						{reap !== null && reap.branchPushed === true && reap.commitsAhead === 0 ? (
+							<Badge
+								variant="cancelled"
+								className="font-mono text-xs"
+								title="git push exited zero but the branch landed no new commits — agent did not commit (warren-f3bb)"
+							>
+								empty push
+							</Badge>
+						) : null}
+						{reap !== null &&
+						reap.branchPushed === true &&
+						typeof reap.commitsAhead === "number" &&
+						reap.commitsAhead > 0 ? (
+							<Badge variant="succeeded" className="font-mono text-xs">
+								+{reap.commitsAhead} commit{reap.commitsAhead === 1 ? "" : "s"}
 							</Badge>
 						) : null}
 					</div>
@@ -284,6 +302,26 @@ function EventTail({
 			</CardContent>
 		</Card>
 	);
+}
+
+/**
+ * Pull the latest `reap.completed` payload off the stream so the header
+ * can show whether the push actually shipped commits (warren-f3bb). The
+ * run row itself doesn't carry `commitsAhead` — it lives only in the
+ * event payload — so without this read the empty-push shape (push exit-0
+ * against unchanged HEAD) would be visually identical to a successful
+ * real-work run.
+ */
+function extractReapSummary(events: RunEvent[]): ReapCompletedPayload | null {
+	for (let i = events.length - 1; i >= 0; i--) {
+		const ev = events[i];
+		if (ev?.kind !== "reap.completed") continue;
+		if (ev.payload === null || typeof ev.payload !== "object" || Array.isArray(ev.payload)) {
+			return null;
+		}
+		return ev.payload as ReapCompletedPayload;
+	}
+	return null;
 }
 
 function statusVariant(
