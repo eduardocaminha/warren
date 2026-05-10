@@ -147,3 +147,53 @@ export interface ReapCompletedPayload {
 export interface ApiErrorEnvelope {
 	error: { code: string; message: string; hint?: string };
 }
+
+/* ----------------------------------------------------------------------- */
+/* Per-project `.warren/` config envelope (warren-435b, warren-756a).      */
+/*                                                                         */
+/* Mirrors src/warren-config/load.ts LoadedWarrenConfig — kept manually    */
+/* in sync because src/ui/ is excluded from the root tsconfig and the     */
+/* boundary is the HTTP wire, not a TS import (mx-1bd551).                 */
+/* ----------------------------------------------------------------------- */
+
+export type WarrenConfigFileErrorCode =
+	| "warren_config_parse_error"
+	| "warren_config_schema_error";
+
+export interface WarrenConfigFileError {
+	/** Project-relative path, e.g. `.warren/triggers.yaml`. */
+	file: string;
+	code: WarrenConfigFileErrorCode;
+	message: string;
+}
+
+/**
+ * Cron trigger entry. The `kind: 'cron'` discriminator leaves room for
+ * future webhook-style triggers without a breaking schema rev (mx-3636de).
+ */
+export interface CronTrigger {
+	id: string;
+	kind: "cron";
+	cron: string;
+	seed: string;
+	role: string;
+	timezone?: string;
+	prompt?: string;
+}
+
+export type Trigger = CronTrigger;
+
+export interface DefaultsConfig {
+	defaultRole?: string;
+	defaultBranch?: string;
+	defaultPrompt?: string;
+}
+
+export interface WarrenConfigResponse {
+	/** Parsed triggers, or `null` when the file is absent or malformed. */
+	triggers: Trigger[] | null;
+	/** Parsed defaults, or `null` when the file is absent or malformed. */
+	defaults: DefaultsConfig | null;
+	/** Per-file failures collected during this load. Empty on full success. */
+	errors: WarrenConfigFileError[];
+}

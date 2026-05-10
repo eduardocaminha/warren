@@ -16,6 +16,7 @@ import type {
 	RunRow,
 	SpawnRunResponse,
 	SteerRunResponse,
+	WarrenConfigResponse,
 } from "./types.ts";
 
 const TOKEN_KEY = "warren.apiToken";
@@ -126,6 +127,10 @@ export const projectsApi = {
 		request<RefreshProjectResponse>(`/projects/${encodeURIComponent(id)}/refresh`, {
 			method: "POST",
 			body: input,
+		}),
+	warrenConfig: (id: string, signal?: AbortSignal) =>
+		request<WarrenConfigResponse>(`/projects/${encodeURIComponent(id)}/warren-config`, {
+			...(signal ? { signal } : {}),
 		}),
 };
 

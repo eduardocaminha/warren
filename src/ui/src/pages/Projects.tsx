@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { RefreshCw, Trash2 } from "lucide-react";
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { projectsApi } from "@/api/client.ts";
 import type { ProjectRow } from "@/api/types.ts";
 import { Button } from "@/components/ui/button.tsx";
@@ -99,7 +100,12 @@ export function ProjectsPage() {
 								{projects.data?.projects.map((p) => (
 									<TableRow key={p.id}>
 										<TableCell className="font-mono text-xs">
-											{p.id}
+											<Link
+												to={`/projects/${encodeURIComponent(p.id)}`}
+												className="underline-offset-4 hover:underline"
+											>
+												{p.id}
+											</Link>
 										</TableCell>
 										<TableCell className="font-mono text-xs">
 											{p.gitUrl}

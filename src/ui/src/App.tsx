@@ -5,6 +5,7 @@ import { Layout } from "@/components/Layout.tsx";
 import { AgentsPage } from "@/pages/Agents.tsx";
 import { LoginPage } from "@/pages/Login.tsx";
 import { NewRunPage } from "@/pages/NewRun.tsx";
+import { ProjectDetailPage } from "@/pages/ProjectDetail.tsx";
 import { ProjectsPage } from "@/pages/Projects.tsx";
 import { RunDetailPage } from "@/pages/RunDetail.tsx";
 import { RunsPage } from "@/pages/Runs.tsx";
@@ -44,6 +45,7 @@ export function App() {
 						<Route path="/runs/:id" element={<RunDetailPage />} />
 						<Route path="/agents" element={<AgentsPage />} />
 						<Route path="/projects" element={<ProjectsPage />} />
+						<Route path="/projects/:id" element={<ProjectDetailPage />} />
 					</Route>
 					<Route path="*" element={<Navigate to="/runs" replace />} />
 				</Routes>
