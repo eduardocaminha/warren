@@ -10,7 +10,7 @@ Warren composes the os-eco data-plane tools — [canopy](https://github.com/jaym
 
 A `warren run claude-code <project> -p "..."` against a real project repo:
 
-1. Resolves the agent from a connected canopy library (`cn render`).
+1. Resolves the agent — built-in by default (`claude-code`, `sapling` ship inline; see `src/registry/builtins/`), or from a connected canopy library if `CANOPY_REPO_URL` is set (`cn render`).
 2. Provisions a `bwrap`-isolated burrow under `/data/burrow/` with the agent's `burrow_config`.
 3. Seeds the burrow's `.canopy/`, `.mulch/`, and `.seeds/` from the rendered agent.
 4. Dispatches the run via burrow's HTTP API and streams NDJSON events back into warren's event log.
@@ -54,9 +54,14 @@ Required `.env` values (see `.env.example` for the full list):
 | `WARREN_API_TOKEN` | Bearer token on every route except `/healthz`. `openssl rand -hex 32`. |
 | `BURROW_API_TOKEN` | Token `burrow serve` requires to bind. `openssl rand -hex 32`. |
 | `WARREN_BURROW_TOKEN` | Token warren's burrow client sends. **Must equal `BURROW_API_TOKEN`** — they are the two ends of one channel. |
-| `CANOPY_REPO_URL` | Git URL of your canopy agent library. Cloned on first refresh. |
 | `ANTHROPIC_API_KEY` | Forwarded to agent runtimes that need it. |
 | `GITHUB_TOKEN` | Forwarded for project clones + branch pushes. |
+
+Optional:
+
+| Variable | Purpose |
+|---|---|
+| `CANOPY_REPO_URL` | Git URL of a canopy agent library. Built-in agents (`claude-code`, `sapling`) cover the common case; set this only if you maintain a custom library and want it loaded on top. Library agents override built-ins by name. |
 
 The compose file applies the four bwrap-required security flags (`apparmor=unconfined`, `seccomp=unconfined`, `systempaths=unconfined`, `cap_add: SYS_ADMIN`) — these relax the outer container so burrow's nested userns sandboxes can come up. Removing any one of them breaks `burrow up`.
 
@@ -71,11 +76,13 @@ fly secrets set \
     WARREN_API_TOKEN=... \
     BURROW_API_TOKEN=... \
     WARREN_BURROW_TOKEN=... \
-    CANOPY_REPO_URL=https://github.com/<you>/agents.git \
     ANTHROPIC_API_KEY=... \
     GITHUB_TOKEN=...
 fly deploy
 ```
+
+To layer a custom canopy library on top of the built-ins, also set
+`CANOPY_REPO_URL=https://github.com/<you>/agents.git`.
 
 ## CLI
 

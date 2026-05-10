@@ -25,7 +25,7 @@ function captureContext(
 }
 
 describe("runDoctor", () => {
-	test("flags missing env vars and exits 1", async () => {
+	test("flags missing WARREN_API_TOKEN and exits 1; CANOPY_REPO_URL is informational", async () => {
 		const { context } = captureContext({});
 		const result = await runDoctor(
 			context,
@@ -38,8 +38,25 @@ describe("runDoctor", () => {
 		expect(result.exitCode).toBe(1);
 		const tokenCheck = result.checks.find((c: DoctorCheck) => c.name === "WARREN_API_TOKEN");
 		expect(tokenCheck?.ok).toBe(false);
+		// CANOPY_REPO_URL is now optional (warren-d3e9): unset is ok with an
+		// informational message, not a failure.
 		const canopyCheck = result.checks.find((c: DoctorCheck) => c.name === "CANOPY_REPO_URL");
-		expect(canopyCheck?.ok).toBe(false);
+		expect(canopyCheck?.ok).toBe(true);
+		expect(canopyCheck?.message).toContain("no canopy library configured");
+	});
+
+	test("doctor passes with no canopy library configured (warren-d3e9)", async () => {
+		const { context } = captureContext({ WARREN_API_TOKEN: "tok" });
+		const result = await runDoctor(
+			context,
+			{
+				existsSync: () => true,
+				probeBurrow: async () => undefined,
+			},
+			{},
+		);
+		expect(result.exitCode).toBe(0);
+		expect(result.checks.every((c: DoctorCheck) => c.ok)).toBe(true);
 	});
 
 	test("--no-auth exempts the WARREN_API_TOKEN check", async () => {

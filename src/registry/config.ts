@@ -7,7 +7,13 @@
  *   2. Where the canopy git URL points (the operator's prompt library).
  *
  * Env contract:
- *   CANOPY_REPO_URL       git URL of the agent library — required
+ *   CANOPY_REPO_URL       git URL of the agent library — optional. Unset
+ *                         means "no library configured"; warren ships
+ *                         built-in agents (src/registry/builtins/) that
+ *                         seed the registry on boot, so a fresh install
+ *                         can dispatch runs without one. When set,
+ *                         library agents load additively over built-ins
+ *                         (same-named library agents override).
  *   WARREN_CANOPY_DIR     local clone path — defaults to /data/canopy-repo
  *
  * The binary names (`cn`, `git`) are deliberately part of the config so tests
@@ -27,13 +33,18 @@ export interface CanopyRegistryConfig {
 
 export type EnvLike = Readonly<Record<string, string | undefined>>;
 
-export function loadCanopyRegistryConfigFromEnv(env: EnvLike = process.env): CanopyRegistryConfig {
+/**
+ * Load the canopy registry config from env, returning `null` when
+ * `CANOPY_REPO_URL` is unset. Callers that gate behavior on a
+ * configured library (refresh, register-agent, canopy_clone /
+ * canopy_clean checks) treat null as "no library configured".
+ */
+export function loadCanopyRegistryConfigFromEnv(
+	env: EnvLike = process.env,
+): CanopyRegistryConfig | null {
 	const repoUrl = env.CANOPY_REPO_URL;
 	if (repoUrl === undefined || repoUrl === "") {
-		throw new ValidationError("CANOPY_REPO_URL is not set", {
-			recoveryHint:
-				"set CANOPY_REPO_URL to the git URL of your canopy agent library (e.g. https://github.com/<you>/agents.git)",
-		});
+		return null;
 	}
 
 	const localDir = env.WARREN_CANOPY_DIR ?? DEFAULT_CANOPY_DIR;
@@ -49,4 +60,23 @@ export function loadCanopyRegistryConfigFromEnv(env: EnvLike = process.env): Can
 		cnBinary: env.WARREN_CN_BINARY ?? "cn",
 		gitBinary: env.WARREN_GIT_BINARY ?? "git",
 	};
+}
+
+/**
+ * Like `loadCanopyRegistryConfigFromEnv` but throws a
+ * `ValidationError` when no library is configured. Used by code paths
+ * that *require* a library — e.g. `POST /agents/refresh` and the
+ * `warren register-agent` CLI.
+ */
+export function requireCanopyRegistryConfigFromEnv(
+	env: EnvLike = process.env,
+): CanopyRegistryConfig {
+	const config = loadCanopyRegistryConfigFromEnv(env);
+	if (config === null) {
+		throw new ValidationError("CANOPY_REPO_URL is not set", {
+			recoveryHint:
+				"set CANOPY_REPO_URL to the git URL of your canopy agent library (e.g. https://github.com/<you>/agents.git) — or run without it to use warren's built-in agents",
+		});
+	}
+	return config;
 }

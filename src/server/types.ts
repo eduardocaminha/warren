@@ -98,7 +98,14 @@ export interface ServerDeps {
 	readonly burrowClient: BurrowClient;
 	readonly broker: RunEventBroker;
 	readonly bridges: BridgeRegistry;
-	readonly canopyConfig: CanopyRegistryConfig;
+	/**
+	 * Canopy library config — undefined when `CANOPY_REPO_URL` is unset
+	 * (warren-d3e9). `POST /agents/refresh` and the canopy clone /
+	 * canopy clean readyz probes are gated on this being defined.
+	 * Built-in agents in `src/registry/builtins/` cover the common
+	 * "no library configured" case.
+	 */
+	readonly canopyConfig?: CanopyRegistryConfig;
 	readonly projectsConfig: ProjectsConfig;
 	readonly logger: Logger;
 	/** UI dist directory for static serving; null disables `/` and `/assets/*`. */

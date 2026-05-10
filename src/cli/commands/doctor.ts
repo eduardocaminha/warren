@@ -57,7 +57,7 @@ export async function runDoctor(
 	const checks: DoctorCheck[] = [];
 
 	checks.push(envCheck("WARREN_API_TOKEN", context.env, args.noAuth ?? false));
-	checks.push(envCheck("CANOPY_REPO_URL", context.env, false));
+	checks.push(canopyRepoUrlCheck(context.env));
 
 	checks.push(checkCanopyClone({ env: context.env, exists }));
 	checks.push(await checkCanopyClean({ env: context.env, spawn: context.spawn, exists }));
@@ -90,6 +90,23 @@ function envCheck(name: string, env: EnvLike, exempted: boolean): DoctorCheck {
 		ok: false,
 		message: `${name} is not set`,
 		hint: `export ${name}=...`,
+	};
+}
+
+/**
+ * `CANOPY_REPO_URL` is optional (warren-d3e9): warren ships built-in
+ * agents that cover the common case. Report unset as `ok: true` with an
+ * informational message rather than failing the check.
+ */
+function canopyRepoUrlCheck(env: EnvLike): DoctorCheck {
+	const value = env.CANOPY_REPO_URL;
+	if (value !== undefined && value !== "") {
+		return { name: "CANOPY_REPO_URL", ok: true };
+	}
+	return {
+		name: "CANOPY_REPO_URL",
+		ok: true,
+		message: "no canopy library configured (using built-in agents only)",
 	};
 }
 

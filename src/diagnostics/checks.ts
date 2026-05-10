@@ -72,15 +72,19 @@ export async function checkBwrap(deps: {
 }
 
 /**
- * Verify the canopy clone directory exists. Failing this check means
- * `POST /agents/refresh` has never run successfully on this host.
+ * Verify the canopy clone directory exists. Returns `ok: true` with an
+ * informational message when no canopy library is configured — built-in
+ * agents (src/registry/builtins/) cover the common case, so a missing
+ * `CANOPY_REPO_URL` is no longer a failure (warren-d3e9). Failing means
+ * `CANOPY_REPO_URL` *is* set but `POST /agents/refresh` has never run
+ * successfully on this host.
  */
 export function checkCanopyClone(deps: {
 	readonly env: EnvLike;
 	readonly exists?: ExistsFn;
 }): DiagnosticCheck {
 	const exists = deps.exists ?? existsSync;
-	let config: CanopyRegistryConfig;
+	let config: CanopyRegistryConfig | null;
 	try {
 		config = loadCanopyRegistryConfigFromEnv(deps.env);
 	} catch (err) {
@@ -90,6 +94,13 @@ export function checkCanopyClone(deps: {
 			ok: false,
 			message,
 			hint: "set CANOPY_REPO_URL and (optionally) WARREN_CANOPY_DIR",
+		};
+	}
+	if (config === null) {
+		return {
+			name: "canopy_clone",
+			ok: true,
+			message: "no canopy library configured (using built-in agents only)",
 		};
 	}
 	if (!exists(config.localDir)) {
@@ -117,7 +128,7 @@ export async function checkCanopyClean(deps: {
 	readonly timeoutMs?: number;
 }): Promise<DiagnosticCheck> {
 	const exists = deps.exists ?? existsSync;
-	let config: CanopyRegistryConfig;
+	let config: CanopyRegistryConfig | null;
 	try {
 		config = loadCanopyRegistryConfigFromEnv(deps.env);
 	} catch (err) {
@@ -127,6 +138,13 @@ export async function checkCanopyClean(deps: {
 			ok: false,
 			message,
 			hint: "set CANOPY_REPO_URL and (optionally) WARREN_CANOPY_DIR",
+		};
+	}
+	if (config === null) {
+		return {
+			name: "canopy_clean",
+			ok: true,
+			message: "no canopy library configured (using built-in agents only)",
 		};
 	}
 	if (!exists(config.localDir)) {

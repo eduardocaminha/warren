@@ -1,11 +1,15 @@
 import { describe, expect, test } from "bun:test";
 import { ValidationError } from "../core/errors.ts";
-import { DEFAULT_CANOPY_DIR, loadCanopyRegistryConfigFromEnv } from "./config.ts";
+import {
+	DEFAULT_CANOPY_DIR,
+	loadCanopyRegistryConfigFromEnv,
+	requireCanopyRegistryConfigFromEnv,
+} from "./config.ts";
 
 describe("loadCanopyRegistryConfigFromEnv", () => {
-	test("requires CANOPY_REPO_URL", () => {
-		expect(() => loadCanopyRegistryConfigFromEnv({})).toThrow(ValidationError);
-		expect(() => loadCanopyRegistryConfigFromEnv({ CANOPY_REPO_URL: "" })).toThrow(ValidationError);
+	test("returns null when CANOPY_REPO_URL is unset (warren-d3e9)", () => {
+		expect(loadCanopyRegistryConfigFromEnv({})).toBeNull();
+		expect(loadCanopyRegistryConfigFromEnv({ CANOPY_REPO_URL: "" })).toBeNull();
 	});
 
 	test("uses defaults when only repo URL is set", () => {
@@ -42,5 +46,21 @@ describe("loadCanopyRegistryConfigFromEnv", () => {
 			cnBinary: "/opt/bun/bin/cn",
 			gitBinary: "/usr/local/bin/git",
 		});
+	});
+});
+
+describe("requireCanopyRegistryConfigFromEnv", () => {
+	test("throws ValidationError when CANOPY_REPO_URL is unset", () => {
+		expect(() => requireCanopyRegistryConfigFromEnv({})).toThrow(ValidationError);
+		expect(() => requireCanopyRegistryConfigFromEnv({ CANOPY_REPO_URL: "" })).toThrow(
+			ValidationError,
+		);
+	});
+
+	test("returns the config when CANOPY_REPO_URL is set", () => {
+		const cfg = requireCanopyRegistryConfigFromEnv({
+			CANOPY_REPO_URL: "https://example.com/agents.git",
+		});
+		expect(cfg.repoUrl).toBe("https://example.com/agents.git");
 	});
 });

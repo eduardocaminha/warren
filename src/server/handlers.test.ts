@@ -386,6 +386,129 @@ describe("POST /projects/:id/refresh — git fetch + hard reset", () => {
 	});
 });
 
+describe("GET /agents — listing with source provenance (warren-d3e9)", () => {
+	let db: WarrenDb;
+	let repos: Repos;
+	let handle: ServeHandle | null = null;
+
+	beforeEach(async () => {
+		db = await openDatabase({ path: ":memory:" });
+		repos = createRepos(db);
+	});
+
+	afterEach(async () => {
+		if (handle) {
+			await handle.stop();
+			handle = null;
+		}
+		db.close();
+	});
+
+	test("returns source: 'builtin' when frontmatter.source === 'builtin'", async () => {
+		repos.agents.upsert({
+			name: "claude-code",
+			renderedJson: {
+				name: "claude-code",
+				version: 1,
+				sections: { system: "..." },
+				resolvedFrom: ["builtin:claude-code"],
+				frontmatter: { source: "builtin" },
+			},
+		});
+		const burrowClient = new BurrowClient({
+			config: { transport: { kind: "unix", path: "/tmp/x.sock" } },
+			fetch: stub(async () => new Response("{}", { status: 200 })),
+		});
+		const deps = depsFor(repos, burrowClient);
+		handle = startServer(deps, {
+			transport: { kind: "tcp", hostname: "127.0.0.1", port: 0 },
+			auth: NO_AUTH,
+			logger: silentLogger,
+		});
+
+		const res = await fetch(`${tcpUrl(handle)}/agents`);
+		expect(res.status).toBe(200);
+		const body = (await res.json()) as { agents: { name: string; source: string }[] };
+		expect(body.agents[0]?.source).toBe("builtin");
+	});
+
+	test("returns source: 'library' for canopy-loaded rows (no source frontmatter)", async () => {
+		repos.agents.upsert({
+			name: "refactor-bot",
+			renderedJson: {
+				name: "refactor-bot",
+				version: 1,
+				sections: { system: "..." },
+				resolvedFrom: [],
+				frontmatter: {},
+			},
+		});
+		const burrowClient = new BurrowClient({
+			config: { transport: { kind: "unix", path: "/tmp/x.sock" } },
+			fetch: stub(async () => new Response("{}", { status: 200 })),
+		});
+		const deps = depsFor(repos, burrowClient);
+		handle = startServer(deps, {
+			transport: { kind: "tcp", hostname: "127.0.0.1", port: 0 },
+			auth: NO_AUTH,
+			logger: silentLogger,
+		});
+
+		const res = await fetch(`${tcpUrl(handle)}/agents`);
+		const body = (await res.json()) as { agents: { name: string; source: string }[] };
+		expect(body.agents[0]?.source).toBe("library");
+	});
+});
+
+describe("POST /agents/refresh without canopy library (warren-d3e9)", () => {
+	let db: WarrenDb;
+	let repos: Repos;
+	let handle: ServeHandle | null = null;
+
+	beforeEach(async () => {
+		db = await openDatabase({ path: ":memory:" });
+		repos = createRepos(db);
+	});
+
+	afterEach(async () => {
+		if (handle) {
+			await handle.stop();
+			handle = null;
+		}
+		db.close();
+	});
+
+	test("returns 400 with friendly hint when canopyConfig is undefined", async () => {
+		const burrowClient = new BurrowClient({
+			config: { transport: { kind: "unix", path: "/tmp/x.sock" } },
+			fetch: stub(async () => new Response("{}", { status: 200 })),
+		});
+		const deps = depsFor(repos, burrowClient);
+		// Strip canopyConfig — equivalent to booting without CANOPY_REPO_URL.
+		const noCanopyDeps: ServerDeps = {
+			repos: deps.repos,
+			burrowClient: deps.burrowClient,
+			broker: deps.broker,
+			bridges: deps.bridges,
+			projectsConfig: deps.projectsConfig,
+			logger: deps.logger,
+			uiDistDir: deps.uiDistDir,
+			...(deps.spawn !== undefined ? { spawn: deps.spawn } : {}),
+		};
+		handle = startServer(noCanopyDeps, {
+			transport: { kind: "tcp", hostname: "127.0.0.1", port: 0 },
+			auth: NO_AUTH,
+			logger: silentLogger,
+		});
+
+		const res = await fetch(`${tcpUrl(handle)}/agents/refresh`, { method: "POST" });
+		expect(res.status).toBe(400);
+		const body = (await res.json()) as { error: { code: string; hint?: string } };
+		expect(body.error.code).toBe("validation_error");
+		expect(body.error.hint).toContain("CANOPY_REPO_URL");
+	});
+});
+
 describe("GET /runs/:id/events — NDJSON tail", () => {
 	let db: WarrenDb;
 	let repos: Repos;

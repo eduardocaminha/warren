@@ -5,6 +5,18 @@
  */
 
 export {
+	type AgentSource,
+	BUILTIN_AGENT_NAMES,
+	BUILTIN_AGENT_SOURCE,
+	BUILTIN_AGENTS,
+	CLAUDE_CODE_BUILTIN,
+	LIBRARY_AGENT_SOURCE,
+	readAgentSource,
+	SAPLING_BUILTIN,
+	type SeedBuiltinAgentsResult,
+	seedBuiltinAgents,
+} from "./builtins/index.ts";
+export {
 	type AgentSummary,
 	CanopyClient,
 	type CanopyClientOptions,
@@ -24,6 +36,7 @@ export {
 	DEFAULT_CANOPY_DIR,
 	type EnvLike,
 	loadCanopyRegistryConfigFromEnv,
+	requireCanopyRegistryConfigFromEnv,
 } from "./config.ts";
 export { AgentSchemaError, CanopyUnavailableError } from "./errors.ts";
 export {

@@ -14,7 +14,8 @@ import { Command } from "commander";
 import { BurrowClient } from "../burrow-client/client.ts";
 import { VERSION } from "../index.ts";
 import { loadProjectsConfigFromEnv } from "../projects/config.ts";
-import { loadCanopyRegistryConfigFromEnv } from "../registry/config.ts";
+import { seedBuiltinAgents } from "../registry/builtins/index.ts";
+import { requireCanopyRegistryConfigFromEnv } from "../registry/config.ts";
 import { runAddProject } from "./commands/add-project.ts";
 import { runDoctor } from "./commands/doctor.ts";
 import { runRegisterAgent } from "./commands/register-agent.ts";
@@ -42,7 +43,12 @@ export function buildProgram(context: CliContext): Command {
 		.argument("<name>", "canopy prompt name (must be tagged 'agent')")
 		.action(async (name: string) => {
 			const exitCode = await withCliDb({ env: context.env }, async ({ repos }) => {
-				const canopyConfig = loadCanopyRegistryConfigFromEnv(context.env);
+				// register-agent only makes sense against a configured library —
+				// built-ins are seeded automatically and can't be 'registered'
+				// from canopy. requireCanopyRegistryConfigFromEnv throws a
+				// ValidationError with a friendly hint when CANOPY_REPO_URL is
+				// unset; main's catch surfaces it.
+				const canopyConfig = requireCanopyRegistryConfigFromEnv(context.env);
 				const result = await runRegisterAgent(
 					context,
 					{ agents: repos.agents, canopyConfig },
@@ -83,6 +89,11 @@ export function buildProgram(context: CliContext): Command {
 		.option("--trigger <label>", "run trigger label", "cli")
 		.action(async (agent: string, project: string, opts: { prompt: string; trigger?: string }) => {
 			const exitCode = await withCliDb({ env: context.env }, async ({ repos }) => {
+				// Seed built-ins so `warren run claude-code <prj> -p ...` works
+				// against a fresh DB without first registering the agent from
+				// a canopy library (warren-d3e9). Idempotent against existing
+				// rows.
+				seedBuiltinAgents(repos.agents, undefined, context.now);
 				const burrowClient = BurrowClient.fromEnv(context.env);
 				try {
 					const result = await runRun(

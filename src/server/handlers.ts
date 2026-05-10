@@ -28,6 +28,7 @@
 
 import type { MessagePriority } from "@os-eco/burrow-cli";
 import { ValidationError } from "../core/errors.ts";
+import type { AgentRow } from "../db/schema.ts";
 import {
 	checkBurrowReachable,
 	checkBwrap,
@@ -37,6 +38,7 @@ import {
 } from "../diagnostics/checks.ts";
 import type { SpawnFn, SpawnOptions, SpawnResult } from "../projects/clone.ts";
 import { addProject, deleteProject, listProjects, refreshProject } from "../projects/index.ts";
+import { type AgentSource, readAgentSource } from "../registry/builtins/index.ts";
 import { CanopyClient } from "../registry/canopy.ts";
 import { refreshAgentRegistry } from "../registry/refresh.ts";
 import { cancelRun, spawnRun, steerRun, tailRunEvents } from "../runs/index.ts";
@@ -157,25 +159,47 @@ function parseNonNegativeInt(raw: string | null, label: string): number | undefi
 /* Agents (§8.1)                                                            */
 /* ----------------------------------------------------------------------- */
 
+/**
+ * Decorate an `AgentRow` with the `source` provenance so `GET /agents`
+ * consumers can distinguish built-ins from library-loaded agents.
+ */
+function withAgentSource(row: AgentRow): AgentRow & { source: AgentSource } {
+	return { ...row, source: readAgentSource(row.renderedJson) };
+}
+
 function listAgents(deps: ServerDeps): RouteHandler {
-	return () => jsonResponse(200, { agents: deps.repos.agents.listAll() });
+	return () =>
+		jsonResponse(200, {
+			agents: deps.repos.agents.listAll().map(withAgentSource),
+		});
 }
 
 function getAgent(deps: ServerDeps): RouteHandler {
 	return (ctx) => {
 		const name = requireParam(ctx, "name");
-		return jsonResponse(200, deps.repos.agents.require(name));
+		return jsonResponse(200, withAgentSource(deps.repos.agents.require(name)));
 	};
 }
 
 function refreshAgents(deps: ServerDeps): RouteHandler {
 	return async () => {
-		const client = new CanopyClient({ config: deps.canopyConfig, spawn: defaultSpawn });
+		// No canopy library configured (warren-d3e9): refresh has nothing
+		// to refresh against. 400 with a friendly hint is more useful than
+		// 200-with-empty-arrays — the operator's mental model is "I asked
+		// for a refresh, why didn't anything happen".
+		if (deps.canopyConfig === undefined) {
+			throw new ValidationError("CANOPY_REPO_URL is not set; nothing to refresh", {
+				recoveryHint:
+					"set CANOPY_REPO_URL to a canopy agent library to enable refresh — built-in agents are always available without one",
+			});
+		}
+		const canopyConfig = deps.canopyConfig;
+		const client = new CanopyClient({ config: canopyConfig, spawn: defaultSpawn });
 		const result = await refreshAgentRegistry({
 			client,
 			agents: deps.repos.agents,
 			cloneOptions: {
-				config: deps.canopyConfig,
+				config: canopyConfig,
 				spawn: defaultSpawn,
 			},
 		});
@@ -451,11 +475,18 @@ function readyz(deps: ServerDeps): RouteHandler {
 		// handler-local `defaultSpawn` to keep the contract live in tests
 		// that don't override.
 		const spawn: SpawnFn = deps.spawn ?? defaultSpawn;
-		const env: Readonly<Record<string, string | undefined>> = {
-			CANOPY_REPO_URL: deps.canopyConfig.repoUrl,
-			WARREN_CANOPY_DIR: deps.canopyConfig.localDir,
-			WARREN_GIT_BINARY: deps.canopyConfig.gitBinary,
-		};
+		// Canopy probes are gated on `CANOPY_REPO_URL` being configured
+		// (warren-d3e9). With no library, both probes return informational
+		// `ok: true` rather than failing — built-in agents cover the
+		// "no library" case and there's no clone to inspect.
+		const env: Readonly<Record<string, string | undefined>> =
+			deps.canopyConfig !== undefined
+				? {
+						CANOPY_REPO_URL: deps.canopyConfig.repoUrl,
+						WARREN_CANOPY_DIR: deps.canopyConfig.localDir,
+						WARREN_GIT_BINARY: deps.canopyConfig.gitBinary,
+					}
+				: {};
 
 		const checks: DiagnosticCheck[] = [];
 		checks.push(await checkBurrowReachable({ burrowClient: deps.burrowClient }));
@@ -475,11 +506,17 @@ function readyz(deps: ServerDeps): RouteHandler {
 function checkAgentsRegistered(deps: ServerDeps): DiagnosticCheck {
 	const count = deps.repos.agents.listAll().length;
 	if (count === 0) {
+		// Built-ins seed on boot (warren-d3e9), so an empty registry here
+		// means seeding itself failed — an internal problem, not an
+		// operator one. Keep the failure but reword the hint accordingly.
 		return {
 			name: "agents",
 			ok: false,
-			message: "no agents registered (POST /agents/refresh against your canopy library)",
-			hint: "POST /agents/refresh against your canopy library",
+			message: "no agents registered",
+			hint:
+				deps.canopyConfig !== undefined
+					? "POST /agents/refresh against your canopy library, or check the warren server logs for built-in seed errors"
+					: "check the warren server logs for built-in seed errors",
 		};
 	}
 	return { name: "agents", ok: true };

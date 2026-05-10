@@ -63,10 +63,10 @@ describe("checkBwrap", () => {
 });
 
 describe("checkCanopyClone", () => {
-	test("fails when CANOPY_REPO_URL unset", () => {
+	test("ok with informational message when CANOPY_REPO_URL unset (warren-d3e9)", () => {
 		const result = checkCanopyClone({ env: {}, exists: () => true });
-		expect(result.ok).toBe(false);
-		expect(result.message).toContain("CANOPY_REPO_URL");
+		expect(result.ok).toBe(true);
+		expect(result.message).toContain("no canopy library configured");
 	});
 
 	test("fails when the local dir does not exist", () => {
@@ -92,11 +92,12 @@ describe("checkCanopyClone", () => {
 describe("checkCanopyClean", () => {
 	const baseEnv = { CANOPY_REPO_URL: "https://x/y.git", WARREN_CANOPY_DIR: "/cn" };
 
-	test("fails when CANOPY_REPO_URL unset", async () => {
-		const { spawn } = captureSpawnCalls({});
+	test("ok with informational message when CANOPY_REPO_URL unset (warren-d3e9)", async () => {
+		const { spawn, calls } = captureSpawnCalls({});
 		const result = await checkCanopyClean({ env: {}, spawn, exists: () => true });
-		expect(result.ok).toBe(false);
-		expect(result.message).toContain("CANOPY_REPO_URL");
+		expect(result.ok).toBe(true);
+		expect(result.message).toContain("no canopy library configured");
+		expect(calls.length).toBe(0);
 	});
 
 	test("fails when the local dir does not exist", async () => {

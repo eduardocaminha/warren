@@ -27,13 +27,13 @@ V1 is single-user, single-host: clone warren, `docker compose up`, browser at `l
 
 ```
 $ git clone https://github.com/jayminwest/warren && cd warren
-$ cp .env.example .env && $EDITOR .env   # CANOPY_REPO_URL, ANTHROPIC_API_KEY, GITHUB_TOKEN
+$ cp .env.example .env && $EDITOR .env   # WARREN_API_TOKEN, BURROW_API_TOKEN, WARREN_BURROW_TOKEN, ANTHROPIC_API_KEY, GITHUB_TOKEN (CANOPY_REPO_URL optional)
 $ docker compose up -d
 $ open http://homeserver.local:8080
 ```
 
 In the UI:
-1. **Connect agent library** — Warren clones your canopy repo. Every prompt with the `agent: true` schema tag becomes a registered agent (`refactor-bot`, `docs-bot`, `sre-bot`, ...).
+1. **Pick an agent** — Warren ships built-in `claude-code` and `sapling` agents inline (`src/registry/builtins/`), so a fresh install can dispatch a run without further setup. To layer a custom library on top, set `CANOPY_REPO_URL` and Warren clones your canopy repo; every prompt tagged `agent` becomes a library-source agent that overrides any same-named built-in (`refactor-bot`, `docs-bot`, `sre-bot`, ...).
 2. **Add project** — paste a GitHub URL. Warren clones it under `/data/projects/`.
 3. **Spawn run** — pick agent + project + prompt. Warren provisions a burrow, renders the canopy agent into it, dispatches the run, streams events to the UI.
 4. **Watch and steer** — live event tail, send steering messages, see seeds the agent files for itself, see mulch records the agent records as it learns.
@@ -441,9 +441,10 @@ fly launch                          # uses ./fly.toml
 fly volumes create warren_data --size 50 --region sjc
 fly secrets set \
     WARREN_API_TOKEN=... \
-    CANOPY_REPO_URL=https://github.com/<you>/agents.git \
     ANTHROPIC_API_KEY=... \
     GITHUB_TOKEN=...
+# Optional: layer a custom canopy library on top of the built-ins:
+#   CANOPY_REPO_URL=https://github.com/<you>/agents.git
 fly deploy
 ```
 
@@ -505,6 +506,7 @@ The decided shape, expanded from prior open question #4:
 | Run cancellation | `POST /runs/:id/cancel` proxies to burrow's `POST /runs/:burrow_run_id/cancel`. Hard-stop = `DELETE /burrows/:burrow_id` is V2; not needed for V1. | §4.3 |
 | Burrow API contract | Burrow's `/openapi.json` is the source of truth. Warren generates a typed client against it. | §4.3 |
 | Burrow shippability | All 21 routes implemented as of `burrow@7926a0e` (2026-05-08). `POST /burrows` no longer returns 501. | — |
+| `CANOPY_REPO_URL` is optional (warren-d3e9, 2026-05-10) | Warren ships built-in `claude-code` and `sapling` agents inline (`src/registry/builtins/`); the canopy library is a power-user override, not a hard dependency. Boot seeds built-ins; refresh upserts library agents on top (same-named library agents win). `warren doctor` and `/readyz` treat unset `CANOPY_REPO_URL` as info, not failure. `POST /agents/refresh` and `warren register-agent` 400 with a friendly hint when no library is configured. `GET /agents` returns `source: "builtin" \| "library"` provenance derived from `frontmatter.source`. | §10.2, §11.B |
 
 ### 11.C Open questions for V1
 

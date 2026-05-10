@@ -406,6 +406,34 @@ describe("startServer — routes", () => {
 		}
 	});
 
+	test("/readyz returns 200 with no canopy library configured (warren-d3e9)", async () => {
+		// Strip canopyConfig — equivalent to booting without CANOPY_REPO_URL.
+		// canopy_clone / canopy_clean become informational `ok: true` and
+		// the agents check passes because the test fixture seeded one row.
+		const deps = depsFor(repos);
+		const noCanopyDeps: ServerDeps = {
+			repos: deps.repos,
+			burrowClient: deps.burrowClient,
+			broker: deps.broker,
+			bridges: deps.bridges,
+			projectsConfig: deps.projectsConfig,
+			logger: deps.logger,
+			uiDistDir: deps.uiDistDir,
+			...(deps.spawn !== undefined ? { spawn: deps.spawn } : {}),
+		};
+		handle = startServer(noCanopyDeps, tcpOpts());
+		const res = await fetch(`${tcpUrl(handle)}/readyz`);
+		expect(res.status).toBe(200);
+		const body = (await res.json()) as {
+			ok: boolean;
+			checks: { name: string; ok: boolean; message?: string }[];
+		};
+		expect(body.ok).toBe(true);
+		const canopyClone = body.checks.find((c) => c.name === "canopy_clone");
+		expect(canopyClone?.ok).toBe(true);
+		expect(canopyClone?.message).toContain("no canopy library configured");
+	});
+
 	test("/readyz flags canopy_clean when git status reports dirt", async () => {
 		const canopyDir = mkdtempSync(join(tmpdir(), "warren-readyz-dirty-"));
 		const dirtySpawn: SpawnFn = async (cmd) => {

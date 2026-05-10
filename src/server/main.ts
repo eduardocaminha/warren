@@ -29,6 +29,7 @@ import { openDatabase, type WarrenDb } from "../db/client.ts";
 import { createRepos } from "../db/repos/index.ts";
 import type { SpawnFn, SpawnOptions, SpawnResult } from "../projects/clone.ts";
 import { loadProjectsConfigFromEnv } from "../projects/config.ts";
+import { seedBuiltinAgents } from "../registry/builtins/index.ts";
 import { loadCanopyRegistryConfigFromEnv } from "../registry/config.ts";
 import { RunEventBroker } from "../runs/index.ts";
 import { NO_AUTH, resolveAuth } from "./auth.ts";
@@ -72,6 +73,14 @@ export async function bootServer(opts: BootServerOptions = {}): Promise<WarrenSe
 		"warren server starting",
 	);
 
+	// Seed built-in agents (warren-d3e9). Idempotent: existing rows
+	// (whether seeded by an earlier boot or upserted by a refresh of a
+	// same-named library agent) are preserved.
+	const seedResult = seedBuiltinAgents(repos.agents, undefined, opts.now);
+	if (seedResult.seeded.length > 0) {
+		logger.info({ agents: seedResult.seeded }, "seeded built-in agents");
+	}
+
 	const bridgesBoot = bootBridges({
 		repos,
 		broker,
@@ -107,7 +116,7 @@ export async function bootServer(opts: BootServerOptions = {}): Promise<WarrenSe
 		burrowClient,
 		broker,
 		bridges: bridgesBoot.registry,
-		canopyConfig,
+		...(canopyConfig !== null ? { canopyConfig } : {}),
 		projectsConfig,
 		logger,
 		uiDistDir: serverConfig.uiDistDir,
