@@ -1,0 +1,15 @@
+# Per-project trigger entries (SPEC §11.H).
+#
+# Only `kind: cron` is implemented today (R-02 ships the loader; R-06 will
+# wire croner-backed dispatch). Each entry needs: id, kind, cron, seed, role.
+# `timezone` and `prompt` are optional.
+#
+# Example shape:
+#
+#   - id: nightly-readyz
+#     kind: cron
+#     cron: "0 4 * * *"
+#     seed: warren-xxxx
+#     role: claude-code
+#     timezone: America/Los_Angeles
+#     prompt: "Audit /readyz output and file seeds for any failing checks."
