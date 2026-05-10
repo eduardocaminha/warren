@@ -358,6 +358,7 @@ function cancelRunHandler(deps: ServerDeps): RouteHandler {
 			broker: deps.broker,
 			...(reason !== undefined ? { reason } : {}),
 			...(deps.now !== undefined ? { now: deps.now } : {}),
+			...(deps.autoOpenPr !== undefined ? { autoOpenPr: deps.autoOpenPr } : {}),
 		});
 		return jsonResponse(200, {
 			state: result.state,

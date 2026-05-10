@@ -48,6 +48,7 @@ import { ValidationError } from "../core/errors.ts";
 import type { Repos } from "../db/repos/index.ts";
 import { RUN_TERMINAL_STATES, type RunState, type RunTerminalState } from "../db/schema.ts";
 import type { RunEventBroker } from "./events.ts";
+import type { AutoOpenPrConfig } from "./pr.ts";
 import { type ReapRunInput, type ReapRunResult, reapRun } from "./reap.ts";
 import type { BridgeLogger } from "./stream.ts";
 
@@ -67,6 +68,13 @@ export interface CancelRunInput {
 	 */
 	readonly reap?: (input: ReapRunInput) => Promise<ReapRunResult>;
 	readonly logger?: BridgeLogger;
+	/**
+	 * Auto-open-PR config (warren-f6af). Forwarded to reap so a graceful
+	 * cancel that reaches a terminal state still gets PR auto-open. Reap
+	 * skips the step internally when `outcome !== "succeeded"`, so a
+	 * cancel-to-cancelled transition won't open a PR even with this set.
+	 */
+	readonly autoOpenPr?: AutoOpenPrConfig;
 }
 
 export interface CancelRunResult {
@@ -132,6 +140,7 @@ export async function cancelRun(input: CancelRunInput): Promise<CancelRunResult>
 				...(input.broker !== undefined ? { broker: input.broker } : {}),
 				...(input.now !== undefined ? { now: input.now } : {}),
 				...(input.logger !== undefined ? { logger: input.logger } : {}),
+				...(input.autoOpenPr !== undefined ? { autoOpenPr: input.autoOpenPr } : {}),
 			});
 			stateAfter = result.state;
 		} catch (err) {

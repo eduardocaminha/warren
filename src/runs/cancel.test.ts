@@ -19,6 +19,7 @@ function reapStub(outcome: RunTerminalState): ReapRunResult {
 		seedsClosed: 0,
 		branchPushed: false,
 		commitsAhead: null,
+		prUrl: null,
 		errors: [],
 		alreadyTerminal: false,
 	};

@@ -29,6 +29,13 @@
 			"when": 1778362122451,
 			"tag": "0003_orphan_runs_on_project_delete",
 			"breakpoints": true
+		},
+		{
+			"idx": 4,
+			"version": "6",
+			"when": 1778381304312,
+			"tag": "0004_add_run_pr_url",
+			"breakpoints": true
 		}
 	]
 }

@@ -99,6 +99,12 @@ export const runs = sqliteTable(
 		endedAt: text("ended_at"),
 		prompt: text("prompt").notNull(),
 		trigger: text("trigger").notNull(),
+		// PR URL filled in by reap's pr_open sub-step (warren-f6af) when the
+		// agent's branch push lands real commits and WARREN_AUTO_OPEN_PR is on.
+		// Null encodes "no PR was opened" — auto-open disabled, push failed,
+		// branch == defaultBranch, no commits ahead, or the GitHub call itself
+		// errored (recorded as a `reap_failed` event with step=pr_open).
+		prUrl: text("pr_url"),
 	},
 	(t) => [
 		index("runs_state_idx").on(t.state),

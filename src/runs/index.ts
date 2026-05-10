@@ -15,6 +15,14 @@ export {
 	tailRunEvents,
 } from "./events.ts";
 export {
+	type AutoOpenPrConfig,
+	buildPrContent,
+	loadAutoOpenPrConfigFromEnv,
+	type OpenPullRequestInput,
+	type OpenPullRequestResult,
+	openPullRequest,
+} from "./pr.ts";
+export {
 	mergeMulchFile,
 	type ReapExec,
 	type ReapFs,

@@ -15,6 +15,7 @@ import type { SpawnFn } from "../projects/clone.ts";
 import type { ProjectsConfig } from "../projects/config.ts";
 import type { CanopyRegistryConfig } from "../registry/config.ts";
 import type { RunEventBroker } from "../runs/events.ts";
+import type { AutoOpenPrConfig } from "../runs/pr.ts";
 
 /**
  * Error envelope rendered for every non-2xx response. Mirrors burrow's
@@ -118,6 +119,13 @@ export interface ServerDeps {
 	readonly spawn?: SpawnFn;
 	/** Provided so tests can override `Date.now()`. */
 	readonly now?: () => Date;
+	/**
+	 * Auto-open-PR config (warren-f6af). Threaded into the cancel handler
+	 * so a graceful cancel that reaps inline still gets the same PR
+	 * behavior as the bridge's terminal-detect reap path. `bootServer`
+	 * resolves it from env via `loadAutoOpenPrConfigFromEnv`.
+	 */
+	readonly autoOpenPr?: AutoOpenPrConfig;
 }
 
 /**

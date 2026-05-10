@@ -121,6 +121,17 @@ export function RunDetailPage() {
 								+{reap.commitsAhead} commit{reap.commitsAhead === 1 ? "" : "s"}
 							</Badge>
 						) : null}
+						{r.prUrl !== null ? (
+							<a
+								href={r.prUrl}
+								target="_blank"
+								rel="noreferrer noopener"
+								className="font-mono text-xs underline underline-offset-2 text-(--color-fg) hover:text-(--color-primary)"
+								title="Open the auto-opened pull request on GitHub (warren-f6af)"
+							>
+								PR ↗
+							</a>
+						) : null}
 					</div>
 					<p className="mt-1 text-sm text-(--color-muted-foreground)">
 						<span className="font-medium">{r.agentName}</span> ·{" "}
@@ -155,6 +166,18 @@ export function RunDetailPage() {
 					<span className="font-mono text-xs">{r.burrowRunId ?? "—"}</span>
 				</MetaCard>
 				<MetaCard label="Updated">{relativeTime(r.endedAt ?? r.startedAt)}</MetaCard>
+				{r.prUrl !== null ? (
+					<MetaCard label="Pull Request">
+						<a
+							href={r.prUrl}
+							target="_blank"
+							rel="noreferrer noopener"
+							className="break-all font-mono text-xs underline underline-offset-2 hover:text-(--color-primary)"
+						>
+							{r.prUrl}
+						</a>
+					</MetaCard>
+				) : null}
 			</div>
 
 			<Card>

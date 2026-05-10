@@ -31,7 +31,7 @@ import type { SpawnFn, SpawnOptions, SpawnResult } from "../projects/clone.ts";
 import { loadProjectsConfigFromEnv } from "../projects/config.ts";
 import { seedBuiltinAgents } from "../registry/builtins/index.ts";
 import { loadCanopyRegistryConfigFromEnv } from "../registry/config.ts";
-import { RunEventBroker } from "../runs/index.ts";
+import { loadAutoOpenPrConfigFromEnv, RunEventBroker } from "../runs/index.ts";
 import { NO_AUTH, resolveAuth } from "./auth.ts";
 import { bootBridges } from "./bridges.ts";
 import { type EnvLike, loadServerConfigFromEnv } from "./config.ts";
@@ -81,11 +81,20 @@ export async function bootServer(opts: BootServerOptions = {}): Promise<WarrenSe
 		logger.info({ agents: seedResult.seeded }, "seeded built-in agents");
 	}
 
+	const autoOpenPr = loadAutoOpenPrConfigFromEnv(env);
+	if (autoOpenPr.enabled && autoOpenPr.token === "") {
+		logger.warn(
+			{},
+			"WARREN_AUTO_OPEN_PR is enabled but GITHUB_TOKEN is unset; reap pr_open will skip with reap_failed events",
+		);
+	}
+
 	const bridgesBoot = bootBridges({
 		repos,
 		broker,
 		burrowClient,
 		logger: bridgeLoggerFromPino(logger),
+		autoOpenPr,
 	});
 	if (bridgesBoot.resumed.length > 0) {
 		logger.info(
@@ -121,6 +130,7 @@ export async function bootServer(opts: BootServerOptions = {}): Promise<WarrenSe
 		logger,
 		uiDistDir: serverConfig.uiDistDir,
 		spawn: defaultSpawn,
+		autoOpenPr,
 		...(opts.now !== undefined ? { now: opts.now } : {}),
 	};
 

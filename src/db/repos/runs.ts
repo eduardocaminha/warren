@@ -70,6 +70,7 @@ export class RunsRepo {
 			endedAt: null,
 			prompt: input.prompt,
 			trigger: input.trigger,
+			prUrl: null,
 		};
 		this.db.insert(runs).values(row).run();
 		return row;
@@ -163,6 +164,18 @@ export class RunsRepo {
 		};
 		this.db.update(runs).set(patch).where(eq(runs.id, id)).run();
 		return { ...current, ...patch };
+	}
+
+	/**
+	 * Persist the PR URL reap's `pr_open` sub-step opened (warren-f6af).
+	 * Last write wins; passing `null` clears the field. Separate from
+	 * `finalize` because reap fires this *before* the terminal transition
+	 * (so the URL lands on the `reap.completed` event payload too).
+	 */
+	setPrUrl(id: string, prUrl: string | null): RunRow {
+		const current = this.require(id);
+		this.db.update(runs).set({ prUrl }).where(eq(runs.id, id)).run();
+		return { ...current, prUrl };
 	}
 
 	/**

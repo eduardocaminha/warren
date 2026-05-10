@@ -78,7 +78,15 @@ import type { BurrowClient } from "../burrow-client/client.ts";
 import { withTransportMapping } from "../burrow-client/client.ts";
 import type { Repos } from "../db/repos/index.ts";
 import type { EventRow, RunFailureReason, RunTerminalState } from "../db/schema.ts";
+import { parseGitHubUrl } from "../projects/url.ts";
 import type { RunEventBroker } from "./events.ts";
+import {
+	type AutoOpenPrConfig,
+	buildPrContent,
+	type OpenPullRequestInput,
+	type OpenPullRequestResult,
+	openPullRequest,
+} from "./pr.ts";
 import type { BridgeLogger } from "./stream.ts";
 
 const execFileAsync = promisify(execFile);
@@ -128,6 +136,21 @@ export interface ReapRunInput {
 	 * Ignored when `outcome !== "failed"`.
 	 */
 	readonly failureReason?: RunFailureReason;
+	/**
+	 * Auto-open-PR config (warren-f6af). When omitted or `enabled: false`,
+	 * the `pr_open` sub-step is skipped entirely (no event emitted, no
+	 * runs.pr_url update). Higher-level callers (HTTP server boot, CLI
+	 * `warren run`) load this from env via `loadAutoOpenPrConfigFromEnv`
+	 * and pass it through; tests pass `{ enabled: false, ... }` (or omit)
+	 * to keep the network out of the unit-test surface.
+	 */
+	readonly autoOpenPr?: AutoOpenPrConfig;
+	/**
+	 * Override the PR-open seam (tests). Defaults to the live
+	 * `openPullRequest`. Receives the same input shape as the production
+	 * function so tests can assert call arguments.
+	 */
+	readonly openPr?: (input: OpenPullRequestInput) => Promise<OpenPullRequestResult>;
 }
 
 export interface ReapStepError {
@@ -136,7 +159,12 @@ export interface ReapStepError {
 	readonly path?: string;
 }
 
-export type ReapStep = "workspace_lookup" | "mulch_merge" | "seeds_close" | "branch_push";
+export type ReapStep =
+	| "workspace_lookup"
+	| "mulch_merge"
+	| "seeds_close"
+	| "branch_push"
+	| "pr_open";
 
 export interface ReapRunResult {
 	readonly state: RunTerminalState;
@@ -166,6 +194,13 @@ export interface ReapRunResult {
 	 * without this field.
 	 */
 	readonly commitsAhead: number | null;
+	/**
+	 * URL of the PR reap opened (warren-f6af). Null when the `pr_open`
+	 * sub-step was skipped (auto-open disabled, missing token, push
+	 * failed, branch == defaultBranch, no commits ahead) or when the
+	 * GitHub call itself errored (errors append to `errors` instead).
+	 */
+	readonly prUrl: string | null;
 	readonly errors: readonly ReapStepError[];
 	/** True when the row was already terminal on entry — sub-steps were skipped. */
 	readonly alreadyTerminal: boolean;
@@ -195,6 +230,7 @@ export async function reapRun(input: ReapRunInput): Promise<ReapRunResult> {
 			seedsClosed: 0,
 			branchPushed: false,
 			commitsAhead: null,
+			prUrl: run.prUrl,
 			errors: [],
 			alreadyTerminal: true,
 		};
@@ -242,6 +278,7 @@ export async function reapRun(input: ReapRunInput): Promise<ReapRunResult> {
 	let seedsClosed = 0;
 	let branchPushed = false;
 	let commitsAhead: number | null = null;
+	let prUrl: string | null = null;
 
 	let workspacePath: string | null = null;
 	let branch: string | null = null;
@@ -323,6 +360,47 @@ export async function reapRun(input: ReapRunInput): Promise<ReapRunResult> {
 				});
 			}
 		}
+
+		// Auto-open PR (warren-f6af). Best-effort: failures emit a
+		// `reap_failed` step=pr_open event but do not fail the run. Skip
+		// silently when:
+		//   - autoOpenPr config is absent or disabled (operator opt-out),
+		//   - outcome !== "succeeded" (conservative V1: don't spam draft
+		//     PRs for crashed runs; gate revisited if needed),
+		//   - branchPushed === false (nothing to PR),
+		//   - commitsAhead is null or 0 (push landed no work),
+		//   - branch is null or matches project.defaultBranch (push went
+		//     straight to the default branch; PR would be empty),
+		//   - GITHUB_TOKEN is unset (logged via reap_failed so operators
+		//     see why; not a hard error).
+		if (
+			input.autoOpenPr?.enabled === true &&
+			input.outcome === "succeeded" &&
+			branchPushed &&
+			commitsAhead !== null &&
+			commitsAhead > 0 &&
+			branch !== null &&
+			branch !== project.defaultBranch
+		) {
+			try {
+				const opened = await tryOpenPr({
+					project,
+					branch,
+					autoOpen: input.autoOpenPr,
+					run,
+					openPr: input.openPr ?? openPullRequest,
+				});
+				if (opened.ok) {
+					prUrl = opened.url;
+					input.repos.runs.setPrUrl(run.id, prUrl);
+					emit("reap.pr_opened", { prUrl, mode: opened.mode, branch, baseBranch });
+				} else {
+					fail("pr_open", new Error(`${opened.reason}: ${opened.message}`));
+				}
+			} catch (err) {
+				fail("pr_open", err);
+			}
+		}
 	} else if (workspacePath !== null && project === null) {
 		emit("reap.orphaned", {
 			projectId: run.projectId,
@@ -351,6 +429,7 @@ export async function reapRun(input: ReapRunInput): Promise<ReapRunResult> {
 		seeds: { closed: seedsClosed },
 		branchPushed,
 		commitsAhead,
+		prUrl,
 		errors,
 	});
 
@@ -367,6 +446,7 @@ export async function reapRun(input: ReapRunInput): Promise<ReapRunResult> {
 			seedsClosed,
 			branchPushed,
 			commitsAhead,
+			prUrl,
 			errored: errors.length > 0,
 		},
 		"reap completed",
@@ -381,9 +461,50 @@ export async function reapRun(input: ReapRunInput): Promise<ReapRunResult> {
 		seedsClosed,
 		branchPushed,
 		commitsAhead,
+		prUrl,
 		errors,
 		alreadyTerminal: false,
 	};
+}
+
+/* ----------------------------------------------------------------------- */
+/* PR open (warren-f6af)                                                    */
+/* ----------------------------------------------------------------------- */
+
+interface TryOpenPrInput {
+	readonly project: { gitUrl: string; defaultBranch: string };
+	readonly branch: string;
+	readonly autoOpen: AutoOpenPrConfig;
+	readonly run: { id: string; agentName: string; prompt: string };
+	readonly openPr: (input: OpenPullRequestInput) => Promise<OpenPullRequestResult>;
+}
+
+async function tryOpenPr(input: TryOpenPrInput): Promise<OpenPullRequestResult> {
+	if (input.autoOpen.token === "") {
+		return {
+			ok: false,
+			reason: "missing_token",
+			message: "GITHUB_TOKEN unset; skipping auto-open PR",
+		};
+	}
+	const parsed = parseGitHubUrl(input.project.gitUrl);
+	const content = buildPrContent({
+		prompt: input.run.prompt,
+		runId: input.run.id,
+		agentName: input.run.agentName,
+		...(input.autoOpen.warrenBaseUrl !== null
+			? { warrenBaseUrl: input.autoOpen.warrenBaseUrl }
+			: {}),
+	});
+	return input.openPr({
+		owner: parsed.owner,
+		repo: parsed.name,
+		head: input.branch,
+		base: input.project.defaultBranch,
+		title: content.title,
+		body: content.body,
+		token: input.autoOpen.token,
+	});
 }
 
 /* ----------------------------------------------------------------------- */

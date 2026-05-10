@@ -56,6 +56,12 @@ export interface RunRow {
 	endedAt: string | null;
 	prompt: string;
 	trigger: string;
+	/**
+	 * URL of the PR reap opened (warren-f6af). Null when reap's `pr_open`
+	 * sub-step was skipped (auto-open disabled, no commits, push failed,
+	 * branch == defaultBranch) or the GitHub call errored.
+	 */
+	prUrl: string | null;
 }
 
 export interface BurrowSummary {
@@ -119,6 +125,8 @@ export interface ReapCompletedPayload {
 	failureReason?: RunFailureReason | null;
 	branchPushed?: boolean;
 	commitsAhead?: number | null;
+	/** PR URL when reap auto-opened one (warren-f6af). */
+	prUrl?: string | null;
 	mulch?: { updated?: number; skipped?: number; appended?: number };
 	seeds?: { closed?: number };
 	errors?: { step: string; message: string; path?: string }[];

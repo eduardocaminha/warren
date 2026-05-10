@@ -34,6 +34,7 @@ import type { BurrowClient } from "../burrow-client/client.ts";
 import type { Repos } from "../db/repos/index.ts";
 import type { RunState } from "../db/schema.ts";
 import {
+	type AutoOpenPrConfig,
 	type BridgeLogger,
 	type BridgeRunStreamInput,
 	type BridgeRunStreamResult,
@@ -82,6 +83,12 @@ export interface CreateBridgeRegistryInput {
 	readonly reconnectBackoffMs?: readonly number[];
 	/** Override the sleep primitive (tests). Default: `setTimeout`-based. */
 	readonly sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
+	/**
+	 * Auto-open-PR config (warren-f6af). Forwarded to reap so the bridge's
+	 * inline reap call (terminal-detect path) opens a PR for the agent's
+	 * pushed branch. Omit to disable; `bootServer` resolves it from env.
+	 */
+	readonly autoOpenPr?: AutoOpenPrConfig;
 }
 
 export function createBridgeRegistry(input: CreateBridgeRegistryInput): BridgeRegistry {
@@ -106,6 +113,7 @@ export function createBridgeRegistry(input: CreateBridgeRegistryInput): BridgeRe
 			backoff,
 			sleep,
 			...(input.logger !== undefined ? { logger: input.logger } : {}),
+			...(input.autoOpenPr !== undefined ? { autoOpenPr: input.autoOpenPr } : {}),
 		});
 		const entry: BridgeEntry = { burrowRunId, abort, done };
 		live.set(runId, entry);
@@ -140,6 +148,7 @@ interface RunWithReconnectInput {
 	readonly backoff: readonly number[];
 	readonly sleep: (ms: number, signal: AbortSignal) => Promise<void>;
 	readonly logger?: BridgeLogger;
+	readonly autoOpenPr?: AutoOpenPrConfig;
 }
 
 /**
@@ -180,6 +189,7 @@ async function runWithReconnect(input: RunWithReconnectInput): Promise<BridgeRun
 					burrowClient: input.burrowClient,
 					broker: input.broker,
 					...(input.logger !== undefined ? { logger: input.logger } : {}),
+					...(input.autoOpenPr !== undefined ? { autoOpenPr: input.autoOpenPr } : {}),
 				});
 			} catch (err) {
 				input.logger?.error?.(

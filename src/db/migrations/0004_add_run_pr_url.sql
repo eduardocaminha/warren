@@ -1,0 +1,1 @@
+ALTER TABLE `runs` ADD `pr_url` text;

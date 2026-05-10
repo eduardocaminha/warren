@@ -25,8 +25,10 @@ import { withTransportMapping } from "../../burrow-client/client.ts";
 import type { Repos } from "../../db/repos/index.ts";
 import type { RunTerminalState } from "../../db/schema.ts";
 import {
+	type AutoOpenPrConfig,
 	type BridgeRunStreamResult,
 	bridgeRunStream,
+	loadAutoOpenPrConfigFromEnv,
 	RunEventBroker,
 	reapRun,
 	type SpawnRunResult,
@@ -56,6 +58,12 @@ export interface RunDeps {
 	readonly reap?: typeof reapRun;
 	/** Override the burrow run state lookup (tests). */
 	readonly fetchBurrowRunState?: (burrowRunId: string) => Promise<RunTerminalState>;
+	/**
+	 * Auto-open-PR config (warren-f6af). Defaults to
+	 * `loadAutoOpenPrConfigFromEnv(process.env)`. Tests pass an explicit
+	 * `{ enabled: false, ... }` to keep the network out of the surface.
+	 */
+	readonly autoOpenPr?: AutoOpenPrConfig;
 }
 
 export interface RunResult {
@@ -78,6 +86,7 @@ export async function runRun(
 	const spawn = deps.spawn ?? spawnRun;
 	const bridge = deps.bridge ?? bridgeRunStream;
 	const reap = deps.reap ?? reapRun;
+	const autoOpenPr = deps.autoOpenPr ?? loadAutoOpenPrConfigFromEnv();
 	const fetchBurrowRunState =
 		deps.fetchBurrowRunState ?? defaultFetchBurrowRunState(deps.burrowClient);
 
@@ -169,6 +178,7 @@ export async function runRun(
 			repos: deps.repos,
 			burrowClient: deps.burrowClient,
 			broker,
+			autoOpenPr,
 			...(context.now !== undefined ? { now: context.now } : {}),
 		});
 		finalState = reaped.state;
@@ -184,6 +194,8 @@ export async function runRun(
 			},
 			seedsClosed: reaped.seedsClosed,
 			branchPushed: reaped.branchPushed,
+			commitsAhead: reaped.commitsAhead,
+			prUrl: reaped.prUrl,
 			errors: reaped.errors,
 		});
 	} catch (err) {
