@@ -56,6 +56,7 @@ export {
 	type RunTickResult,
 	runTick,
 	type SchedulerHandle,
+	type SchedulerTimerHandle,
 	type StartSchedulerInput,
 	startScheduler,
 	type TickDeps,

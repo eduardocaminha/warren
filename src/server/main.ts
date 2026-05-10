@@ -32,10 +32,12 @@ import { loadProjectsConfigFromEnv } from "../projects/config.ts";
 import { seedBuiltinAgents } from "../registry/builtins/index.ts";
 import { loadCanopyRegistryConfigFromEnv } from "../registry/config.ts";
 import { loadAutoOpenPrConfigFromEnv, RunEventBroker } from "../runs/index.ts";
+import { loadTriggerSchedulerConfigFromEnv } from "../triggers/index.ts";
 import { createWarrenConfigCache } from "../warren-config/index.ts";
 import { NO_AUTH, resolveAuth } from "./auth.ts";
 import { bootBridges } from "./bridges.ts";
 import { type EnvLike, loadServerConfigFromEnv } from "./config.ts";
+import { bootScheduler } from "./scheduler.ts";
 import { startServer } from "./server.ts";
 import type { AuthProvider, Logger, ServeHandle, ServerDeps } from "./types.ts";
 
@@ -123,6 +125,27 @@ export async function bootServer(opts: BootServerOptions = {}): Promise<WarrenSe
 
 	const warrenConfigs = createWarrenConfigCache();
 
+	const schedulerConfig = loadTriggerSchedulerConfigFromEnv(env);
+	const scheduler = bootScheduler({
+		repos,
+		burrowClient,
+		bridges: bridgesBoot.registry,
+		warrenConfigs,
+		projectsConfig,
+		projectSpawn: defaultSpawn,
+		config: schedulerConfig,
+		logger: schedulerLoggerFromPino(logger),
+		...(opts.now !== undefined ? { now: opts.now } : {}),
+	});
+	if (schedulerConfig.disabled) {
+		logger.info({}, "scheduler disabled via WARREN_SCHEDULER_DISABLED");
+	} else {
+		logger.info(
+			{ tickMs: schedulerConfig.tickMs, sdBinary: schedulerConfig.sdBinary },
+			"scheduler running",
+		);
+	}
+
 	const deps: ServerDeps = {
 		repos,
 		burrowClient,
@@ -154,7 +177,11 @@ export async function bootServer(opts: BootServerOptions = {}): Promise<WarrenSe
 		url: handle.url,
 		stop: async () => {
 			logger.info({}, "warren server stopping");
+			// Stop the HTTP listener first so no new POSTs land mid-teardown,
+			// then drain the scheduler so any in-flight tick finishes calling
+			// spawnRun before bridges/burrow/db disappear under it.
 			await handle.stop();
+			await scheduler.stop();
 			await bridgesBoot.registry.stopAll();
 			await burrowClient.close();
 			closeDatabase(db);
@@ -204,6 +231,18 @@ function bridgeLoggerFromPino(logger: Logger): {
 	info?(obj: object, msg?: string): void;
 	warn?(obj: object, msg?: string): void;
 	error?(obj: object, msg?: string): void;
+} {
+	return {
+		info: (obj, msg) => logger.info(obj, msg),
+		warn: (obj, msg) => logger.warn(obj, msg),
+		error: (obj, msg) => logger.error(obj, msg),
+	};
+}
+
+function schedulerLoggerFromPino(logger: Logger): {
+	info(obj: Record<string, unknown>, msg?: string): void;
+	warn(obj: Record<string, unknown>, msg?: string): void;
+	error(obj: Record<string, unknown>, msg?: string): void;
 } {
 	return {
 		info: (obj, msg) => logger.info(obj, msg),
