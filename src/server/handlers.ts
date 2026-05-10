@@ -243,6 +243,7 @@ function deleteProjectHandler(deps: ServerDeps): RouteHandler {
 			repo: deps.repos.projects,
 			config: deps.projectsConfig,
 			id,
+			...(deps.warrenConfigs !== undefined ? { warrenConfigs: deps.warrenConfigs } : {}),
 		});
 		return jsonResponse(200, row);
 	};
@@ -260,6 +261,7 @@ function refreshProjectHandler(deps: ServerDeps): RouteHandler {
 			...(ref !== undefined ? { ref } : {}),
 			spawn: deps.spawn ?? defaultSpawn,
 			...(deps.now !== undefined ? { now: deps.now } : {}),
+			...(deps.warrenConfigs !== undefined ? { warrenConfigs: deps.warrenConfigs } : {}),
 		});
 		return jsonResponse(200, {
 			project: result.project,
@@ -312,6 +314,7 @@ function createRunHandler(deps: ServerDeps): RouteHandler {
 			projectsConfig: deps.projectsConfig,
 			projectSpawn: deps.spawn ?? defaultSpawn,
 			...(ref !== undefined ? { ref } : {}),
+			...(deps.warrenConfigs !== undefined ? { warrenConfigs: deps.warrenConfigs } : {}),
 		});
 		// Hand off to the bridge so events start flowing into warren.events
 		// — without this the dispatched run would emit events into burrow

@@ -5,6 +5,12 @@
  */
 
 export {
+	createWarrenConfigCache,
+	type WarrenConfigCache,
+	type WarrenConfigCacheOptions,
+	type WarrenConfigLoader,
+} from "./cache.ts";
+export {
 	WARREN_CONFIG_DIR,
 	WARREN_CONFIG_FILES,
 	type WarrenConfigFileKey,

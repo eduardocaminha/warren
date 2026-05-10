@@ -52,6 +52,7 @@ import {
 	parseRenderedAgent,
 	RenderResponseSchema,
 } from "../registry/schema.ts";
+import type { WarrenConfigCache } from "../warren-config/index.ts";
 import { parseBurrowConfig } from "./burrow_config.ts";
 import { RunSpawnError } from "./errors.ts";
 import { type SeedBurrowWorkspaceInput, seedBurrowWorkspace } from "./seed.ts";
@@ -83,6 +84,13 @@ export interface SpawnRunInput {
 	readonly ref?: string;
 	/** Override the project refresher; defaults to `refreshProject`. */
 	readonly refreshProjectFn?: typeof refreshProject;
+	/**
+	 * Optional warren-config cache. Forwarded into the pre-spawn refresh
+	 * so a run that updates the working tree also invalidates any cached
+	 * `.warren/` envelope (pl-5d74 risk #4). Tests that don't exercise
+	 * the cache can omit.
+	 */
+	readonly warrenConfigs?: WarrenConfigCache;
 }
 
 export interface SpawnRunResult {
@@ -117,6 +125,7 @@ export async function spawnRun(input: SpawnRunInput): Promise<SpawnRunResult> {
 					...(input.ref !== undefined ? { ref: input.ref } : {}),
 					spawn: input.projectSpawn,
 					...(input.now !== undefined ? { now: input.now } : {}),
+					...(input.warrenConfigs !== undefined ? { warrenConfigs: input.warrenConfigs } : {}),
 				})
 			: null;
 	const projectAfterRefresh = refreshed?.project ?? project;

@@ -32,6 +32,7 @@ import { loadProjectsConfigFromEnv } from "../projects/config.ts";
 import { seedBuiltinAgents } from "../registry/builtins/index.ts";
 import { loadCanopyRegistryConfigFromEnv } from "../registry/config.ts";
 import { loadAutoOpenPrConfigFromEnv, RunEventBroker } from "../runs/index.ts";
+import { createWarrenConfigCache } from "../warren-config/index.ts";
 import { NO_AUTH, resolveAuth } from "./auth.ts";
 import { bootBridges } from "./bridges.ts";
 import { type EnvLike, loadServerConfigFromEnv } from "./config.ts";
@@ -120,6 +121,8 @@ export async function bootServer(opts: BootServerOptions = {}): Promise<WarrenSe
 		);
 	});
 
+	const warrenConfigs = createWarrenConfigCache();
+
 	const deps: ServerDeps = {
 		repos,
 		burrowClient,
@@ -131,6 +134,7 @@ export async function bootServer(opts: BootServerOptions = {}): Promise<WarrenSe
 		uiDistDir: serverConfig.uiDistDir,
 		spawn: defaultSpawn,
 		autoOpenPr,
+		warrenConfigs,
 		...(opts.now !== undefined ? { now: opts.now } : {}),
 	};
 

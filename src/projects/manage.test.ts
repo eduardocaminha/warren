@@ -4,6 +4,7 @@ import { isId } from "../core/ids.ts";
 import { openDatabase, type WarrenDb } from "../db/client.ts";
 import { ProjectsRepo } from "../db/repos/projects.ts";
 import { RunsRepo } from "../db/repos/runs.ts";
+import type { WarrenConfigCache } from "../warren-config/index.ts";
 import type { CloneProjectResult, SpawnFn } from "./clone.ts";
 import type { ProjectsConfig } from "./config.ts";
 import { ProjectUnavailableError } from "./errors.ts";
@@ -15,6 +16,27 @@ const CFG: ProjectsConfig = {
 };
 
 const NOOP_SPAWN: SpawnFn = async () => ({ stdout: "", stderr: "", exitCode: 0 });
+
+interface RecordingCache extends WarrenConfigCache {
+	readonly invalidations: readonly string[];
+}
+
+function recordingCache(): RecordingCache {
+	const invalidations: string[] = [];
+	return {
+		get invalidations() {
+			return invalidations;
+		},
+		get: async () => ({ triggers: null, defaults: null, errors: [] }),
+		invalidate: (id: string) => {
+			invalidations.push(id);
+		},
+		clear: () => {
+			invalidations.length = 0;
+		},
+		size: () => 0,
+	};
+}
 
 function fakeClone(
 	result: Partial<CloneProjectResult> = {},
@@ -346,6 +368,28 @@ describe("deleteProject", () => {
 			}),
 		).rejects.toMatchObject({ code: "not_found" });
 	});
+
+	test("invalidates the warren-config cache after the row delete", async () => {
+		const row = await addProject({
+			repo,
+			config: CFG,
+			gitUrl: "https://github.com/x/y.git",
+			spawn: NOOP_SPAWN,
+			clone: fakeClone(),
+		});
+
+		const cache = recordingCache();
+		await deleteProject({
+			repo,
+			config: CFG,
+			id: row.id,
+			exists: () => false,
+			rmrf: async () => undefined,
+			warrenConfigs: cache,
+		});
+
+		expect(cache.invalidations).toEqual([row.id]);
+	});
 });
 
 describe("refreshProject", () => {
@@ -478,5 +522,64 @@ describe("refreshProject", () => {
 				refresh: async () => ({ headSha: "x", ref: "main" }),
 			}),
 		).rejects.toMatchObject({ code: "not_found" });
+	});
+
+	test("invalidates the warren-config cache BEFORE refresh runs (pl-5d74 risk #4)", async () => {
+		const row = await addProject({
+			repo,
+			config: CFG,
+			gitUrl: "https://github.com/x/y.git",
+			spawn: NOOP_SPAWN,
+			clone: fakeClone(),
+		});
+
+		const cache = recordingCache();
+		const order: string[] = [];
+		await refreshProject({
+			repo,
+			config: CFG,
+			id: row.id,
+			spawn: NOOP_SPAWN,
+			warrenConfigs: {
+				...cache,
+				invalidate: (id) => {
+					order.push(`invalidate:${id}`);
+					cache.invalidate(id);
+				},
+			},
+			refresh: async (input) => {
+				order.push("refresh");
+				return { headSha: "deadbeef".repeat(5), ref: input.ref };
+			},
+		});
+
+		expect(order).toEqual([`invalidate:${row.id}`, "refresh"]);
+		expect(cache.invalidations).toEqual([row.id]);
+	});
+
+	test("invalidates even when refresh throws (cache stays empty)", async () => {
+		const row = await addProject({
+			repo,
+			config: CFG,
+			gitUrl: "https://github.com/x/y.git",
+			spawn: NOOP_SPAWN,
+			clone: fakeClone(),
+		});
+
+		const cache = recordingCache();
+		await expect(
+			refreshProject({
+				repo,
+				config: CFG,
+				id: row.id,
+				spawn: NOOP_SPAWN,
+				warrenConfigs: cache,
+				refresh: async () => {
+					throw new ProjectUnavailableError("git fetch failed");
+				},
+			}),
+		).rejects.toBeInstanceOf(ProjectUnavailableError);
+
+		expect(cache.invalidations).toEqual([row.id]);
 	});
 });

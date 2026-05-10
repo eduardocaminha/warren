@@ -16,6 +16,7 @@ import type { ProjectsConfig } from "../projects/config.ts";
 import type { CanopyRegistryConfig } from "../registry/config.ts";
 import type { RunEventBroker } from "../runs/events.ts";
 import type { AutoOpenPrConfig } from "../runs/pr.ts";
+import type { WarrenConfigCache } from "../warren-config/index.ts";
 
 /**
  * Error envelope rendered for every non-2xx response. Mirrors burrow's
@@ -126,6 +127,13 @@ export interface ServerDeps {
 	 * resolves it from env via `loadAutoOpenPrConfigFromEnv`.
 	 */
 	readonly autoOpenPr?: AutoOpenPrConfig;
+	/**
+	 * Per-project `.warren/` config cache (R-02, pl-5d74 step 3). The
+	 * project HTTP handlers invalidate this on refresh + delete so any
+	 * subsequent reader re-parses against the post-lifecycle state.
+	 * `bootServer` always wires a fresh cache; tests may omit.
+	 */
+	readonly warrenConfigs?: WarrenConfigCache;
 }
 
 /**

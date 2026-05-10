@@ -31,6 +31,7 @@ import { ValidationError } from "../core/errors.ts";
 import type { ProjectsRepo } from "../db/repos/projects.ts";
 import type { ProjectRow } from "../db/schema.ts";
 import type { BridgeLogger } from "../runs/stream.ts";
+import type { WarrenConfigCache } from "../warren-config/index.ts";
 import {
 	type CloneProjectResult,
 	cloneProjectRepo,
@@ -95,6 +96,14 @@ export interface RefreshProjectInput {
 	readonly now?: () => Date;
 	/** Inject the refresher; defaults to the live `refreshProjectClone`. */
 	readonly refresh?: typeof refreshProjectClone;
+	/**
+	 * Optional warren-config cache. When present, invalidated BEFORE
+	 * `refreshProjectClone` runs so any reader that started parsing
+	 * against the pre-fetch tree cannot commit a stale envelope to the
+	 * cache (pl-5d74 risk #4). Omit when the caller has no cache (CLI
+	 * one-shots, tests that don't exercise the HTTP surface).
+	 */
+	readonly warrenConfigs?: WarrenConfigCache;
 }
 
 export interface RefreshProjectResult {
@@ -110,6 +119,15 @@ export async function refreshProject(input: RefreshProjectInput): Promise<Refres
 	if (ref === "") {
 		throw new ValidationError("ref must be a non-empty string");
 	}
+
+	// Drop the cached envelope BEFORE the working tree changes. Per
+	// pl-5d74 risk #4, this guarantees a concurrent
+	// GET /projects/:id/warren-config either (a) joined the in-flight
+	// pre-fetch load and observed the stale envelope without it being
+	// committed, or (b) starts a fresh parse against the post-fetch tree.
+	// No caller observes the post-refresh row paired with the pre-refresh
+	// parse.
+	input.warrenConfigs?.invalidate(id);
 
 	const refreshFn = input.refresh ?? refreshProjectClone;
 	const result: RefreshProjectCloneResult = await refreshFn({
@@ -137,6 +155,12 @@ export interface DeleteProjectInput {
 	readonly rmrf?: (path: string) => Promise<void>;
 	/** Optional structured logger; warnings about stranded clones go here. */
 	readonly logger?: BridgeLogger;
+	/**
+	 * Optional warren-config cache. Invalidated after the row delete so a
+	 * future re-registration under the same id (or a stale reader) never
+	 * sees the deleted project's parsed envelope.
+	 */
+	readonly warrenConfigs?: WarrenConfigCache;
 }
 
 export async function deleteProject(input: DeleteProjectInput): Promise<ProjectRow> {
@@ -154,6 +178,7 @@ export async function deleteProject(input: DeleteProjectInput): Promise<ProjectR
 	// that combination wedged subsequent dispatches against the project
 	// (warren-5f19).
 	repo.delete(id);
+	input.warrenConfigs?.invalidate(id);
 
 	if (exists(row.localPath)) {
 		try {
