@@ -15,6 +15,7 @@ import { WarrenHttp } from "../lib/http.ts";
 
 interface AgentRow {
 	readonly name: string;
+	readonly source?: "builtin" | "library";
 	readonly registeredAt?: string;
 	readonly lastRefreshed?: string;
 }
@@ -26,9 +27,15 @@ export const scenario: Scenario = {
 	async run(ctx) {
 		const http = new WarrenHttp({ baseUrl: ctx.warrenUrl, token: ctx.token });
 
-		// Initial /agents — nothing registered yet.
+		// Initial /agents — only the boot-seeded built-ins (claude-code, sapling)
+		// are registered; no library-sourced agents until the first refresh.
 		const before = await http.expectJson<{ agents: AgentRow[] }>("GET", "/agents", 200);
-		assertEqual(before.agents.length, 0, "agents list is empty before first refresh");
+		const beforeLibrary = before.agents.filter((a) => a.source !== "builtin");
+		assertEqual(
+			beforeLibrary.length,
+			0,
+			"no library-sourced agents are registered before first refresh",
+		);
 
 		// Trigger refresh. Warren clones the canopy repo (via insteadOf
 		// redirect), enumerates `agent: true` prompts, renders each.
