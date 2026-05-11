@@ -47,6 +47,7 @@ import { scenario as scenario11 } from "./scenarios/11-doctor-exit-codes.ts";
 import { scenario as scenario12 } from "./scenarios/12-supervisor-restart-budget.ts";
 import { scenario as scenario13 } from "./scenarios/13-container-smoke.ts";
 import { scenario as scenario14 } from "./scenarios/14-warren-config.ts";
+import { scenario as scenario15 } from "./scenarios/15-triggers-roundtrip.ts";
 
 const SCENARIOS: readonly Scenario[] = [
 	scenario01,
@@ -63,6 +64,7 @@ const SCENARIOS: readonly Scenario[] = [
 	scenario12,
 	scenario13,
 	scenario14,
+	scenario15,
 ];
 
 interface ParsedArgs {
@@ -188,6 +190,13 @@ async function runInProcMode(opts: RunModeArgs): Promise<number> {
 				// scenarios 05/06 a steady stream of per-second heartbeat
 				// events while leaving room to kill+restart warren mid-run.
 				WARREN_STUB_SLEEP_MS: "8000",
+				// Scenario 15 drives a live cron + scheduledFor dispatch via
+				// the R-06 tick loop; the 60s production default would push
+				// the scenario past any reasonable budget. Other scenarios
+				// don't configure `.warren/triggers.yaml` or scheduledFor
+				// seeds, so the faster tick is a no-op for them (pl-2f15
+				// risk #8 mitigation).
+				WARREN_SCHEDULER_TICK_MS: "1000",
 			},
 		});
 		logger.info(`acceptance: warren ready at ${handle.warrenUrl}`);
