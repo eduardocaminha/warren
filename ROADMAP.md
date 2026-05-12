@@ -1162,6 +1162,120 @@ deploy; GitHub App mode activates when `WARREN_GITHUB_APP_ID` +
 
 ---
 
+## R-19 — Per-run preview environments
+Status: [proposed] — needs more sketching before commit
+Depends on: burrow-side inbound networking policy (not yet filed; today
+burrow's bwrap profiles bind for outbound only). Plays well with R-12
+(remote workers) but doesn't require it.
+Unlocks: runs feel real — "here's the agent's branch, here's the diff,
+**and here's the working app at this URL**" instead of just a diff in
+the UI. Removes the "I'd need to check this out locally to see if it
+works" friction that pushes humans out of the review loop.
+
+**Problem.** Today a successful run ends with a pushed branch and a
+reap summary. The reviewer's next step is git-checkout-and-run-locally,
+which is high-friction enough that most runs get judged on the diff
+alone. If each run produced an ephemeral URL where the agent's output
+was actually running, runs would feel like deployable artifacts rather
+than text diffs. This is the *single biggest* perceived-realness win we
+can ship — but it's underspecified across at least four layers (port
+binding, host routing, TLS, lifecycle) and warrants a design pass
+before we commit.
+
+**Sketch.** Each successful run optionally exposes a public URL of the
+form `https://run-<id>.<warren-host>` that proxies into the burrow
+workspace's listening port. Roughly:
+
+1. **Project opts in.** `.warren/defaults.json` (or `triggers.yaml`)
+   gains a `preview` block declaring how to start a server inside the
+   workspace and what port it listens on:
+
+       preview:
+         enabled: true
+         command: "bun run dev"
+         port: 3000
+         readiness_path: "/healthz"
+         ttl: "1h"
+
+2. **Run reaper starts the preview.** After the agent reaches terminal
+   success, warren tells burrow to spawn `preview.command` as a
+   long-lived sidecar process inside the same workspace sandbox (or a
+   forked sandbox — see open questions). Burrow needs an inbound
+   networking policy that doesn't exist today.
+
+3. **Routing.** A reverse proxy on the warren host (likely Caddy, which
+   already handles its TLS automation) accepts `*.<warren-host>` and
+   maps the subdomain → burrow workspace → internal port via a warren
+   API call (`GET /previews/:run-id` returning `{burrow_id, port}`).
+4. **TLS.** Operator points a wildcard `*.<warren-host>` CNAME at the
+   warren box; Caddy issues a wildcard cert via Let's Encrypt DNS-01.
+   Operator picks a DNS provider Caddy supports (Cloudflare,
+   Route53, etc.) — this is real config burden we should document
+   honestly.
+5. **Lifecycle.** Preview lives until `preview.ttl` elapses or the
+   reviewer clicks "Tear down" on the run-detail page. Warren persists
+   `preview_state` per run (`starting | live | torn-down | failed`)
+   and exposes the URL in the UI as a clickable link with a status
+   badge.
+
+**Open questions (the part that needs sketching).**
+
+- **Same sandbox or forked?** Running `bun run dev` inside the same
+  bwrap that the agent just ran in is simpler (one workspace, one
+  filesystem, one process tree) but means the preview shares whatever
+  state the agent left behind, including any malicious side effects.
+  Forking a fresh sandbox from the agent's final commit is safer but
+  doubles the burrow workload and complicates port binding. Default
+  to "same sandbox" for the initial spec and document the tradeoff?
+- **Auth on the preview URL.** A run against private code produces a
+  preview containing whatever the agent built — possibly with secrets,
+  possibly with the org's UI. Options: (a) the same bearer token that
+  fronts warren, transferred via signed cookie; (b) GitHub OAuth (if
+  R-18 ships); (c) basic auth with a per-run password surfaced in the
+  reap summary; (d) no auth, opt-in per project. We should not ship
+  (d) as the default.
+- **Inbound burrow networking.** Burrow's bwrap profiles bind for
+  outbound only today. Adding inbound means a per-burrow port-forward
+  on the host loopback (`127.0.0.1:<random-port>` → burrow's port
+  3000). This is the same architectural change as the
+  `.gitconfig`-mount / per-run secret mount discussed in R-15 and
+  §11.G — coordinate the seam.
+- **Port allocation.** Static range (`30000-31000`)? Dynamic from the
+  ephemeral range? Need a small allocator in warren that survives
+  restarts (persist to `runs.preview_port`).
+- **Resource ceiling.** A long-lived `bun run dev` per recent run can
+  exhaust memory fast. Need an LRU eviction policy that supersedes
+  the per-preview TTL (e.g., "max 20 live previews, evict oldest").
+  Pairs naturally with R-17 (cost & concurrency guardrails) but
+  shouldn't *require* R-17 to ship a useful V2.
+- **Remote workers (R-12) interaction.** If the burrow is on a
+  different host than warren, the host-side proxy needs to route
+  cross-machine. Wireguard mesh between warren and workers? Public
+  IP per worker + signed-URL routing? Push to R-12's protocol
+  discussions before locking the design.
+- **Custom domain per project.** Some projects will want
+  `<project>.example.com/runs/<id>/` instead of
+  `run-<id>.<warren-host>`. Defer to V2-of-this-item; ship the
+  `run-<id>` form first.
+- **Non-HTTP previews.** Lots of agent output is not a web server —
+  a CLI tool, a generated PDF, a video render, a static-site bundle.
+  Static-site fallback (preview command produces a directory, warren
+  serves it through the same proxy) is a near-free addition once
+  the routing layer exists; non-HTTP "preview as downloadable
+  artifact" is a separate problem and likely out of scope here.
+- **Failure UX.** If `preview.command` fails to bind or never passes
+  `readiness_path`, the run is still successful — the agent did its
+  work — but the preview is broken. Surface `preview_state: failed`
+  with the last 200 lines of stdout/stderr; don't fail the run.
+
+**Why this is filed as needs-sketching rather than implementable.** The
+sketch above touches burrow's network policy, warren's proxy story,
+TLS/DNS operator burden, auth, lifecycle, and the remote-worker future.
+A real design doc should land before any code — probably a §11.K
+addition to SPEC.md plus a burrow-side issue for inbound networking.
+
+---
+
 ## Decisions already made
 
 Choices locked in during prior design discussions. Captured here so they aren't
@@ -1373,3 +1487,13 @@ R-09 is repromoted and R-12 through R-18 are slotted in.
 18. **R-18** (GitHub App) — independent of the rest of the cluster.
     Can ship any time once an org actually asks; PAT mode stays
     supported indefinitely as the home-server path.
+
+**Wave 3 — perceived-realness (post-org-readiness, design-first).**
+
+19. **R-19** (per-run preview environments) — explicitly needs a
+    design pass before commit (SPEC §11.K + burrow inbound-networking
+    seed). High UX leverage — collapses "diff + checkout-locally to
+    verify" into "click the URL" — but the design surface spans burrow
+    network policy, TLS/DNS, auth, lifecycle, and the R-12 remote-worker
+    future. Sketch first; sequence after R-12's protocol stabilizes so
+    cross-host routing isn't a retrofit.
