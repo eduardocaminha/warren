@@ -130,5 +130,140 @@ describe("seedBurrowWorkspace", () => {
 		});
 		expect(result.workflowPath).toBeNull();
 		expect(result.mulchDomains).toEqual([]);
+		expect(result.piSkills).toEqual([]);
+		expect(result.piPrompts).toEqual([]);
+	});
+
+	test("writes pi_skills JSONL lines to .pi/skills/<name>/SKILL.md", async () => {
+		const { fs, writes, mkdirCalls } = recorder();
+		const section = [
+			JSON.stringify({ name: "refactor", body: "# Refactor\nguidance here" }),
+			JSON.stringify({ name: "review", body: "# Review\nchecklist" }),
+		].join("\n");
+		const result = await seedBurrowWorkspace({
+			workspacePath: "/ws",
+			agent: makeAgent({ sections: { system: "s", pi_skills: section } }),
+			fs,
+		});
+
+		expect(result.piSkills).toEqual(["refactor", "review"]);
+		expect(mkdirCalls).toContain("/ws/.pi/skills");
+		expect(mkdirCalls).toContain("/ws/.pi/skills/refactor");
+		expect(mkdirCalls).toContain("/ws/.pi/skills/review");
+		expect(writes.get("/ws/.pi/skills/refactor/SKILL.md")).toBe("# Refactor\nguidance here\n");
+		expect(writes.get("/ws/.pi/skills/review/SKILL.md")).toBe("# Review\nchecklist\n");
+	});
+
+	test("preserves a body that already ends with a newline (pi_skills)", async () => {
+		const { fs, writes } = recorder();
+		const section = JSON.stringify({ name: "x", body: "body\n" });
+		await seedBurrowWorkspace({
+			workspacePath: "/ws",
+			agent: makeAgent({ sections: { system: "s", pi_skills: section } }),
+			fs,
+		});
+		expect(writes.get("/ws/.pi/skills/x/SKILL.md")).toBe("body\n");
+	});
+
+	test("writes pi_prompts JSONL lines to .pi/prompts/<name>.md", async () => {
+		const { fs, writes, mkdirCalls } = recorder();
+		const section = [
+			JSON.stringify({ name: "summary", body: "Summarize the diff." }),
+			JSON.stringify({ name: "deep-dive", body: "Investigate root cause." }),
+		].join("\n");
+		const result = await seedBurrowWorkspace({
+			workspacePath: "/ws",
+			agent: makeAgent({ sections: { system: "s", pi_prompts: section } }),
+			fs,
+		});
+
+		expect(result.piPrompts).toEqual(["deep-dive", "summary"]);
+		expect(mkdirCalls).toContain("/ws/.pi/prompts");
+		expect(writes.get("/ws/.pi/prompts/summary.md")).toBe("Summarize the diff.\n");
+		expect(writes.get("/ws/.pi/prompts/deep-dive.md")).toBe("Investigate root cause.\n");
+	});
+
+	test("rejects malformed pi_skills lines with RunSpawnError", async () => {
+		const { fs } = recorder();
+		await expect(
+			seedBurrowWorkspace({
+				workspacePath: "/ws",
+				agent: makeAgent({ sections: { system: "s", pi_skills: "not json" } }),
+				fs,
+			}),
+		).rejects.toBeInstanceOf(RunSpawnError);
+	});
+
+	test("rejects pi_skills lines without a non-empty name", async () => {
+		const { fs } = recorder();
+		await expect(
+			seedBurrowWorkspace({
+				workspacePath: "/ws",
+				agent: makeAgent({
+					sections: { system: "s", pi_skills: JSON.stringify({ body: "x" }) },
+				}),
+				fs,
+			}),
+		).rejects.toBeInstanceOf(RunSpawnError);
+	});
+
+	test("rejects pi_skills lines without a string body", async () => {
+		const { fs } = recorder();
+		await expect(
+			seedBurrowWorkspace({
+				workspacePath: "/ws",
+				agent: makeAgent({
+					sections: { system: "s", pi_skills: JSON.stringify({ name: "x" }) },
+				}),
+				fs,
+			}),
+		).rejects.toBeInstanceOf(RunSpawnError);
+	});
+
+	test("rejects pi_skills names containing path separators or traversal", async () => {
+		const { fs } = recorder();
+		await expect(
+			seedBurrowWorkspace({
+				workspacePath: "/ws",
+				agent: makeAgent({
+					sections: {
+						system: "s",
+						pi_skills: JSON.stringify({ name: "../escape", body: "x" }),
+					},
+				}),
+				fs,
+			}),
+		).rejects.toBeInstanceOf(RunSpawnError);
+	});
+
+	test("rejects duplicate pi_skills names", async () => {
+		const { fs } = recorder();
+		const dup = [
+			JSON.stringify({ name: "x", body: "a" }),
+			JSON.stringify({ name: "x", body: "b" }),
+		].join("\n");
+		await expect(
+			seedBurrowWorkspace({
+				workspacePath: "/ws",
+				agent: makeAgent({ sections: { system: "s", pi_skills: dup } }),
+				fs,
+			}),
+		).rejects.toBeInstanceOf(RunSpawnError);
+	});
+
+	test("rejects malformed pi_prompts lines with RunSpawnError", async () => {
+		const { fs } = recorder();
+		await expect(
+			seedBurrowWorkspace({
+				workspacePath: "/ws",
+				agent: makeAgent({
+					sections: {
+						system: "s",
+						pi_prompts: `${JSON.stringify({ name: "good", body: "ok" })}\n}{garbage`,
+					},
+				}),
+				fs,
+			}),
+		).rejects.toBeInstanceOf(RunSpawnError);
 	});
 });

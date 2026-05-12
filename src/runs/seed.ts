@@ -2,7 +2,7 @@
  * Seed a burrow workspace with the agent's canopy/mulch/seeds inputs
  * (SPEC §4.3 step 3, §11.A).
  *
- * Three drops, all written directly into the burrow workspace path
+ * Five drops, all written directly into the burrow workspace path
  * (warren and burrow share the container filesystem, so direct writes
  * are the "or equivalent" of `burrow exec` from §11.A):
  *
@@ -19,6 +19,17 @@
  *
  *   `.seeds/workflow.txt` — the workflow body verbatim. Seeds tooling
  *      consumes it; warren is just the courier.
+ *
+ *   `.pi/skills/<name>/SKILL.md` — one file per `pi_skills` JSONL line
+ *      `{name, body}`. Pi reads SKILL.md from each skill directory; the
+ *      canopy section is one envelope-per-line so a single canopy
+ *      section can ship many skills without inventing a new artifact
+ *      type. Bad lines (non-JSON, missing/invalid `name` or `body`)
+ *      abort seeding with the same RunSpawnError shape as expertise_seed.
+ *
+ *   `.pi/prompts/<name>.md` — same JSONL `{name, body}` shape as
+ *      pi_skills but flat (one .md per prompt, no per-prompt
+ *      directory).
  *
  * Mkdir + writeFile are injectable so unit tests don't touch disk. The
  * default impls call `fs/promises` directly with `recursive: true` and
@@ -46,6 +57,8 @@ export interface SeedBurrowWorkspaceResult {
 	readonly canopyPath: string;
 	readonly mulchDomains: readonly string[];
 	readonly workflowPath: string | null;
+	readonly piSkills: readonly string[];
+	readonly piPrompts: readonly string[];
 }
 
 export async function seedBurrowWorkspace(
@@ -63,7 +76,19 @@ export async function seedBurrowWorkspace(
 		input.agent.sections.workflow,
 		fs,
 	);
-	return { canopyPath, mulchDomains, workflowPath };
+	const piSkills = await writePiArtifacts(
+		input.workspacePath,
+		input.agent.sections.pi_skills,
+		fs,
+		"skill",
+	);
+	const piPrompts = await writePiArtifacts(
+		input.workspacePath,
+		input.agent.sections.pi_prompts,
+		fs,
+		"prompt",
+	);
+	return { canopyPath, mulchDomains, workflowPath, piSkills, piPrompts };
 }
 
 async function writeCanopyAgent(
@@ -145,6 +170,84 @@ async function writeWorkflowTemplate(
 	await fs.mkdirp(dirname(path));
 	await fs.writeFile(path, body.endsWith("\n") ? body : `${body}\n`);
 	return path;
+}
+
+type PiArtifactKind = "skill" | "prompt";
+
+async function writePiArtifacts(
+	workspacePath: string,
+	body: string | undefined,
+	fs: SeedFs,
+	kind: PiArtifactKind,
+): Promise<readonly string[]> {
+	if (body === undefined || body.trim() === "") return [];
+	const sectionName = kind === "skill" ? "pi_skills" : "pi_prompts";
+
+	const entries: Array<{ name: string; body: string }> = [];
+	const seen = new Set<string>();
+	const lines = body.split("\n");
+	for (let i = 0; i < lines.length; i++) {
+		const raw = lines[i];
+		if (raw === undefined) continue;
+		const line = raw.trim();
+		if (line === "") continue;
+		let parsed: unknown;
+		try {
+			parsed = JSON.parse(line);
+		} catch (err) {
+			throw new RunSpawnError(
+				`${sectionName} line ${i + 1} is not valid JSON: ${formatError(err)}`,
+				{ recoveryHint: `fix the canopy prompt's ${sectionName} section` },
+			);
+		}
+		if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+			throw new RunSpawnError(
+				`${sectionName} line ${i + 1} is not a JSON object: ${truncate(line, 80)}`,
+			);
+		}
+		const obj = parsed as { name?: unknown; body?: unknown };
+		if (typeof obj.name !== "string" || obj.name === "") {
+			throw new RunSpawnError(`${sectionName} line ${i + 1} is missing a non-empty "name" field`);
+		}
+		if (!isSafeArtifactName(obj.name)) {
+			throw new RunSpawnError(
+				`${sectionName} line ${i + 1} has unsafe "name" ${JSON.stringify(obj.name)} (no path separators, "." or "..")`,
+			);
+		}
+		if (typeof obj.body !== "string") {
+			throw new RunSpawnError(`${sectionName} line ${i + 1} is missing a string "body" field`);
+		}
+		if (seen.has(obj.name)) {
+			throw new RunSpawnError(
+				`${sectionName} line ${i + 1} duplicates name ${JSON.stringify(obj.name)}`,
+			);
+		}
+		seen.add(obj.name);
+		entries.push({ name: obj.name, body: obj.body });
+	}
+
+	if (entries.length === 0) return [];
+
+	const baseDir = join(workspacePath, ".pi", kind === "skill" ? "skills" : "prompts");
+	await fs.mkdirp(baseDir);
+
+	for (const entry of entries) {
+		const target =
+			kind === "skill" ? join(baseDir, entry.name, "SKILL.md") : join(baseDir, `${entry.name}.md`);
+		if (kind === "skill") {
+			await fs.mkdirp(dirname(target));
+		}
+		await fs.writeFile(target, entry.body.endsWith("\n") ? entry.body : `${entry.body}\n`);
+	}
+
+	return entries.map((e) => e.name).sort();
+}
+
+function isSafeArtifactName(name: string): boolean {
+	if (name === "." || name === "..") return false;
+	if (name.includes("/") || name.includes("\\")) return false;
+	if (name.includes("\0")) return false;
+	return true;
 }
 
 function truncate(s: string, max: number): string {
