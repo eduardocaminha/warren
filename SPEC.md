@@ -15,9 +15,9 @@ V1 scope is the **manual run path** plus the **cron half of the scheduler**: con
 
 ## 1. TL;DR
 
-Warren is the platform layer for the os-eco agent ecosystem. It composes the four data-plane tools (canopy, mulch, seeds, sapling) and the runtime substrate (burrow) into a single deployable system that runs on a home server or in the cloud.
+Warren is a self-hostable control plane for ephemeral coding agents. A user points it at a GitHub repo, picks an agent, writes a prompt; warren spawns the agent inside a sandbox, streams events back to the UI, lets the user steer mid-run, then pushes the workspace branch. **One container, one volume, one HTTP API, one UI.**
 
-A user defines a custom agent as a versioned canopy prompt (with structured sections like `system`, `skills`, `expertise_seed`, `burrow_config`). Warren spawns that agent against a project repo inside a burrow sandbox, streams events back, persists outcomes, and lets the agent self-manage its own work queue (seeds), self-repair from past failures (mulch), and self-improve by recording new expertise. A web UI sits on top of the same HTTP API that any external orchestrator could call.
+The fresh-install path is standalone: the built-in `claude-code` agent ships inline, so a user with a GitHub URL and an Anthropic key can dispatch a run end-to-end with no other tooling. Warren also bundles a small set of [os-eco](https://github.com/jayminwest/os-eco) tools as opt-in built-in features — versioned prompt libraries via canopy, persistent agent memory via mulch, an integrated issue queue via seeds, a steerable alternative harness via sapling — each surfaced only when the project or operator opts in. The runtime substrate is [burrow](https://github.com/jayminwest/burrow), a sibling process inside the container that warren talks to over a unix socket.
 
 V1 is single-user, single-host: clone warren, `docker compose up`, browser at `localhost:8080`. The same image runs on Fly.io with a volume and three secrets. No cross-tenant story, no SaaS, no auth beyond a bearer token.
 
@@ -35,30 +35,30 @@ $ open http://homeserver.local:8080
 ```
 
 In the UI:
-1. **Pick an agent** — Warren ships built-in `claude-code` and `sapling` agents inline (`src/registry/builtins/`), so a fresh install can dispatch a run without further setup. To layer a custom library on top, set `CANOPY_REPO_URL` and Warren clones your canopy repo; every prompt tagged `agent` becomes a library-source agent that overrides any same-named built-in (`refactor-bot`, `docs-bot`, `sre-bot`, ...).
+1. **Pick an agent** — Warren ships built-in `claude-code` and `sapling` agents inline (`src/registry/builtins/`), so a fresh install can dispatch a run without further setup. Power users who want a custom prompt library set `CANOPY_REPO_URL`; warren clones the repo and every prompt tagged `agent` becomes a library-source agent that overrides any same-named built-in.
 2. **Add project** — paste a GitHub URL. Warren clones it under `/data/projects/`.
-3. **Spawn run** — pick agent + project + prompt. Warren provisions a burrow, renders the canopy agent into it, dispatches the run, streams events to the UI.
-4. **Watch and steer** — live event tail, send steering messages, see seeds the agent files for itself, see mulch records the agent records as it learns.
+3. **Spawn run** — pick agent + project + prompt. Warren provisions a sandbox, seeds the rendered agent into it, dispatches the run, streams events to the UI.
+4. **Watch and steer** — live event tail, send steering messages, cancel cleanly. If the project opted into the agent-memory feature, the UI also surfaces mulch records the agent recorded; if it opted into the issue-queue feature, it surfaces seeds the agent filed or closed.
 5. **Schedule** — "every 6 hours, run docs-bot against repo X" via `.warren/triggers.yaml`, or "dispatch this seed at 3am" via `extensions.scheduledFor`. Cron half shipped in V1 (R-06, §11.I); webhook/event-driven triggers (e.g. "on PR open, run reviewer-bot") remain V2.
 
 ### 2.2 What Warren is
 
 - The **control plane**: one process, one HTTP API, one volume.
-- The **glue**: shells out to mulch/seeds/canopy/sapling CLIs, talks to burrow over its HTTP API.
+- The **agent registry**: built-in agents inline, plus optional canopy library on top.
+- The **dispatcher**: provisions sandboxes via the runtime, streams events back, reaps results.
 - The **UI**: web frontend served from the same process.
-- The **agent registry**: reads canopy, surfaces installable roles.
 - The **scheduler**: in-process cron tick + scheduled-seed dispatch (V1, §11.I). Webhook/event-triggered runs deferred to V2.
+
+Warren bundles four os-eco data-plane tools (canopy, mulch, seeds, sapling) as built-in features, but a fresh install does not require a user to adopt any of them — `claude-code` ships inline and reads/writes nothing outside the sandbox. The integrations light up when the operator sets `CANOPY_REPO_URL`, or when a project contains `.mulch/` / `.seeds/`.
 
 ### 2.3 What Warren is not
 
-- Not a coding agent. Burrow runs them; sapling/claude-code are them; warren orchestrates.
-- Not a sandbox. Burrow owns isolation.
-- Not an issue tracker. Seeds owns the work queue.
-- Not a prompt manager. Canopy owns the agent definitions.
-- Not an expertise store. Mulch owns memory.
+- Not a coding agent. The runtime runs them; sapling/claude-code are them; warren orchestrates.
+- Not a sandbox. The runtime owns isolation.
+- Not a hard dependency on the os-eco data-plane tools. They are bundled features, not required infrastructure — see §2.2 above.
 - Not a multi-tenant SaaS. The deployment unit is one team / one org self-hosting one warren — never a shared hosted service. V1 ships single-user (one bearer token, one box); V2/V3 layer in SSO + per-user identity + remote workers so a team of 50 ICs can share one warren without sharing one credential or one machine (R-09, R-12, §11.J).
 
-Warren is a thin coordinator — most of the value is in the four CLIs and burrow. Warren's job is to compose them into a deployable system with a UI on top.
+Warren is a thin coordinator — most of the value is in the runtime plus whichever data-plane features the project opts into. Warren's job is to compose them into a deployable system with a UI on top.
 
 ---
 

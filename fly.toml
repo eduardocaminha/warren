@@ -13,9 +13,11 @@
 #       WARREN_API_TOKEN=$(openssl rand -hex 32) \
 #       BURROW_API_TOKEN=$BURROW_TOKEN \
 #       WARREN_BURROW_TOKEN=$BURROW_TOKEN \
-#       CANOPY_REPO_URL=https://github.com/<you>/agents.git \
 #       ANTHROPIC_API_KEY=... \
 #       GITHUB_TOKEN=...
+#   # Optional — only if you want a custom canopy agent library on top
+#   # of the built-in claude-code + sapling agents:
+#   #     fly secrets set CANOPY_REPO_URL=https://github.com/<you>/agents.git
 #   fly deploy
 #
 # BURROW_API_TOKEN (read by `burrow serve`) and WARREN_BURROW_TOKEN

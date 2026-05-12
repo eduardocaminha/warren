@@ -1,7 +1,7 @@
 {
 	"name": "@os-eco/warren-cli",
 	"version": "0.1.6",
-	"description": "Control plane and UI for cloud-based custom agents (canopy + mulch + seeds + sapling, on burrow)",
+	"description": "Self-hostable control plane for ephemeral cloud agents — spawn sandboxed agents at your GitHub repos, watch them work live, steer them, get a branch back",
 	"type": "module",
 	"bin": {
 		"warren": "./src/cli/main.ts",

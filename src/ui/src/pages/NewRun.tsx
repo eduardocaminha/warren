@@ -90,7 +90,7 @@ export function NewRunPage() {
 			<header>
 				<h1 className="text-2xl font-semibold tracking-tight">Dispatch run</h1>
 				<p className="text-sm text-(--color-muted-foreground)">
-					Spawn a canopy agent against a project repo inside a fresh burrow sandbox.
+					Spawn an agent against a project repo inside a fresh sandbox.
 				</p>
 			</header>
 

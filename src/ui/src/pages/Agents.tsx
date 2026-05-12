@@ -34,8 +34,9 @@ export function AgentsPage() {
 				<div>
 					<h1 className="text-2xl font-semibold tracking-tight">Agents</h1>
 					<p className="text-sm text-(--color-muted-foreground)">
-						Canopy prompts tagged <code>agent: true</code>. Refresh re-clones the canopy
-						library.
+						Agents available for dispatch. <code>claude-code</code> and{" "}
+						<code>sapling</code> ship inline; refresh re-clones the optional canopy
+						library for custom agents.
 					</p>
 				</div>
 				<Button
@@ -95,8 +96,11 @@ export function AgentsPage() {
 						</p>
 					) : agents.data?.agents.length === 0 ? (
 						<p className="p-6 text-sm text-(--color-muted-foreground)">
-							No agents registered. Click <strong>Refresh registry</strong> to clone
-							your canopy library.
+							No agents registered. Built-in <code>claude-code</code> and{" "}
+							<code>sapling</code> should appear here automatically — if not, check{" "}
+							<code>warren doctor</code>. To layer a custom canopy library on top,
+							set <code>CANOPY_REPO_URL</code> and click{" "}
+							<strong>Refresh registry</strong>.
 						</p>
 					) : (
 						<Table>

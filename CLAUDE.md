@@ -1,10 +1,36 @@
 # Warren
 
-Control plane and UI for cloud-based custom agents. Composes the four
-os-eco data-plane tools (canopy, mulch, seeds, sapling) on top of the
-[burrow](https://github.com/jayminwest/burrow) sandbox runtime into a
-single deployable system: one container, one volume, one HTTP API,
-one UI.
+Self-hostable control plane for ephemeral cloud agents. A user points
+warren at a GitHub repo, picks an agent, writes a prompt; warren spawns
+the agent inside a sandbox, streams events back to the UI, lets the user
+steer mid-run, then pushes the workspace branch. One container, one
+volume, one HTTP API, one UI.
+
+The fresh-install path is standalone: the built-in `claude-code` agent
+ships inline (`src/registry/builtins/`), so a user with a GitHub URL and
+an Anthropic key can dispatch a run end-to-end with no other tooling.
+
+Warren also bundles four [os-eco](https://github.com/jayminwest/os-eco)
+data-plane tools as **opt-in built-in features**, not required
+infrastructure:
+
+- **canopy** — versioned prompt libraries for custom agents. Activated by
+  setting `CANOPY_REPO_URL`; library agents override built-ins by name.
+- **mulch** — persistent agent memory across runs. Activated by the
+  project having a `.mulch/` directory.
+- **seeds** — integrated issue queue agents read from and write to.
+  Activated by the project having a `.seeds/` directory.
+- **sapling** — alternative steerable coding harness. Ships inline as a
+  built-in agent alongside claude-code.
+
+Same code, same depth — only the user-facing framing surfaces them as
+opt-in. When you change cross-cutting docs (README, SPEC §1/§2, package
+description), keep the standalone path primary and the integrations as
+features that light up when used.
+
+The runtime substrate is [burrow](https://github.com/jayminwest/burrow);
+warren and burrow are co-tenanted inside the container and share a unix
+socket — see "Relationship to burrow" below.
 
 [SPEC.md](SPEC.md) is the V1 design record. The manual-run path
 (`warren run <agent> <project> -p "..."`) and the cron half of the

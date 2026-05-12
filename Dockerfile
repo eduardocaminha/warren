@@ -2,8 +2,9 @@
 #
 # Two-stage build:
 #   1. ui-builder — build the React/Vite SPA into src/ui/dist.
-#   2. runtime    — bun + bwrap + uidmap, warren source, the four os-eco
-#                   CLIs warren shells out to plus burrow itself, and the
+#   2. runtime    — bun + bwrap + uidmap, warren source, burrow itself
+#                   plus the bundled os-eco CLIs warren shells out to for
+#                   opt-in features (canopy/mulch/seeds/sapling), and the
 #                   SPA bundle copied from stage 1.
 #
 # The supervisor (src/supervisor/main.ts) is the ENTRYPOINT — it owns
@@ -41,10 +42,13 @@ RUN apt-get update \
         curl \
     && rm -rf /var/lib/apt/lists/*
 
-# os-eco CLIs warren shells out to during run setup, reap, and project
+# Bundled CLIs warren shells out to during run setup, reap, and project
 # management, plus burrow itself (the supervisor execs `burrow serve`).
-# Versions track each tool's current release; bumping them is a deliberate
-# image-rebuild decision.
+# The four os-eco CLIs (canopy/seeds/mulch/sapling) back warren's opt-in
+# features — they ship in every image so the features light up the moment
+# a project or operator opts in, with no separate install. Versions track
+# each tool's current release; bumping them is a deliberate image-rebuild
+# decision.
 #
 # BUN_INSTALL=/usr/local relocates the global package store from the default
 # /root/.bun/install/global into /usr/local/install/global. Burrow's bwrap
