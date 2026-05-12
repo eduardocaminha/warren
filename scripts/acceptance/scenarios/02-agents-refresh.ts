@@ -30,8 +30,9 @@ export const scenario: Scenario = {
 	async run(ctx) {
 		const http = new WarrenHttp({ baseUrl: ctx.warrenUrl, token: ctx.token });
 
-		// Initial /agents — only the boot-seeded built-ins (claude-code, sapling)
-		// are registered; no library-sourced agents until the first refresh.
+		// Initial /agents — only the boot-seeded built-ins (claude-code,
+		// sapling, pi) are registered; no library-sourced agents until the
+		// first refresh.
 		const before = await http.expectJson<{ agents: AgentRow[] }>("GET", "/agents", 200);
 		const beforeLibrary = before.agents.filter((a) => a.source !== "builtin");
 		assertEqual(

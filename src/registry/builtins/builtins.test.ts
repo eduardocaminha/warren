@@ -6,15 +6,17 @@ import {
 	BUILTIN_AGENT_NAMES,
 	BUILTIN_AGENTS,
 	CLAUDE_CODE_BUILTIN,
+	PI_BUILTIN,
 	readAgentSource,
 	SAPLING_BUILTIN,
 	seedBuiltinAgents,
 } from "./index.ts";
 
 describe("BUILTIN_AGENTS", () => {
-	test("includes claude-code and sapling", () => {
+	test("includes claude-code, sapling, and pi", () => {
 		expect(BUILTIN_AGENT_NAMES.has("claude-code")).toBe(true);
 		expect(BUILTIN_AGENT_NAMES.has("sapling")).toBe(true);
+		expect(BUILTIN_AGENT_NAMES.has("pi")).toBe(true);
 	});
 
 	test("each builtin has a non-empty system section (warren's required schema field)", () => {
@@ -51,6 +53,7 @@ describe("readAgentSource", () => {
 	test("returns 'builtin' when frontmatter.source === 'builtin'", () => {
 		expect(readAgentSource(CLAUDE_CODE_BUILTIN)).toBe("builtin");
 		expect(readAgentSource(SAPLING_BUILTIN)).toBe("builtin");
+		expect(readAgentSource(PI_BUILTIN)).toBe("builtin");
 	});
 
 	test("returns 'library' for arbitrary library-shaped renderedJson", () => {

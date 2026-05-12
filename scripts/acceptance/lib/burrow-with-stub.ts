@@ -127,6 +127,24 @@ const STUB_AGENT_CONFIG = {
 	inboxDelivery: "none" as const,
 };
 
+// Pi (`@earendil-works/pi-coding-agent`) is the third built-in coding-agent
+// runtime warren ships (alongside claude-code + sapling). Burrow's piRuntime
+// is the cross-repo half of pl-4374 (warren-0e06) and is not yet shipped in
+// @os-eco/burrow-cli; until it lands, the acceptance harness registers a
+// declarative pi agent that reuses the stub-shell script so scenario 16 has
+// something to dispatch through. Same id ('pi') warren forwards as the burrow
+// runtime id at burrow.up time (mx-7352f4).
+const PI_AGENT_CONFIG = {
+	id: "pi",
+	displayName: "Pi Coding Agent (acceptance stub)",
+	command: "bash",
+	args: ["./tools/stub-agent.sh", "{{prompt}}"],
+	promptDelivery: "arg" as const,
+	outputFormat: "raw-text" as const,
+	supportsResume: false,
+	inboxDelivery: "none" as const,
+};
+
 async function main(): Promise<number> {
 	const args = parseArgs(process.argv.slice(2));
 
@@ -140,8 +158,9 @@ async function main(): Promise<number> {
 		// Register the declarative stub agent so the dispatcher can resolve
 		// `agentId: "stub-shell"` when warren spawns a run. Identical to what
 		// `burrow.toml [[agents]]` *would* do if upstream auto-registered it.
-		const runtime = loadAgentConfig(STUB_AGENT_CONFIG);
-		client.agents.register(runtime);
+		client.agents.register(loadAgentConfig(STUB_AGENT_CONFIG));
+		// Same shape for pi until burrow's piRuntime ships (warren-0e06).
+		client.agents.register(loadAgentConfig(PI_AGENT_CONFIG));
 
 		const serveOpts: Parameters<typeof runServeCommand>[0]["options"] = {};
 		if (args.socket !== undefined) serveOpts.socket = args.socket;

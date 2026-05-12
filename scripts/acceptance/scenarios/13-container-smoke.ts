@@ -16,8 +16,8 @@
  *     seccomp=unconfined, systempaths=unconfined, cap_add=SYS_ADMIN),
  *   - warren and burrow start as siblings on the in-container socket,
  *   - /healthz responds 200 (auth-exempt),
- *   - GET /agents (with auth) returns the two built-in agents,
- *     `claude-code` and `sapling`, both with `source: "builtin"`,
+ *   - GET /agents (with auth) returns the three built-in agents,
+ *     `claude-code`, `sapling`, and `pi`, all with `source: "builtin"`,
  *   - /readyz returns a structured `{ ok, checks: [...] }` body
  *     (we don't assert ok=true; bwrap probe behaviour on macOS Docker
  *     Desktop is host-dependent — see body comment below).
@@ -71,24 +71,22 @@ export const scenario: Scenario = {
 		const unauth = await fetch(http.url("/agents"));
 		assertEqual(unauth.status, 401, "GET /agents returns 401 without bearer token");
 
-		// GET /agents (authenticated) returns the two built-in agents the
-		// boot path seeds before exposing /healthz. The container has no
-		// canopy library configured (CANOPY_REPO_URL is blanked by the
-		// override), so every row should carry `source: "builtin"`.
+		// GET /agents (authenticated) returns the built-in agents the boot
+		// path seeds before exposing /healthz. The container has no canopy
+		// library configured (CANOPY_REPO_URL is blanked by the override),
+		// so every row should carry `source: "builtin"`.
 		const agentsBody = await http.expectJson<AgentsResponse>("GET", "/agents", 200);
 		assertTrue(
 			Array.isArray(agentsBody.agents),
 			`GET /agents body shape unexpected: ${JSON.stringify(agentsBody).slice(0, 200)}`,
 		);
 		const names = new Set(agentsBody.agents.map((a) => a.name));
-		assertTrue(
-			names.has("claude-code"),
-			`GET /agents missing builtin claude-code; got [${[...names].join(", ")}]`,
-		);
-		assertTrue(
-			names.has("sapling"),
-			`GET /agents missing builtin sapling; got [${[...names].join(", ")}]`,
-		);
+		for (const expected of ["claude-code", "sapling", "pi"]) {
+			assertTrue(
+				names.has(expected),
+				`GET /agents missing builtin ${expected}; got [${[...names].join(", ")}]`,
+			);
+		}
 		const nonBuiltin = agentsBody.agents.filter((a) => a.source !== "builtin");
 		assertEqual(
 			nonBuiltin.length,
