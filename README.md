@@ -17,13 +17,13 @@ Engineering teams self-hosting their own agent infrastructure — not a SaaS, no
 
 ## Status
 
-V1 (`0.1.6`). The manual-run path is end-to-end validated against a deployed Fly.io instance ([SPEC §11.E](SPEC.md#11e-first-run-validation-2026-05-09)) and exercised by 15 scenario-based acceptance tests in [`scripts/acceptance/`](scripts/acceptance/). The cron half of the scheduler now ships in V1 ([SPEC §11.I](SPEC.md)); GitHub webhook triggers and library API exports remain deferred to V2. V1 is single-user / single-host as shipped; the [org-readiness cluster](ROADMAP.md#org-readiness-cluster-r-12--r-18) (SSO, remote burrow workers, Postgres backend, MCP, audit, budgets, GitHub App) is the active forward direction.
+V1 (`0.1.7`). The manual-run path is end-to-end validated against a deployed Fly.io instance ([SPEC §11.E](SPEC.md#11e-first-run-validation-2026-05-09)) and exercised by 16 scenario-based acceptance tests in [`scripts/acceptance/`](scripts/acceptance/). The cron half of the scheduler now ships in V1 ([SPEC §11.I](SPEC.md)); GitHub webhook triggers and library API exports remain deferred to V2. V1 is single-user / single-host as shipped; the [org-readiness cluster](ROADMAP.md#org-readiness-cluster-r-12--r-18) (SSO, remote burrow workers, Postgres backend, MCP, audit, budgets, GitHub App) is the active forward direction.
 
 ## What you get
 
 - **One image, one volume.** The supervisor (`src/supervisor/main.ts`) is the container ENTRYPOINT — it spawns the sandbox runtime first, waits for the unix socket, then spawns warren. SIGTERM/SIGINT forward to both children; the runtime restarts under a 5-in-60s budget on unexpected exit.
 - **Native sandboxing per run.** Every run gets a fresh `bwrap`-isolated workspace under `/data/burrow/`. The host is unreachable; warren talks to the runtime over a unix socket with a shared bearer token.
-- **Built-in agents.** `claude-code` and `sapling` ship inline (`src/registry/builtins/`) — no library, no config, no extra setup to dispatch a run.
+- **Built-in agents.** `claude-code`, `sapling`, and `pi` ship inline (`src/registry/builtins/`) — no library, no config, no extra setup to dispatch a run.
 - **Live event stream.** NDJSON events are persisted to warren's SQLite log and tailed over `GET /runs/:id/events?follow=1`. The UI, CLI (`warren run`), and HTTP clients all consume the same stream.
 - **Steerable mid-run.** `POST /runs/:id/steer` lands a message in the agent's inbox; the next turn picks it up. `POST /runs/:id/cancel` aborts cleanly.
 - **Scheduled runs.** `.warren/triggers.yaml` defines cron triggers per project; the in-process scheduler dispatches them on the same composition path as manual runs.
@@ -74,7 +74,7 @@ Warren bundles a small set of [os-eco](https://github.com/jayminwest/os-eco) too
 
 ### Custom agents — bring your own prompt library
 
-The built-in `claude-code` and `sapling` agents cover the common case. To define custom agents as versioned prompts (with inheritance, mixins, and per-agent sandbox config), point warren at a [canopy](https://github.com/jayminwest/canopy) repo:
+The built-in `claude-code`, `sapling`, and `pi` agents cover the common case. To define custom agents as versioned prompts (with inheritance, mixins, and per-agent sandbox config), point warren at a [canopy](https://github.com/jayminwest/canopy) repo:
 
 ```bash
 fly secrets set CANOPY_REPO_URL=https://github.com/<you>/agents.git
@@ -175,7 +175,7 @@ bun run ui:install
 bun run ui:dev
 ```
 
-The acceptance harness in [`scripts/acceptance/`](scripts/acceptance/) drives 15 scenario-based end-to-end runs against a live container — covering boot health, agent refresh, project lifecycle, run spawn/stream/cancel/steer, restart recovery, mulch + seeds round-tripping, doctor exit codes, supervisor restart-budget, container-mode parity, `.warren/` config lifecycle, and cron + scheduled-for trigger dispatch. See [ACCEPTANCE.md](ACCEPTANCE.md) for the runbook.
+The acceptance harness in [`scripts/acceptance/`](scripts/acceptance/) drives 16 scenario-based end-to-end runs against a live container — covering boot health, agent refresh, project lifecycle, run spawn/stream/cancel/steer, restart recovery, mulch + seeds round-tripping, doctor exit codes, supervisor restart-budget, container-mode parity, `.warren/` config lifecycle, cron + scheduled-for trigger dispatch, and the pi built-in parity smoke. See [ACCEPTANCE.md](ACCEPTANCE.md) for the runbook.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for branch naming, testing conventions, and PR expectations.
 

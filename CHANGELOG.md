@@ -7,6 +7,131 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.7] — 2026-05-13
+
+Pi lands as the third inline built-in (alongside `claude-code` and
+`sapling`), and warren grows the surrounding surface for it:
+multi-provider frontmatter + per-run overrides, per-run cost + token
+accounting on a new `runs.cost_usd` / `tokens_*` column family
+(migration 0006), pi-namespaced canopy sections (`pi_skills` /
+`pi_prompts`) materialized into the burrow workspace, and UI
+rendering for pi's runtime event sub-kinds. Burrow CLI bumps
+`0.2.7 → 0.2.8`, which ships the matching `piRuntime` so dispatching
+`agent='pi'` round-trips end-to-end in production. Acceptance grows
+scenario 16 (pi parity smoke). Docs reposition warren as a standalone
+agent platform (the four os-eco tools framed as opt-in built-in
+features, not required infrastructure) and the org-readiness cluster
+(R-12 – R-18) joins the active forward direction in SPEC §11.J.
+
+### Added
+
+- **`feat(registry)`** — `pi` built-in agent ships inline alongside
+  `claude-code` and `sapling` (warren-d18e, pl-4374 step 2). `PI_BUILTIN`
+  mirrors `SAPLING_BUILTIN`'s parity shape (system + burrow_config
+  sections, `network=open`, `frontmatter.source='builtin'`). Wired into
+  `BUILTIN_AGENTS`, `builtins.test.ts`, the container-smoke scenario,
+  and the Agents UI page header / empty-state.
+- **`feat(registry)`** — `AgentDefinition.frontmatter.provider` and
+  `frontmatter.model` are now well-known optional string fields. Two
+  helpers: `readProviderFrontmatter()` narrows the open frontmatter bag
+  to typed `{provider?, model?}` strings; `withProviderOverrides()`
+  folds operator-supplied per-run overrides onto a freshly-cloned
+  `AgentDefinition` (empty/whitespace are no-ops). `spawnRun` applies
+  overrides **before** creating the run row, so both
+  `runs.rendered_agent_json` and the `.canopy/agent.json` seeded into
+  the burrow workspace carry the override-applied frontmatter. Base
+  agent row stays untouched — overrides are per-run, not per-agent
+  (warren-f8c0, pl-4374 step 4).
+- **`feat(server)`** — `POST /runs` accepts optional
+  `providerOverride` + `modelOverride` strings on the request body;
+  `CreateRunInput` on the wire mirrors them.
+- **`feat(ui)`** — `NewRunPage` surfaces a paired Provider/Model 2-col
+  grid above the prompt textarea, auto-filling from the selected
+  agent's frontmatter until the operator types. Empties are trimmed off
+  the wire (warren-f8c0).
+- **`feat(runs)`** — `seedBurrowWorkspace` materializes pi-specific
+  canopy sections alongside `.canopy/agent.json`, `.mulch/expertise`,
+  and `.seeds/workflow.txt`. `pi_skills` is a JSONL stream of
+  `{name, body}` envelopes that render to
+  `.pi/skills/<name>/SKILL.md` (one subdir per skill); `pi_prompts`
+  renders to `.pi/prompts/<name>.md` (flat). Malformed JSON,
+  missing/empty name, non-string body, duplicate names, and unsafe
+  names (path separators, `.`, `..`) abort seeding with
+  `RunSpawnError`, mirroring the existing `expertise_seed` shape. No
+  behavior change for non-pi agents (warren-846b, pl-4374 step 3).
+- **`feat(db)`** — migration 0006 adds nullable `cost_usd` +
+  `tokens_input` / `tokens_output` / `tokens_cache_read` /
+  `tokens_cache_write` to `runs`. `RunsRepo.attachStats` merges
+  partial stat patches into the row using the same undefined-omitted /
+  explicit-null-clears shape as `attachBurrow` (warren-a7dc).
+- **`feat(runs)`** — `bridgeRunStream` gains an optional
+  `PiStatsClient` that snapshots `get_session_stats` at run-start +
+  `agent_end` and persists the **delta**. Resumed pi sessions would
+  otherwise double-count prior turns; the delta keeps per-run figures
+  honest (warren-a7dc).
+- **`feat(ui)`** — `RunDetail` shows a cost badge with a tokens
+  tooltip; `Runs.tsx` exposes an opt-in Cost column persisted in
+  localStorage. Non-pi runs leave every new column null and render
+  blank (warren-a7dc).
+- **`feat(ui)`** — `EventLine` detects pi-runtime sub-kinds
+  (`compaction_start/end`, `auto_retry_start/end`, `extension_error`,
+  `queue_update`) by peeking at `payload.type` when `event.kind` is
+  `state_change` / `telemetry` — burrow's pi parser collapses pi's
+  wide vocabulary into the stable taxonomy and stores the original
+  type in the payload. `extension_error` tints rose like stderr.
+  Kind-direct matches are honored too, so a future burrow release
+  promoting any of these to first-class kinds works without a UI rev
+  (warren-70af).
+- **`test(acceptance)`** — scenario 16
+  (`scripts/acceptance/scenarios/16-pi-parity-smoke.ts`) dispatches
+  `POST /runs agent='pi'` against the in-proc warren+burrow stack and
+  asserts (a) `GET /agents/pi` returns `source='builtin'`, (b)
+  `burrowId` / `burrowRunId` populated, (c) frozen
+  `renderedAgentJson`, (d) ≥1 event lands in the events table. The
+  acceptance harness registers a declarative pi stub via
+  `burrow-with-stub.ts` (deterministic, no pi binary needed in CI);
+  production warren talks to the real `piRuntime` in burrow 0.2.8
+  (warren-d18e, warren-0e06).
+
+### Changed
+
+- **Burrow CLI bumped `0.2.7 → 0.2.8`** — burrow v0.2.8 (released
+  2026-05-13) lands the built-in `piRuntime` (burrow-8aff, pl-5198).
+  Pin bumped in all three lockstep locations (`package.json` +
+  `bun.lock` + `Dockerfile` global install — see CLAUDE.md
+  "Relationship to burrow") so warren's `BUILT_IN_RUNTIMES` sees pi at
+  boot. Closes warren-0e06's four-condition gate end-to-end.
+
+### Docs
+
+- **`docs(readme)`** — repositions warren as a standalone agent
+  platform (warren-e576). Leads with what warren does (spawn sandboxed
+  agents at GitHub repos, watch live, steer, get a branch) instead of
+  the four-tool composition. The os-eco data-plane tools
+  (canopy/mulch/seeds/sapling) stay bundled in every image but are
+  framed as opt-in built-in features — none required for a fresh
+  install. Same code, same depth; only the public framing changes.
+  README quickstart, SPEC §1 / §2.1 / §2.3, CLAUDE.md opener, package
+  description, Dockerfile + fly.toml comments, and Agents/NewRun
+  empty-state copy all updated in lockstep.
+- **`docs(spec)`** — new `SPEC.md` §11.J pins the **org-readiness
+  direction** (2026-05-11) into the V1 record: the seams to extend
+  warren from "one team, one box" to a 50-engineer organization
+  without forcing a fork. Covers SSO, remote burrow workers, Postgres
+  backend, MCP, audit, budgets, GitHub App. New `SPEC.md` §11.K
+  records **pi runtime support** as a frozen design entry: phased
+  landing (pl-4374), built-in shape, burrow piRuntime contract,
+  canopy sections, multi-provider surface, cost + token accounting,
+  event-model widening, MCP omission, headless API-key auth posture.
+  §1 / §2.1 / §3.2 / §4.2 / §11.B / §12 updated to name pi as the
+  third built-in.
+- **`docs(roadmap)`** — `ROADMAP.md` adds the org-readiness cluster
+  (R-12 – R-18) plus R-19 preview environments, updates R-03's
+  problem statement to list pi in the registry inventory, and logs
+  the pl-4374 summary plus the three deferred-decision records under
+  "Recently shipped". `WARREN_DEFAULT_AGENT` picks pi as a third
+  option.
+
 ## [0.1.6] — 2026-05-10
 
 R-06 lands: the cron half of the scheduler ships end-to-end. New

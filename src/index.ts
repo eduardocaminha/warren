@@ -4,4 +4,4 @@
  * `Client` class is deferred to V2 (SPEC §8.3).
  */
 
-export const VERSION = "0.1.6";
+export const VERSION = "0.1.7";
