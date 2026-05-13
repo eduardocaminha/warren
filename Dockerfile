@@ -59,7 +59,7 @@ RUN apt-get update \
 # /usr/local sits under /usr so the symlink targets resolve inside the sandbox.
 ENV BUN_INSTALL=/usr/local
 RUN bun install -g \
-    @os-eco/burrow-cli@0.2.11 \
+    @os-eco/burrow-cli@0.2.12 \
     @os-eco/canopy-cli@0.2.4 \
     @os-eco/seeds-cli@0.4.3 \
     @os-eco/mulch-cli@0.9.0 \
