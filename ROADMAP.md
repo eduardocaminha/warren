@@ -216,8 +216,8 @@ Unlocks: R-05 (roles tab can read/write project-local roles); user-creatable
 roles without forking a shared canopy repo
 
 **Problem.** Warren's registry today resolves agent roles from two sources:
-built-ins shipped in `src/registry/builtins/` (claude-code, sapling) and an
-optional shared canopy repo via `CANOPY_REPO_URL`. There's no third tier for
+built-ins shipped in `src/registry/builtins/` (claude-code, sapling, pi) and
+an optional shared canopy repo via `CANOPY_REPO_URL`. There's no third tier for
 roles that should travel with one specific project — e.g., a refactor-bot
 tuned for this codebase's conventions. Forcing project-specific roles into a
 shared canopy repo couples unrelated projects' role definitions.
@@ -1293,7 +1293,9 @@ relitigated when items become seeds issues.
   org-readiness direction (SPEC §11.J). The bearer stays as a
   service-account path once R-09 ships OIDC.
 - **Sapling for personal use, claude-code as public default.**
-  `WARREN_DEFAULT_AGENT` env var, no source change.
+  `WARREN_DEFAULT_AGENT` env var, no source change. (Pi joined as the third
+  built-in 2026-05-12 — same env-var picks it as default for multi-provider
+  / cost-reporting deployments.)
 - **Roles tab editor is raw markdown with full canopy feature set.**
   Inheritance, mixins, and partials all work. Editing a base prompt
   propagates through the whole tree on next render. Wrapping canopy in a
@@ -1352,9 +1354,29 @@ so subsequent revisions know what's already off the punch list.
   of the base branch. Surfaces the PR URL in the run row + UI.
 - **Branch ref selection in NewRun UI** (warren-7589). Users pick a base
   branch when dispatching; project refresh tracks per-branch HEAD SHAs.
-- **Built-in agents shipped inline** (`src/registry/builtins/`). `claude-code`
-  and `sapling` available without any `CANOPY_REPO_URL` configuration. Fresh
-  warren installs work out of the box.
+- **Built-in agents shipped inline** (`src/registry/builtins/`). `claude-code`,
+  `sapling`, and `pi` available without any `CANOPY_REPO_URL` configuration.
+  Fresh warren installs work out of the box.
+- **Pi built-in agent + multi-provider + cost reporting** (plan `pl-4374` /
+  warren-39c1, 2026-05-12). Third coding-agent built-in (`pi`,
+  `@earendil-works/pi-coding-agent`) shipped in seven phased steps: burrow
+  piRuntime cross-repo contract (warren-0e06), parity-shape builtin
+  (warren-d18e + acceptance scenario 16), `pi_skills` + `pi_prompts` canopy
+  sections materialized into `.pi/skills/<name>/SKILL.md` + `.pi/prompts/<name>.md`
+  via JSONL `{name, body}` envelopes (warren-846b), multi-provider surface —
+  `AgentDefinition.frontmatter.provider/model` + `POST /runs` provider/model
+  overrides + `NewRun.tsx` Inputs + burrow `envPassthrough` widening to
+  `OPENAI_API_KEY`/`GEMINI_API_KEY`/`GOOGLE_API_KEY`/`PI_API_KEY`/`GROQ_API_KEY`/
+  `MISTRAL_API_KEY`/`DEEPSEEK_API_KEY` (warren-f8c0), per-run cost tracking —
+  migration 0006 (`runs.cost_usd` + `tokens_*`) + `RunsRepo.attachStats` +
+  bridge `get_session_stats` delta consumer + RunDetail cost badge + Runs
+  Cost column (warren-a7dc), UI rendering for pi event sub-kinds
+  (`compaction_*`, `auto_retry_*`, `extension_error`, `queue_update`) in
+  RunDetail (warren-70af), and SPEC §11.K + ROADMAP entry + mulch decisions
+  (warren-f1da). Pi extensions deferred until canopy ships artifact types;
+  MCP omission documented as worldview difference (pi has no MCP — R-15 stays
+  scoped to claude-code/sapling); headless API-key-only auth posture (pi
+  `/login` OAuth flow unsupported in V1 — reconsiderable in V2 if demanded).
 - **`.warren/` directory convention** (R-02, plan `pl-5d74`, 2026-05-10).
   Per-project, git-tracked home for warren-specific config. Two files:
   `triggers.yaml` (cron entries, `kind:` discriminator leaves room for

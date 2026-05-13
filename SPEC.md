@@ -17,7 +17,7 @@ V1 scope is the **manual run path** plus the **cron half of the scheduler**: con
 
 Warren is a self-hostable control plane for ephemeral coding agents. A user points it at a GitHub repo, picks an agent, writes a prompt; warren spawns the agent inside a sandbox, streams events back to the UI, lets the user steer mid-run, then pushes the workspace branch. **One container, one volume, one HTTP API, one UI.**
 
-The fresh-install path is standalone: the built-in `claude-code` agent ships inline, so a user with a GitHub URL and an Anthropic key can dispatch a run end-to-end with no other tooling. Warren also bundles a small set of [os-eco](https://github.com/jayminwest/os-eco) tools as opt-in built-in features — versioned prompt libraries via canopy, persistent agent memory via mulch, an integrated issue queue via seeds, a steerable alternative harness via sapling — each surfaced only when the project or operator opts in. The runtime substrate is [burrow](https://github.com/jayminwest/burrow), a sibling process inside the container that warren talks to over a unix socket.
+The fresh-install path is standalone: the built-in `claude-code` agent ships inline, so a user with a GitHub URL and an Anthropic key can dispatch a run end-to-end with no other tooling. Two additional coding-agent runtimes ship inline alongside it — `sapling` (steerable harness) and `pi` (multi-provider, with per-run cost reporting). Warren also bundles a small set of [os-eco](https://github.com/jayminwest/os-eco) tools as opt-in built-in features — versioned prompt libraries via canopy, persistent agent memory via mulch, an integrated issue queue via seeds — each surfaced only when the project or operator opts in. The runtime substrate is [burrow](https://github.com/jayminwest/burrow), a sibling process inside the container that warren talks to over a unix socket.
 
 V1 is single-user, single-host: clone warren, `docker compose up`, browser at `localhost:8080`. The same image runs on Fly.io with a volume and three secrets. No cross-tenant story, no SaaS, no auth beyond a bearer token.
 
@@ -35,7 +35,7 @@ $ open http://homeserver.local:8080
 ```
 
 In the UI:
-1. **Pick an agent** — Warren ships built-in `claude-code` and `sapling` agents inline (`src/registry/builtins/`), so a fresh install can dispatch a run without further setup. Power users who want a custom prompt library set `CANOPY_REPO_URL`; warren clones the repo and every prompt tagged `agent` becomes a library-source agent that overrides any same-named built-in.
+1. **Pick an agent** — Warren ships three built-in agents inline (`src/registry/builtins/`): `claude-code` (default), `sapling` (alternative steerable harness), and `pi` (multi-provider harness with first-class cost reporting). A fresh install can dispatch a run against any of them without further setup. Power users who want a custom prompt library set `CANOPY_REPO_URL`; warren clones the repo and every prompt tagged `agent` becomes a library-source agent that overrides any same-named built-in.
 2. **Add project** — paste a GitHub URL. Warren clones it under `/data/projects/`.
 3. **Spawn run** — pick agent + project + prompt. Warren provisions a sandbox, seeds the rendered agent into it, dispatches the run, streams events to the UI.
 4. **Watch and steer** — live event tail, send steering messages, cancel cleanly. If the project opted into the agent-memory feature, the UI also surfaces mulch records the agent recorded; if it opted into the issue-queue feature, it surfaces seeds the agent filed or closed.
@@ -86,7 +86,7 @@ Warren is a thin coordinator — most of the value is in the runtime plus whiche
 - No laptop-driven `burrow up` against warren. The home server is the canonical V1 deploy.
 - No real-time collaboration. One UI, one user at a time.
 - No payment, no usage metering, no quota in V1. Per-user / per-project cost and concurrency guardrails are planned post-V1 (R-17).
-- No cost or run-budget enforcement in V1. Token spend and concurrent-run caps are planned post-V1 (R-17).
+- No cost or run-budget enforcement in V1. Token spend and concurrent-run caps are planned post-V1 (R-17). V1 does *report* per-run cost + token usage for the `pi` built-in (`runs.cost_usd`, `runs.tokens_*`, §11.K) — reporting is observability; enforcement (per-user / per-project budget caps) is the deferred half.
 - No bring-your-own database in V1 — SQLite via `bun:sqlite` is the only backend. Postgres-as-a-backend is planned post-V1 (R-13).
 - No MCP server configuration in V1. Canopy-frontmatter-driven MCP plus burrow-side credential mounts are planned post-V1 (R-15).
 - No audit log in V1. Append-only dispatch/steer/cancel/secret-read ledger is planned post-V1 (R-16), and lands alongside R-09 since it depends on real user identity.
@@ -140,7 +140,23 @@ sections:
   workflow: |
     # seeds plan template name to use
     template: refactor
+  pi_skills: |                           # pi-only — materialized into .pi/skills/<name>/SKILL.md
+    {"name":"refactor-pass","body":"# Refactor pass\nIdentify dead code..."}
+    {"name":"safe-rename","body":"# Safe rename\nUse the LSP rename..."}
+  pi_prompts: |                          # pi-only — materialized into .pi/prompts/<name>.md
+    {"name":"summarize-diff","body":"Summarize the diff in {{lines}} lines..."}
 ```
+
+**Section enumeration (V1).** Generic sections shared by every runtime:
+`system`, `skills`, `expertise_seed`, `burrow_config`, `workflow`. Pi-namespaced
+sections (consumed only by the `pi` built-in; ignored by `claude-code` /
+`sapling`): `pi_skills`, `pi_prompts`. Pi-section bodies are JSON-Lines envelopes
+of `{name, body}` — one artifact per line — which `src/runs/seed.ts`
+materializes into `.pi/skills/<name>/SKILL.md` and `.pi/prompts/<name>.md`
+inside the burrow workspace before dispatch (§11.K). Malformed envelopes
+(non-JSON, missing/empty `name`, non-string `body`, duplicate names, unsafe
+names containing `/`, `\`, `.`, `..`) abort seeding with the same
+`RunSpawnError` shape as `expertise_seed`.
 
 Inheritance solves the "thousand repos" problem: `base-coding-agent` defines defaults, role-specific bots override only what differs. One PR to canopy updates every descendant.
 
@@ -531,7 +547,7 @@ The decided shape, expanded from prior open question #4:
 | Run cancellation | `POST /runs/:id/cancel` proxies to burrow's `POST /runs/:burrow_run_id/cancel`. Hard-stop = `DELETE /burrows/:burrow_id` is V2; not needed for V1. | §4.3 |
 | Burrow API contract | Burrow's `/openapi.json` is the source of truth. Warren generates a typed client against it. | §4.3 |
 | Burrow shippability | All 21 routes implemented as of `burrow@7926a0e` (2026-05-08). `POST /burrows` no longer returns 501. | — |
-| `CANOPY_REPO_URL` is optional (warren-d3e9, 2026-05-10) | Warren ships built-in `claude-code` and `sapling` agents inline (`src/registry/builtins/`); the canopy library is a power-user override, not a hard dependency. Boot seeds built-ins; refresh upserts library agents on top (same-named library agents win). `warren doctor` and `/readyz` treat unset `CANOPY_REPO_URL` as info, not failure. `POST /agents/refresh` and `warren register-agent` 400 with a friendly hint when no library is configured. `GET /agents` returns `source: "builtin" \| "library"` provenance derived from `frontmatter.source`. | §10.2, §11.B |
+| `CANOPY_REPO_URL` is optional (warren-d3e9, 2026-05-10) | Warren ships built-in `claude-code`, `sapling`, and `pi` agents inline (`src/registry/builtins/`); the canopy library is a power-user override, not a hard dependency. Boot seeds built-ins; refresh upserts library agents on top (same-named library agents win). `warren doctor` and `/readyz` treat unset `CANOPY_REPO_URL` as info, not failure. `POST /agents/refresh` and `warren register-agent` 400 with a friendly hint when no library is configured. `GET /agents` returns `source: "builtin" \| "library"` provenance derived from `frontmatter.source`. | §10.2, §11.B |
 
 ### 11.C Open questions for V1
 
@@ -789,6 +805,153 @@ mulch, and sapling have no new asks from this direction — the org-readiness
 work is almost entirely warren-internal. Update the cross-repo readiness
 table in `ROADMAP.md` when `burrow-c47a` produces a sub-plan.
 
+### 11.K Pi runtime support (2026-05-12)
+
+The `pi` (`@earendil-works/pi-coding-agent`) runtime is the third built-in
+coding agent alongside `claude-code` and `sapling`. It shipped as
+plan `pl-4374` (warren-39c1) in seven phased steps: a cross-repo burrow
+piRuntime contract (`warren-0e06` → `burrow-8aff`), a parity-shape builtin
+(`warren-d18e`), workspace seeding for pi-namespaced canopy sections
+(`warren-846b`), a multi-provider surface (`warren-f8c0`), per-run cost
+tracking (`warren-a7dc`), event-model widening in the UI (`warren-70af`),
+and this docs/decision record (`warren-f1da`).
+
+**Why a third built-in.** Pi is distinguished from `claude-code` and
+`sapling` by three properties warren operators care about: (1) a unified
+multi-provider LLM API (Anthropic, OpenAI, Google, Bedrock, Vertex,
+DeepSeek, Groq, Mistral, Azure OpenAI, and custom OpenAI-compatible
+endpoints) — pick the best model per task without standing up a second
+runtime; (2) first-class `get_session_stats` RPC reporting tokens
+(input / output / cacheRead / cacheWrite) + cost (USD) per session — see
+what a run actually cost; (3) a clean customization surface
+(`.pi/skills/<name>/SKILL.md`, `.pi/prompts/<name>.md`) that maps onto
+warren's existing canopy-section seeding flow.
+
+**Built-in shape.** `src/registry/builtins/pi.ts` (`PI_BUILTIN`,
+`mx-4888d2`) mirrors `SAPLING_BUILTIN` exactly: `name='pi'`, `version=1`,
+`sections.system` + `sections.burrow_config` with `network='open'`,
+`frontmatter.source='builtin'`, `resolvedFrom=['builtin:pi']`. Wired into
+`BUILTIN_AGENTS` (`src/registry/builtins/index.ts`), asserted by
+`builtins.test.ts`, surfaced in the Agents page (`mx-723c5e`), and covered
+by acceptance scenario 16 (`mx-05f62f`). Warren forwards `agent.name='pi'`
+to burrow as the runtime id via the existing
+`agent.name → burrow agentId` convention (`mx-7352f4`, `mx-c8fc41`); burrow's
+piRuntime is registered in the `AgentRegistry` per the warren-0e06 contract
+(`mx-0db923`).
+
+**Burrow piRuntime contract.** Pinned at `mx-0db923`:
+`id='pi'`; `displayName='Pi'`; `supportsResume=true` (pi has
+`--continue` / `--session`, *not* one-shot like codex); spawn shape
+`pi --mode rpc --no-session [--no-extensions] --provider <…> --model <…>`
+(RPC mode, not JSON — chosen for the bidirectional steer / abort /
+get_state / get_session_stats surface that warren's spawn-per-turn flow
+assumes). RPC commands warren consumes: `prompt`, `steer`, `abort`,
+`get_state`, `get_session_stats`. Event kinds warren's parser surfaces:
+`agent_start`/`end`, `turn_start`/`end`, `message_start`/`update`/`end`,
+`tool_execution_start`/`update`/`end`, `queue_update`, `compaction_start`/`end`,
+`auto_retry_start`/`end`, `extension_error`. `envPassthrough` widens beyond
+claude-code's `ANTHROPIC_*` + `CLAUDE_CODE_OAUTH_TOKEN` set to include
+`OPENAI_API_KEY`, `GEMINI_API_KEY`, `GOOGLE_API_KEY`, `PI_API_KEY`,
+`GROQ_API_KEY`, `MISTRAL_API_KEY`, `DEEPSEEK_API_KEY` — implemented at the
+runtime-contract layer (burrow's `envPassthrough` escape hatch), so warren
+does not change `docker-compose.yml` to add a new provider. If burrow ships
+piRuntime under a different id (e.g. `pi-coding-agent`), warren's
+`BUILTIN_AGENTS` name must change in lockstep — the two strings must match
+exactly (`mx-7352f4`).
+
+**Canopy sections.** Pi accepts two extra canopy sections beyond the
+generic enumeration in §4.2: `pi_skills` and `pi_prompts`. Bodies are
+JSON-Lines `{name, body}` envelopes, materialized by
+`src/runs/seed.ts` into the burrow workspace before dispatch
+(`mx-413c1b`): `pi_skills` writes to `.pi/skills/<name>/SKILL.md`
+(per-skill subdir matching the `agentskills.io` standard); `pi_prompts`
+writes to `.pi/prompts/<name>.md` (flat). Both reject malformed JSON,
+non-object lines, missing/empty `name`, non-string `body`, duplicate
+names, and unsafe names with `RunSpawnError` — same shape as
+`expertise_seed`. Sections are pi-namespaced (not generic `skills`) so a
+canopy author can land a generic `skills` section on a base agent and have
+it remain ignored by pi without collision.
+
+**Multi-provider surface.** `AgentDefinition.frontmatter` grows two
+well-known optional string fields: `provider` and `model` (`mx-20a3b9`).
+Built-in `PI_BUILTIN` leaves both unset by default — pi resolves from its
+own `~/.pi/agent/models.json`. `POST /runs` accepts optional
+`providerOverride` + `modelOverride` strings (`mx-fd6008`); they thread onto
+`agent.frontmatter` before freeze, so the rendered agent on
+`runs.rendered_agent_json` records exactly what ran. `NewRun.tsx` surfaces
+the pair as two free-text Inputs in a 2-col grid (`mx-0048cb`), auto-filled
+from the selected agent's frontmatter.
+
+**Cost + token accounting.** Migration 0006 adds five nullable columns to
+`runs`: `cost_usd REAL`, `tokens_input INTEGER`, `tokens_output INTEGER`,
+`tokens_cache_read INTEGER`, `tokens_cache_write INTEGER`. `RunsRepo.attachStats`
+mirrors `attachBurrow`'s partial-input semantics (`mx-49272e`): omitted fields
+preserve existing values; explicit `null` does not clear. The bridge layer
+issues `get_session_stats` against pi at run-start and run-end via a
+`PiStatsClient` injected into `bridgeRunStream` (`mx-916eb6`); persisted
+cost is the run-end-minus-run-start delta (defends against the multi-session
+cost double-count when pi resumes via `--continue` / `--session`).
+Non-pi runs leave every column `null`. RPC failures are logged as a system
+event and do not fail the run. `RunDetail.tsx` renders a header cost badge
+using `formatCostUsd()` (`mx-9d987a`): `≥$1` → 2 decimals, `<$1` → 3 decimals;
+badge omitted when `cost_usd` is `null`. `Runs.tsx` adds an opt-in Cost
+column (hidden by default, toggled via the toolbar).
+
+**Event model.** Pi's wider event vocabulary (`compaction_start`/`end`,
+`auto_retry_start`/`end`, `extension_error`, `queue_update`) is collapsed by
+burrow's pi parser (`src/runtime/parsers/pi.ts`) into burrow's stable
+event taxonomy, with the original pi envelope `type` preserved in
+`payload.type`. `RunDetail.tsx` `EventLine` detects pi sub-kinds by peeking
+at `payload.type` when `event.kind` is `state_change` or `telemetry`
+(`mx-66ff69`); `PI_SUBKIND_LABELS` maps each to a friendlier display label;
+`extension_error` additionally tints `rose-700` like stderr. A kind-direct
+match (e.g. `event.kind === 'compaction_start'`) is also honored so a
+future burrow release that promotes any of these to first-class kinds Just
+Works without a UI rev. Unknown kinds fall through to the existing generic
+renderer.
+
+**Pi extensions are deferred** (`.pi/extensions/*.ts`). Pi extensions are
+TypeScript source modules with access to `ExtensionAPI` (`registerTool`,
+`registerCommand`). Encoding TS source inside a canopy section body works
+but is awkward — operators lose `tsc` / `biome` on the source, syntax errors
+only surface at run time, and the canopy diff view becomes useless. The
+right fix is a canopy *artifact type* (file-shaped, not section-shaped)
+that warren materializes alongside the rendered `AgentDefinition`. That is
+a canopy-side change first. V1 ships `pi_skills` + `pi_prompts` (already
+file-shaped + markdown) and leaves `.pi/extensions/` to a follow-up plan
+once canopy ships artifact types.
+
+**No MCP support on pi.** Pi explicitly has no MCP — its tool surface is
+built-in plus extensions only. This is a worldview difference, not an
+omission: R-15 (MCP via canopy frontmatter, post-V1) stays scoped to
+`claude-code` and `sapling` and is *not* a blocker for the `pi` built-in.
+Operators wanting MCP-style external tools on pi should reach for pi's
+extensions story once canopy artifact types land.
+
+**Headless provider-auth posture.** Warren passes provider API keys into
+the sandbox via burrow's `envPassthrough` (see contract above). Pi's
+interactive `/login` flow (OAuth for Anthropic Claude Pro/Max, ChatGPT
+Plus, GitHub Copilot, etc.) is unsupported by design: warren is headless.
+A future "bring-your-own-browser" path for OAuth-only providers is
+reconsiderable in V2 if there is demand; in V1, pi is API-key-only.
+
+**Why not ship pi as a canopy library agent?** Built-ins exist precisely
+so a fresh warren install can dispatch a run without `CANOPY_REPO_URL` set
+(see §2.1, `src/registry/builtins/index.ts`). `claude-code` and `sapling`
+both ship inline; `pi` is the third member of the same set and deserves the
+same treatment. A library-only path would mean every operator who wants
+pi has to stand up a canopy fork first — high friction for the
+"multi-provider out of the box" value proposition.
+
+**Adding a fourth built-in (or schema-extending pi).** Per `mx-39a64f`,
+five places update in lockstep: (1) `src/registry/builtins/<name>.ts`,
+(2) `BUILTIN_AGENTS` array + re-export in `src/registry/builtins/index.ts`,
+(3) `builtins.test.ts` assertions on `BUILTIN_AGENT_NAMES` + `readAgentSource`,
+(4) `scripts/acceptance/scenarios/13-container-smoke.ts` builtin-names check,
+(5) `src/ui/src/pages/Agents.tsx` header + empty-state copy. Scenario
+`02-agents-refresh.ts` already filters on `source !== 'builtin'`
+(`mx-ae877e`), so it auto-extends without a code change.
+
 ---
 
 ## 12. Relationship to other os-eco tools
@@ -799,7 +962,8 @@ table in `ROADMAP.md` when `burrow-c47a` produces a sub-plan.
 | **canopy** | Hard dependency. Source of agent definitions. Cloned at startup, refreshed on demand. |
 | **mulch** | Used per-project. Warren shells out to `ml record` / `ml prime` against the project mulch dir during run setup and reap. |
 | **seeds** | Used per-project. Warren reads `sd ready` to surface the project's worklist in the UI; agents file/close seeds during runs. |
-| **sapling** | One of two harness choices (the other is claude-code). Shipped as a pre-installed CLI in the container; selected per agent via `burrow_config`. |
+| **sapling** | One of three built-in harnesses (alongside `claude-code` and `pi`). Shipped as a pre-installed CLI in the container; selected per agent via `burrow_config`. |
+| **pi** (`@earendil-works/pi-coding-agent`) | Third built-in harness, multi-provider with first-class per-run cost reporting. Shipped as a pre-installed CLI in the container; runtime contract lives in burrow's `AgentRegistry` (see §11.K). |
 | **overstory** | Sibling, not subordinate. Multi-agent orchestration is overstory's domain; warren is single-agent-per-run. Overstory could be invoked as a "harness" in a future agent definition. |
 | **greenhouse** | Sibling. Greenhouse polls GitHub → creates seeds → could call warren's HTTP API to dispatch a run. The autonomous outer loop. |
 | **mycelium / grove** | Out of scope for this document. |
