@@ -106,10 +106,11 @@ export async function bootInProc(opts: InProcBootOptions): Promise<BootHandle> {
 	};
 
 	if (opts.gitConfigPath === undefined) {
-		await writeFile(
-			gitConfigPath,
-			"[user]\n\tname = Warren Acceptance\n\temail = acceptance@warren.invalid\n",
-		);
+		// No [user] block (warren-9f70). Identity comes from the
+		// GIT_AUTHOR_* / GIT_COMMITTER_* env vars set above; a global
+		// [user] can leak into agent-side commits via the project
+		// clone's .git/config under the wrong conditions.
+		await writeFile(gitConfigPath, "[init]\n\tdefaultBranch = main\n");
 	}
 
 	const state: ProcState = {

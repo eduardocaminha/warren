@@ -28,7 +28,7 @@ function ok(stdout = ""): SpawnResult {
 }
 
 describe("refreshProjectClone", () => {
-	test("fetches, checks out ref, hard-resets to origin/<ref>, and returns HEAD sha", async () => {
+	test("fetches, checks out ref, hard-resets to origin/<ref>, scrubs stale user identity, and returns HEAD sha", async () => {
 		const sha = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
 		const { spawn, calls } = recorder((cmd) => {
 			if (cmd[1] === "rev-parse") return ok(`${sha}\n`);
@@ -43,11 +43,45 @@ describe("refreshProjectClone", () => {
 		});
 
 		expect(result).toEqual({ headSha: sha, ref: "main" });
-		expect(calls.map((c) => c.cmd[1])).toEqual(["fetch", "checkout", "reset", "rev-parse"]);
+		expect(calls.map((c) => c.cmd[1])).toEqual([
+			"fetch",
+			"checkout",
+			"reset",
+			"config",
+			"config",
+			"rev-parse",
+		]);
 		expect(calls[0]?.cmd).toEqual(["git", "fetch", "--prune", "origin"]);
 		expect(calls[1]?.cmd).toEqual(["git", "checkout", "--force", "main"]);
 		expect(calls[2]?.cmd).toEqual(["git", "reset", "--hard", "origin/main"]);
+		expect(calls[3]?.cmd).toEqual(["git", "config", "--local", "--unset-all", "user.name"]);
+		expect(calls[4]?.cmd).toEqual(["git", "config", "--local", "--unset-all", "user.email"]);
 		expect(calls.every((c) => c.cwd === "/data/projects/x/y")).toBe(true);
+	});
+
+	test("tolerates the user identity scrub exiting non-zero when keys are absent (warren-9f70)", async () => {
+		const sha = "abcabcabcabcabcabcabcabcabcabcabcabcabca";
+		const { spawn, calls } = recorder((cmd) => {
+			if (cmd[1] === "config" && cmd.includes("--unset-all")) {
+				// Real git exits 5 ("no such key") when the key is absent —
+				// the normal case for clean clones.
+				return { stdout: "", stderr: "", exitCode: 5 };
+			}
+			if (cmd[1] === "rev-parse") return ok(`${sha}\n`);
+			return ok();
+		});
+		const result = await refreshProjectClone({
+			config: CFG,
+			localPath: "/data/projects/x/y",
+			ref: "main",
+			spawn,
+			exists: () => true,
+		});
+
+		expect(result.headSha).toBe(sha);
+		// rev-parse still runs after a failed unset: the scrub is
+		// best-effort and must not abort the refresh.
+		expect(calls.map((c) => c.cmd[1])).toContain("rev-parse");
 	});
 
 	test("falls back to plain reset --hard <ref> when origin/<ref> does not resolve", async () => {

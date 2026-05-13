@@ -224,16 +224,14 @@ async function writeGitConfigRedirects(
 	gitConfigPath: string,
 	redirects: ReadonlyArray<{ fakeUrl: string; localPath: string }>,
 ): Promise<void> {
-	const lines: string[] = [
-		"[user]",
-		"\tname = Warren Acceptance",
-		"\temail = acceptance@warren.invalid",
-		"[init]",
-		"\tdefaultBranch = main",
-		"[safe]",
-		"\tdirectory = *",
-		"",
-	];
+	// No [user] section here on purpose (warren-9f70): a global [user]
+	// can stick to a project clone's local .git/config under the wrong
+	// conditions and leak `acceptance@warren.invalid` into agent commits
+	// during real runs. Fixture and scenario git invocations supply
+	// identity via GIT_AUTHOR_* / GIT_COMMITTER_* env vars
+	// (see withGitIdentity below and inproc.ts), which is sufficient
+	// for `git commit` without any local or global [user] entry.
+	const lines: string[] = ["[init]", "\tdefaultBranch = main", "[safe]", "\tdirectory = *", ""];
 	for (const { fakeUrl, localPath } of redirects) {
 		lines.push(`[url "${localPath}"]`);
 		lines.push(`\tinsteadOf = ${fakeUrl}`);

@@ -93,6 +93,19 @@ export async function refreshProjectClone(
 		});
 	}
 
+	// Drop any stale user.name / user.email from the local .git/config
+	// (warren-9f70). Warren never writes either itself; if one is here
+	// it came from a prior tool (the acceptance harness used to ship
+	// `[user]` in GIT_CONFIG_GLOBAL) and would silently leak that
+	// identity into the agent's commits. Best-effort: `--unset-all`
+	// exits 5 when the key is absent, which is the normal case.
+	for (const key of ["user.name", "user.email"] as const) {
+		await trySpawn(spawn, [config.gitBinary, "config", "--local", "--unset-all", key], {
+			cwd: localPath,
+			timeoutMs,
+		});
+	}
+
 	const headSha = await readHead(spawn, config.gitBinary, localPath, timeoutMs);
 	return { headSha, ref };
 }

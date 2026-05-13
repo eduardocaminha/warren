@@ -17,7 +17,7 @@
  *
  * Exit code: 0 if all scenarios pass, 1 otherwise.
  */
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, readdir, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -237,6 +237,21 @@ async function runInProcMode(opts: RunModeArgs): Promise<number> {
 		});
 
 		console.log(formatOutcomes(outcomes));
+
+		// Teardown guardrail (warren-9f70): no scenario should leave
+		// user.name / user.email set on a project clone's local
+		// .git/config. If one does, an agent commit in a subsequent
+		// production run against the same clone path inherits the stale
+		// identity. Fail the run so the offender surfaces in CI.
+		const leaks = await collectUserIdentityLeaks(join(handle.dataDir, "projects"));
+		if (leaks.length > 0) {
+			console.error(
+				`acceptance: warren-9f70 guardrail tripped — project clone(s) leaked user identity into .git/config:`,
+			);
+			for (const leak of leaks) console.error(`  - ${leak}`);
+			return exitCode === 0 ? 1 : exitCode;
+		}
+
 		return exitCode;
 	} catch (err) {
 		const message = err instanceof Error ? `${err.message}\n${err.stack ?? ""}` : String(err);
@@ -259,6 +274,68 @@ async function runInProcMode(opts: RunModeArgs): Promise<number> {
 			}
 		}
 	}
+}
+
+/**
+ * Walk `<dataDir>/projects/*\/*\/.git/config` and return a human-readable
+ * description of any clone whose local config still has user.name or
+ * user.email set after the run. Empty result = clean.
+ */
+async function collectUserIdentityLeaks(projectsDir: string): Promise<readonly string[]> {
+	const leaks: string[] = [];
+	let owners: string[];
+	try {
+		owners = await readdir(projectsDir);
+	} catch {
+		// No project clones at all — nothing to check. Scenarios that
+		// don't POST /projects leave projectsDir empty or missing.
+		return leaks;
+	}
+	for (const owner of owners) {
+		let names: string[];
+		try {
+			names = await readdir(join(projectsDir, owner));
+		} catch {
+			continue;
+		}
+		for (const name of names) {
+			const configPath = join(projectsDir, owner, name, ".git", "config");
+			let body: string;
+			try {
+				body = await readFile(configPath, "utf8");
+			} catch {
+				continue;
+			}
+			const found = findUserKeys(body);
+			if (found.length > 0) {
+				leaks.push(`${owner}/${name}: ${found.join(", ")} (${configPath})`);
+			}
+		}
+	}
+	return leaks;
+}
+
+/**
+ * Lightweight INI-ish scan for `name`/`email` under the `[user]` section.
+ * We don't shell out to `git config --get`: the harness's job is to
+ * detect any stale identity, not to rely on git's parser (which would
+ * report `user.signingkey` etc. that we don't care about).
+ */
+function findUserKeys(configBody: string): readonly string[] {
+	const lines = configBody.split(/\r?\n/);
+	let inUser = false;
+	const found: string[] = [];
+	for (const raw of lines) {
+		const line = raw.trim();
+		if (line.startsWith("[")) {
+			inUser = /^\[user(\s|\]|$)/.test(line);
+			continue;
+		}
+		if (!inUser) continue;
+		const m = line.match(/^(name|email)\s*=/);
+		if (m !== null && m[1] !== undefined) found.push(`user.${m[1]}`);
+	}
+	return found;
 }
 
 async function runContainerMode(opts: RunModeArgs): Promise<number> {
