@@ -196,7 +196,7 @@ export async function bridgeRunStream(input: BridgeRunStreamInput): Promise<Brid
 			written += 1;
 			broker.publish(runId, row);
 
-			if (!statsPersisted && input.piStats !== undefined && event.kind === "agent_end") {
+			if (!statsPersisted && input.piStats !== undefined && isPiAgentEnd(event)) {
 				statsPersisted = true;
 				await persistPiStatsDelta({
 					piStats: input.piStats,
@@ -293,6 +293,26 @@ function detectRuntimeTerminal(event: RunEvent): RunTerminalState | null {
 	if (env.type === "result") return env.is_error === true ? "failed" : "succeeded";
 	if (env.type === "agent_end") return "succeeded";
 	return null;
+}
+
+/**
+ * Match pi's `agent_end` terminal envelope (warren-36c0). Burrow's pi parser
+ * (burrow `src/runtime/parsers/pi.ts`) maps every pi lifecycle line to a
+ * RunEvent with `kind="state_change"`, `stream="system"`, and the original
+ * envelope shoved into `payload` — so `event.kind === "agent_end"` never
+ * matches on real pi runs. The piStats snapshot branch (bridgeRunStream)
+ * checks this predicate to fire the terminal `get_session_stats` fetch
+ * before the bridge breaks on terminal detection. Distinct from
+ * `detectRuntimeTerminal`, which also accepts claude-code's `result`
+ * envelope — piStats is a pi-only concern.
+ */
+function isPiAgentEnd(event: RunEvent): boolean {
+	if (event.kind !== "state_change") return false;
+	if (event.stream !== "system") return false;
+	const payload = event.payload;
+	if (payload === null || typeof payload !== "object") return false;
+	const env = payload as Record<string, unknown>;
+	return env.type === "agent_end";
 }
 
 /**

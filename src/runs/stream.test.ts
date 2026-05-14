@@ -41,6 +41,20 @@ function source(events: RunEvent[]): (signal: AbortSignal) => AsyncIterable<RunE
 	return () => asyncIter(events);
 }
 
+/**
+ * Build a pi-shaped `agent_end` envelope as it lands after burrow's pi
+ * parser (kind="state_change", stream="system", payload.type="agent_end").
+ * Mirrors burrow `src/runtime/parsers/pi.ts:86-98` (warren-36c0). The
+ * synthetic `{kind:"agent_end"}` shape never appears in production.
+ */
+function piAgentEnd(burrowRunId: string, seq: number): RunEvent {
+	return evt(burrowRunId, seq, {
+		kind: "state_change",
+		stream: "system",
+		payload: { type: "agent_end", messages: [] },
+	});
+}
+
 describe("bridgeRunStream", () => {
 	let db: WarrenDb;
 	let repos: Repos;
@@ -407,7 +421,7 @@ describe("bridgeRunStream", () => {
 			source: source([
 				evt(burrowRunId, 1, { kind: "agent_start" }),
 				evt(burrowRunId, 2, { kind: "text" }),
-				evt(burrowRunId, 3, { kind: "agent_end" }),
+				piAgentEnd(burrowRunId, 3),
 			]),
 		});
 		expect(calls.map((c) => c.phase)).toEqual(["baseline", "terminal"]);
@@ -426,10 +440,7 @@ describe("bridgeRunStream", () => {
 			repos,
 			broker,
 			burrowClient: makeBurrowClient(),
-			source: source([
-				evt(burrowRunId, 1, { kind: "agent_start" }),
-				evt(burrowRunId, 2, { kind: "agent_end" }),
-			]),
+			source: source([evt(burrowRunId, 1, { kind: "agent_start" }), piAgentEnd(burrowRunId, 2)]),
 		});
 		const after = repos.runs.require(runId);
 		expect(after.costUsd).toBeNull();
@@ -459,11 +470,15 @@ describe("bridgeRunStream", () => {
 			piStats,
 			source: source([
 				evt(burrowRunId, 1, { kind: "agent_start" }),
-				evt(burrowRunId, 2, { kind: "agent_end" }),
-				evt(burrowRunId, 3, { kind: "agent_end" }),
+				piAgentEnd(burrowRunId, 2),
+				piAgentEnd(burrowRunId, 3),
 			]),
 		});
-		// One baseline + one terminal — the second agent_end is ignored.
+		// One baseline + one terminal. The first wire-shape agent_end fires
+		// the piStats branch (calls=2) and is the same envelope
+		// detectRuntimeTerminal recognizes, so the bridge breaks before
+		// reaching the second agent_end — exercising both the statsPersisted
+		// guard and the terminal-break belt-and-braces.
 		expect(calls).toBe(2);
 	});
 
@@ -497,10 +512,7 @@ describe("bridgeRunStream", () => {
 					warns.push(obj);
 				},
 			},
-			source: source([
-				evt(burrowRunId, 1, { kind: "agent_start" }),
-				evt(burrowRunId, 2, { kind: "agent_end" }),
-			]),
+			source: source([evt(burrowRunId, 1, { kind: "agent_start" }), piAgentEnd(burrowRunId, 2)]),
 		});
 		const after = repos.runs.require(runId);
 		expect(after.costUsd).toBeNull();
@@ -532,10 +544,7 @@ describe("bridgeRunStream", () => {
 			broker,
 			burrowClient: makeBurrowClient(),
 			piStats,
-			source: source([
-				evt(burrowRunId, 1, { kind: "agent_start" }),
-				evt(burrowRunId, 2, { kind: "agent_end" }),
-			]),
+			source: source([evt(burrowRunId, 1, { kind: "agent_start" }), piAgentEnd(burrowRunId, 2)]),
 		});
 		const after = repos.runs.require(runId);
 		expect(after.costUsd).toBeCloseTo(0.3);
