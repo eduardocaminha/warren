@@ -1,48 +1,152 @@
 /**
- * Drizzle + bun:sqlite database client.
+ * Dialect-aware drizzle database client (R-13, pl-f17e step 3).
  *
- * `openDatabase` opens (or creates) the SQLite file, enables WAL mode, runs
- * any pending migrations, and returns a typed drizzle handle plus the raw
- * connection. Callers close via `db.close()` to release the file.
+ * `openDatabase` opens warren's durable state against either SQLite (today's
+ * default, zero-config fresh-install path) or Postgres (operator opt-in via
+ * `WARREN_DB_URL=postgres://...`). The pg branch lights up with the Postgres
+ * migration set landed in step 4; until then `migrate()` no-ops gracefully on
+ * a missing postgres migrations folder, and production boot still passes
+ * `{ path }` so the sqlite branch is the only path exercised at runtime.
  *
- * WAL is enabled at startup (SPEC §6 "DB: bun:sqlite (WAL mode)") so concurrent
- * readers don't block the single writer; the pragmas are idempotent and cheap
- * to set on every open. Tests pass `path: ":memory:"` for an ephemeral DB —
- * migrations still run so the schema matches production.
+ * Two shapes share one entry point. The `{ path }` overload preserves the
+ * pre-R-13 sqlite signature exactly — tests and the existing server boot path
+ * continue to receive a `WarrenDb` (== sqlite) without narrowing. The `{ url }`
+ * overload accepts the dialect-agnostic WARREN_DB_URL contract and returns
+ * `AnyWarrenDb`; callers narrow on `dialect`. Step 5 (warren-e2ea) wires the
+ * server boot path onto `{ url }`.
+ *
+ * SQLite branch behavior is unchanged: WAL on file-backed dbs, FK off during
+ * `migrate()` so the 12-step ALTER pattern in 0003 survives, FK back on after.
+ * Postgres branch: pg.Pool with `max` from options or env-default; migrations
+ * apply via `drizzle-orm/node-postgres/migrator` against the per-dialect
+ * folder. `pg.Pool.end()` is async — the close hook awaits it, which is why
+ * `WarrenDb.close()` was always typed as `Promise<void>`.
  */
 
 import { Database } from "bun:sqlite";
+import { existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { drizzle } from "drizzle-orm/bun-sqlite";
-import { migrate } from "drizzle-orm/bun-sqlite/migrator";
+import { drizzle as drizzleSqlite } from "drizzle-orm/bun-sqlite";
+import { migrate as migrateSqlite } from "drizzle-orm/bun-sqlite/migrator";
+import { drizzle as drizzlePg } from "drizzle-orm/node-postgres";
+import { migrate as migratePg } from "drizzle-orm/node-postgres/migrator";
+import { Pool } from "pg";
+import { ValidationError } from "../core/errors.ts";
+import * as pgSchema from "./schema/postgres.ts";
 import * as schema from "./schema.ts";
+import { parseDatabaseUrl } from "./url.ts";
 
-const DEFAULT_MIGRATIONS_FOLDER = join(import.meta.dir, "migrations");
+/** WARREN_DB_URL — dialect-aware database URL. */
+export const WARREN_DB_URL_ENV = "WARREN_DB_URL" as const;
+/** WARREN_DB_PATH — legacy sqlite-only path; back-compat alias. */
+export const WARREN_DB_PATH_ENV = "WARREN_DB_PATH" as const;
+/** WARREN_DB_POOL_MAX — pg Pool size (sqlite ignores). Default 10. */
+export const WARREN_DB_POOL_MAX_ENV = "WARREN_DB_POOL_MAX" as const;
+export const DEFAULT_PG_POOL_MAX = 10;
 
-export type DrizzleDb = ReturnType<typeof drizzle<typeof schema>>;
+const DEFAULT_SQLITE_MIGRATIONS_FOLDER = join(import.meta.dir, "migrations");
+const DEFAULT_PG_MIGRATIONS_FOLDER = join(import.meta.dir, "migrations", "postgres");
 
-export interface WarrenDb {
-	drizzle: DrizzleDb;
+export type WarrenDialect = "sqlite" | "postgres";
+
+export type SqliteDrizzleDb = ReturnType<typeof drizzleSqlite<typeof schema>>;
+export type PostgresDrizzleDb = ReturnType<typeof drizzlePg<typeof pgSchema>>;
+
+/**
+ * Back-compat alias. Repos and consumers that imported `DrizzleDb` pre-R-13
+ * expect the sqlite handle — keep that meaning so step 3 doesn't churn the
+ * repo layer. Step 5+ widens repos to accept either dialect.
+ */
+export type DrizzleDb = SqliteDrizzleDb;
+
+export interface SqliteWarrenDb {
+	dialect: "sqlite";
+	drizzle: SqliteDrizzleDb;
 	raw: Database;
 	close(): Promise<void>;
 }
 
+export interface PostgresWarrenDb {
+	dialect: "postgres";
+	drizzle: PostgresDrizzleDb;
+	raw: Pool;
+	close(): Promise<void>;
+}
+
+/**
+ * Back-compat alias for today's runtime: SQLite. Production code paths that
+ * still pass `{ path }` get this exact type back (no narrowing); the wider
+ * union below is what step 5 will adopt as the boot path picks up the URL
+ * contract.
+ */
+export type WarrenDb = SqliteWarrenDb;
+
+/** Dialect-aware union returned by the `{ url }` overload of openDatabase. */
+export type AnyWarrenDb = SqliteWarrenDb | PostgresWarrenDb;
+
 export interface OpenDatabaseOptions {
+	/**
+	 * WARREN_DB_URL contract: `sqlite:///path`, `file:///path`, `:memory:`,
+	 * `postgres://...`, `postgresql://...`, or a bare sqlite path. Wins over
+	 * `path` when both are set.
+	 */
+	url?: string;
+	/**
+	 * Legacy sqlite path (`WARREN_DB_PATH` shape). Equivalent to passing the
+	 * same string as `url` — both flow through `parseDatabaseUrl`, so callers
+	 * can keep the pre-R-13 `{ path }` call shape unchanged.
+	 */
+	path?: string;
+	/** SQLite migrations folder. Defaults to `src/db/migrations/`. */
+	migrationsFolder?: string;
+	/**
+	 * Postgres migrations folder. Defaults to `src/db/migrations/postgres/`
+	 * (populated by step 4). If the folder does not exist yet (pre-step-4
+	 * checkout), the migrator is skipped so the pg branch is still callable
+	 * for integration scaffolding.
+	 */
+	pgMigrationsFolder?: string;
+	skipMigrations?: boolean;
+	/**
+	 * Postgres pool max connections. Operators tune via WARREN_DB_POOL_MAX
+	 * (read by step 5 server config). Defaults to `DEFAULT_PG_POOL_MAX`.
+	 */
+	pgPoolMax?: number;
+}
+
+export async function openDatabase(options: {
 	path: string;
 	migrationsFolder?: string;
 	skipMigrations?: boolean;
+}): Promise<SqliteWarrenDb>;
+export async function openDatabase(options: OpenDatabaseOptions): Promise<AnyWarrenDb>;
+export async function openDatabase(options: OpenDatabaseOptions): Promise<AnyWarrenDb> {
+	const raw = resolveUrl(options);
+	const parsed = parseDatabaseUrl(raw);
+	if (parsed.dialect === "sqlite") {
+		return openSqlite(parsed.path, options);
+	}
+	return openPostgres(parsed.connectionString, options);
 }
 
-export async function openDatabase(options: OpenDatabaseOptions): Promise<WarrenDb> {
-	if (options.path !== ":memory:") {
-		await mkdir(dirname(options.path), { recursive: true });
+function resolveUrl(options: OpenDatabaseOptions): string {
+	if (options.url !== undefined && options.url !== "") return options.url;
+	if (options.path !== undefined && options.path !== "") return options.path;
+	throw new ValidationError("openDatabase requires `url` or `path`", {
+		recoveryHint: "pass { url: 'sqlite:///data/warren.db' } or { path: '/data/warren.db' }",
+	});
+}
+
+async function openSqlite(path: string, options: OpenDatabaseOptions): Promise<SqliteWarrenDb> {
+	if (path !== ":memory:") {
+		await mkdir(dirname(path), { recursive: true });
 	}
 
-	const raw = new Database(options.path, { create: true });
-	configurePragmas(raw, options.path === ":memory:");
+	const raw = new Database(path, { create: true });
+	configureSqlitePragmas(raw, path === ":memory:");
 
-	const db = drizzle(raw, { schema });
+	const db = drizzleSqlite(raw, { schema });
 
 	if (!options.skipMigrations) {
 		// FK must be OFF when migrations run so the canonical SQLite "12-step ALTER"
@@ -52,20 +156,57 @@ export async function openDatabase(options: OpenDatabaseOptions): Promise<Warren
 		// inside a transaction — so the toggle has to happen on the connection
 		// before migrate() opens its transaction.
 		raw.exec("PRAGMA foreign_keys = OFF");
-		migrate(db, {
-			migrationsFolder: options.migrationsFolder ?? DEFAULT_MIGRATIONS_FOLDER,
+		migrateSqlite(db, {
+			migrationsFolder: options.migrationsFolder ?? DEFAULT_SQLITE_MIGRATIONS_FOLDER,
 		});
 	}
 	raw.exec("PRAGMA foreign_keys = ON");
 
 	return {
+		dialect: "sqlite",
 		drizzle: db,
 		raw,
 		close: async () => raw.close(),
 	};
 }
 
-function configurePragmas(raw: Database, inMemory: boolean): void {
+async function openPostgres(
+	connectionString: string,
+	options: OpenDatabaseOptions,
+): Promise<PostgresWarrenDb> {
+	const max = options.pgPoolMax ?? DEFAULT_PG_POOL_MAX;
+	if (!Number.isInteger(max) || max <= 0) {
+		throw new ValidationError(`pgPoolMax must be a positive integer (got ${JSON.stringify(max)})`, {
+			recoveryHint: `set WARREN_DB_POOL_MAX to a positive integer; default is ${DEFAULT_PG_POOL_MAX}`,
+		});
+	}
+
+	const pool = new Pool({ connectionString, max });
+	const db = drizzlePg(pool, { schema: pgSchema });
+
+	if (!options.skipMigrations) {
+		const folder = options.pgMigrationsFolder ?? DEFAULT_PG_MIGRATIONS_FOLDER;
+		// Step 4 populates the pg migrations folder. Until that lands, the
+		// directory may not exist on a fresh checkout. Skip-on-missing keeps
+		// the pg branch callable for integration scaffolding (step 6 test
+		// substrate; step 7 acceptance) without coupling step 3 to step 4's
+		// landing order.
+		if (existsSync(folder)) {
+			await migratePg(db, { migrationsFolder: folder });
+		}
+	}
+
+	return {
+		dialect: "postgres",
+		drizzle: db,
+		raw: pool,
+		close: async () => {
+			await pool.end();
+		},
+	};
+}
+
+function configureSqlitePragmas(raw: Database, inMemory: boolean): void {
 	if (!inMemory) {
 		raw.exec("PRAGMA journal_mode = WAL");
 		raw.exec("PRAGMA synchronous = NORMAL");

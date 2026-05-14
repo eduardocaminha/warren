@@ -1,5 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+	copyFileSync,
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openDatabase } from "./client.ts";
@@ -159,5 +167,63 @@ describe("openDatabase", () => {
 		} finally {
 			db.close();
 		}
+	});
+
+	test("`{ url: ':memory:' }` opens a sqlite in-memory db", async () => {
+		const db = await openDatabase({ url: ":memory:" });
+		try {
+			if (db.dialect !== "sqlite") throw new Error("expected sqlite dialect");
+			const tables = db.raw
+				.query<{ name: string }, []>(
+					"SELECT name FROM sqlite_master WHERE type='table' AND name='runs'",
+				)
+				.all();
+			expect(tables).toHaveLength(1);
+		} finally {
+			await db.close();
+		}
+	});
+
+	test("`{ url: 'sqlite:///...' }` opens a file-backed sqlite db", async () => {
+		const tmp = mkdtempSync(join(tmpdir(), "warren-db-"));
+		const dbPath = join(tmp, "warren.db");
+		const db = await openDatabase({ url: `sqlite://${dbPath}` });
+		try {
+			if (db.dialect !== "sqlite") throw new Error("expected sqlite dialect");
+			const mode = db.raw.query<{ journal_mode: string }, []>("PRAGMA journal_mode").get();
+			expect(mode?.journal_mode).toBe("wal");
+		} finally {
+			await db.close();
+			rmSync(tmp, { recursive: true, force: true });
+		}
+	});
+
+	test("`url` wins over `path` when both are set", async () => {
+		const tmp = mkdtempSync(join(tmpdir(), "warren-db-"));
+		const pathOnly = join(tmp, "ignored.db");
+		const urlPath = join(tmp, "preferred.db");
+		const db = await openDatabase({ path: pathOnly, url: `sqlite://${urlPath}` });
+		try {
+			expect(db.dialect).toBe("sqlite");
+			// The file at urlPath should have been created; pathOnly should not.
+			expect(existsSync(urlPath)).toBe(true);
+			expect(existsSync(pathOnly)).toBe(false);
+		} finally {
+			await db.close();
+			rmSync(tmp, { recursive: true, force: true });
+		}
+	});
+
+	test("calling with neither `url` nor `path` throws", async () => {
+		await expect(openDatabase({})).rejects.toThrow(/requires `url` or `path`/);
+	});
+
+	test("invalid `pgPoolMax` is rejected before opening the pool", async () => {
+		await expect(
+			openDatabase({ url: "postgres://u:p@127.0.0.1:5432/db", pgPoolMax: 0 }),
+		).rejects.toThrow(/pgPoolMax/);
+		await expect(
+			openDatabase({ url: "postgres://u:p@127.0.0.1:5432/db", pgPoolMax: -3 }),
+		).rejects.toThrow(/pgPoolMax/);
 	});
 });
