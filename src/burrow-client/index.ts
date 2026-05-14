@@ -19,6 +19,12 @@ export {
 } from "./config.ts";
 export { BurrowUnreachableError } from "./errors.ts";
 export {
+	type FanOutLogger,
+	type FanOutOptions,
+	type FanOutResult,
+	fanOutAcrossWorkers,
+} from "./fanout.ts";
+export {
 	BurrowClientPool,
 	type BurrowClientPoolDeps,
 	type BurrowClientPoolFromEnvOptions,
