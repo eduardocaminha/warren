@@ -29,6 +29,7 @@ import type {
 	AuthDenied,
 	AuthProvider,
 	Logger,
+	PreviewProxyHandler,
 	Route,
 	RouteContext,
 	ServeHandle,
@@ -63,9 +64,10 @@ export function startServer(deps: ServerDeps, opts: ServeOptions = {}): ServeHan
 	const auth = opts.auth ?? NO_AUTH;
 	const transport = opts.transport ?? DEFAULT_TRANSPORT;
 	const idleTimeout = opts.idleTimeout ?? DEFAULT_IDLE_TIMEOUT_SECONDS;
+	const previewProxy = opts.previewProxy;
 
 	const fetchHandler = (request: Request): Promise<Response> =>
-		handleRequest(request, routes, auth, logger);
+		handleRequest(request, routes, auth, logger, previewProxy);
 
 	const server =
 		transport.kind === "unix"
@@ -159,8 +161,27 @@ async function handleRequest(
 	routes: readonly Route[],
 	auth: AuthProvider,
 	logger: Logger,
+	previewProxy: PreviewProxyHandler | undefined,
 ): Promise<Response> {
 	const url = new URL(request.url);
+
+	// Preview proxy preamble (R-19 / SPEC §11.L, warren-8a10) runs BEFORE the
+	// auth gate: previews use signed-cookie auth keyed off Host, not the
+	// bearer header the API gate inspects. Returns null when the request
+	// isn't for a preview subdomain — the standard pipeline takes over.
+	if (previewProxy !== undefined) {
+		try {
+			const proxied = await previewProxy(request, url);
+			if (proxied !== null) return proxied;
+		} catch (err) {
+			const rendered = renderError(err);
+			logger.error(
+				{ err, route: "preview proxy", status: rendered.status },
+				"server: preview proxy threw",
+			);
+			return jsonResponse(rendered.status, rendered.envelope);
+		}
+	}
 
 	if (!isAuthExempt(url.pathname)) {
 		const result = auth.authorize(request);

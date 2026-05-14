@@ -8,6 +8,7 @@ import {
 	checkCanopyClean,
 	checkCanopyClone,
 	checkDatabaseReachable,
+	checkPreviewAuthStrength,
 	checkPreviewMaxLive,
 	checkPreviewPortAllocator,
 	checkWarrenConfig,
@@ -493,5 +494,55 @@ describe("checkPreviewMaxLive", () => {
 		expect(result.ok).toBe(false);
 		expect(result.message).toBe("db handle closed");
 		expect(result.hint).toContain("migration 0009");
+	});
+});
+
+describe("checkPreviewAuthStrength", () => {
+	const STRONG_TOKEN = "1f3a2b9c0d4e5f6789abcdef0123456789abcdef0123456789abcdef01234567";
+
+	test("ok and informational when WARREN_PREVIEW_HOST is unset", () => {
+		const result = checkPreviewAuthStrength({ env: {} });
+		expect(result.ok).toBe(true);
+		expect(result.message).toContain("WARREN_PREVIEW_HOST unset");
+	});
+
+	test("ok when host is set + token is strong", () => {
+		const result = checkPreviewAuthStrength({
+			env: { WARREN_PREVIEW_HOST: "preview.example.com", WARREN_API_TOKEN: STRONG_TOKEN },
+		});
+		expect(result.ok).toBe(true);
+	});
+
+	test("fails when host is set + token is empty", () => {
+		const result = checkPreviewAuthStrength({
+			env: { WARREN_PREVIEW_HOST: "preview.example.com", WARREN_API_TOKEN: "" },
+		});
+		expect(result.ok).toBe(false);
+		expect(result.hint).toContain("openssl rand -hex 32");
+	});
+
+	test("fails when token matches a documented placeholder", () => {
+		for (const placeholder of ["changeme", "Placeholder", "warren-token", "your-token-here"]) {
+			const result = checkPreviewAuthStrength({
+				env: { WARREN_PREVIEW_HOST: "preview.example.com", WARREN_API_TOKEN: placeholder },
+			});
+			expect(result.ok).toBe(false);
+			expect(result.message).toContain("placeholder");
+		}
+	});
+
+	test("fails when token is shorter than the minimum strength", () => {
+		const result = checkPreviewAuthStrength({
+			env: { WARREN_PREVIEW_HOST: "preview.example.com", WARREN_API_TOKEN: "shorty" },
+		});
+		expect(result.ok).toBe(false);
+		expect(result.message).toContain("preview surface needs");
+	});
+
+	test("blank WARREN_PREVIEW_HOST is treated as unset", () => {
+		const result = checkPreviewAuthStrength({
+			env: { WARREN_PREVIEW_HOST: "   ", WARREN_API_TOKEN: "shorty" },
+		});
+		expect(result.ok).toBe(true);
 	});
 });

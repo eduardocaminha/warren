@@ -28,12 +28,14 @@ import { BurrowClientPool } from "../burrow-client/index.ts";
 import { type AnyWarrenDb, openDatabase, WARREN_DB_POOL_MAX_ENV } from "../db/client.ts";
 import { createRepos } from "../db/repos/index.ts";
 import { parseDatabaseUrl } from "../db/url.ts";
+import { createPreviewAuth, type PreviewAuth } from "../preview/cookie.ts";
 import {
 	loadPreviewEvictionConfigFromEnv,
 	startPreviewEvictionWorker,
 } from "../preview/eviction.ts";
 import { loadPreviewLaunchConfigFromEnv } from "../preview/launch.ts";
 import { loadPreviewPortRangeFromEnv, PreviewPortAllocator } from "../preview/port-allocator.ts";
+import { createPreviewProxyHandler } from "../preview/proxy.ts";
 import type { SpawnFn, SpawnOptions, SpawnResult } from "../projects/clone.ts";
 import { loadProjectsConfigFromEnv } from "../projects/config.ts";
 import { seedBuiltinAgents } from "../registry/builtins/index.ts";
@@ -276,6 +278,19 @@ export async function bootServer(opts: BootServerOptions = {}): Promise<WarrenSe
 		}
 	}
 
+	// Preview signed-cookie auth (R-19 / SPEC §11.L, warren-8a10). Both
+	// surfaces (login handshake + proxy preamble) need the same secret;
+	// derive from `WARREN_API_TOKEN` so a fresh-install operator doesn't
+	// have a second token to manage. Disabled when `WARREN_PREVIEW_HOST`
+	// is unset (no operator opt-in) or when warren booted with
+	// `--no-auth` (no token to derive from).
+	const previewAuth: PreviewAuth | undefined =
+		previewLaunchConfig.host !== null && serverConfig.token !== null
+			? createPreviewAuth(serverConfig.token, { cookieDomain: `.${previewLaunchConfig.host}` })
+			: undefined;
+	const previewHostForDeps =
+		previewLaunchConfig.host !== null ? previewLaunchConfig.host : undefined;
+
 	const deps: ServerDeps = {
 		repos,
 		db,
@@ -292,16 +307,35 @@ export async function bootServer(opts: BootServerOptions = {}): Promise<WarrenSe
 		...(runBranchPrefixDefault !== undefined ? { runBranchPrefixDefault } : {}),
 		previewPortRange,
 		previewMaxLive: previewEvictionConfig.maxLive,
+		...(previewHostForDeps !== undefined ? { previewHost: previewHostForDeps } : {}),
+		...(previewAuth !== undefined ? { previewAuth } : {}),
 		...(opts.now !== undefined ? { now: opts.now } : {}),
 	};
 
 	const auth: AuthProvider =
 		serverConfig.token !== null ? resolveAuth({ token: serverConfig.token }) : NO_AUTH;
 
+	const previewProxy =
+		previewAuth !== undefined && previewLaunchConfig.host !== null
+			? createPreviewProxyHandler({
+					repos,
+					previewAuth,
+					config: { host: previewLaunchConfig.host },
+					...(opts.now !== undefined ? { now: opts.now } : {}),
+				})
+			: undefined;
+	if (previewLaunchConfig.host !== null && previewAuth === undefined) {
+		logger.warn(
+			{ host: previewLaunchConfig.host },
+			"WARREN_PREVIEW_HOST is set but --no-auth disables the signed-cookie surface; preview proxy off",
+		);
+	}
+
 	const handle = startServer(deps, {
 		transport: serverConfig.transport,
 		auth,
 		logger,
+		...(previewProxy !== undefined ? { previewProxy } : {}),
 	});
 
 	logger.info({ url: handle.url }, "warren server listening");

@@ -12,6 +12,7 @@
 import type { BurrowClientPool } from "../burrow-client/pool.ts";
 import type { AnyWarrenDb } from "../db/client.ts";
 import type { Repos } from "../db/repos/index.ts";
+import type { PreviewAuth } from "../preview/cookie.ts";
 import type { SpawnFn } from "../projects/clone.ts";
 import type { ProjectsConfig } from "../projects/config.ts";
 import type { CanopyRegistryConfig } from "../registry/config.ts";
@@ -171,6 +172,23 @@ export interface ServerDeps {
 	 * still exercises.
 	 */
 	readonly previewMaxLive?: number;
+	/**
+	 * Operator's preview host suffix (R-19 / SPEC §11.L, warren-8a10).
+	 * Resolved at boot from `WARREN_PREVIEW_HOST`. When set, the request
+	 * pipeline runs the Host-match preview proxy preamble before the
+	 * normal auth + route match, and `GET /runs/:id/preview/login` issues
+	 * the signed-cookie handshake. Undefined → preview surface is off,
+	 * the login handler returns 503, and the proxy never inspects a
+	 * request.
+	 */
+	readonly previewHost?: string;
+	/**
+	 * Signed-cookie auth for the preview proxy (R-19 / SPEC §11.L,
+	 * warren-8a10). Bound at boot from `WARREN_API_TOKEN` (the same
+	 * bearer the rest of warren uses). Undefined when `WARREN_PREVIEW_HOST`
+	 * is unset or warren booted with `--no-auth`.
+	 */
+	readonly previewAuth?: PreviewAuth;
 }
 
 /**
@@ -206,7 +224,17 @@ export interface ServeOptions {
 	 * the wire is plumbed.
 	 */
 	idleTimeout?: number;
+	/**
+	 * Host-match preview proxy preamble (R-19 / SPEC §11.L, warren-8a10).
+	 * Runs BEFORE auth + route match. Returns a `Response` to short-circuit
+	 * the request, or `null` to fall through to the regular pipeline.
+	 * Undefined → no preview surface (zero overhead per request).
+	 */
+	previewProxy?: PreviewProxyHandler;
 }
+
+/** Host-match preview proxy preamble. See `src/preview/proxy.ts`. */
+export type PreviewProxyHandler = (request: Request, url: URL) => Promise<Response | null>;
 
 export interface ServeHandle {
 	readonly transport: Transport;

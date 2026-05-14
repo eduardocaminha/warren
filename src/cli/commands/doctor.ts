@@ -27,6 +27,7 @@ import {
 	checkCanopyClean,
 	checkCanopyClone,
 	checkDatabaseReachable,
+	checkPreviewAuthStrength,
 	checkPreviewPortAllocator,
 	checkWarrenConfig,
 	checkWarrenDb,
@@ -94,6 +95,8 @@ export async function runDoctor(
 	checks.push(await checkWarrenConfig({ projects: deps.projects ?? [] }));
 
 	checks.push(await previewPortAllocatorCheck(context.env, deps.db));
+
+	checks.push(checkPreviewAuthStrength({ env: context.env }));
 
 	checks.push(await burrowCheck(context.env, deps.probeBurrow));
 

@@ -475,6 +475,64 @@ export async function checkPreviewMaxLive(deps: {
 }
 
 /**
+ * Preview signed-cookie auth strength check (R-19 / SPEC §11.L,
+ * warren-8a10). When `WARREN_PREVIEW_HOST` is set, the proxy preamble
+ * is gated by an HMAC derived from `WARREN_API_TOKEN`. A weak token
+ * ("changeme", "warren-token", a tutorial copy-paste) leaves a
+ * private-code preview accessible to anyone who can guess the token —
+ * the SPEC's risk #2 mitigation. Warns when the token matches a
+ * placeholder or is shorter than `MIN_TOKEN_LENGTH`. No-ops when
+ * `WARREN_PREVIEW_HOST` is absent (the proxy surface is off).
+ */
+export const PREVIEW_TOKEN_PLACEHOLDERS: readonly string[] = [
+	"changeme",
+	"placeholder",
+	"warren-token",
+	"your-token-here",
+	"insecure",
+	"secret",
+];
+/** Below this length the token is considered weak even if not a known placeholder. */
+export const PREVIEW_MIN_TOKEN_LENGTH = 16;
+
+export function checkPreviewAuthStrength(deps: { readonly env: EnvLike }): DiagnosticCheck {
+	const host = deps.env.WARREN_PREVIEW_HOST?.trim() ?? "";
+	if (host === "") {
+		return {
+			name: "preview_auth_strength",
+			ok: true,
+			message: "WARREN_PREVIEW_HOST unset (preview proxy disabled)",
+		};
+	}
+	const token = deps.env.WARREN_API_TOKEN ?? "";
+	if (token === "") {
+		return {
+			name: "preview_auth_strength",
+			ok: false,
+			message: "WARREN_PREVIEW_HOST is set but WARREN_API_TOKEN is empty",
+			hint: "set WARREN_API_TOKEN to a strong random value (e.g. `openssl rand -hex 32`)",
+		};
+	}
+	if (PREVIEW_TOKEN_PLACEHOLDERS.includes(token.toLowerCase())) {
+		return {
+			name: "preview_auth_strength",
+			ok: false,
+			message: "WARREN_API_TOKEN looks like a placeholder copy-pasted from docs",
+			hint: "rotate WARREN_API_TOKEN to a strong random value (e.g. `openssl rand -hex 32`); the preview proxy uses it as the signed-cookie secret",
+		};
+	}
+	if (token.length < PREVIEW_MIN_TOKEN_LENGTH) {
+		return {
+			name: "preview_auth_strength",
+			ok: false,
+			message: `WARREN_API_TOKEN is ${token.length} chars; preview surface needs ≥${PREVIEW_MIN_TOKEN_LENGTH}`,
+			hint: "rotate WARREN_API_TOKEN to a strong random value (e.g. `openssl rand -hex 32`)",
+		};
+	}
+	return { name: "preview_auth_strength", ok: true, message: `host=${host}` };
+}
+
+/**
  * Aggregate `BurrowClientPool.probe()` across every registered worker
  * (warren-c0c9 / pl-9ba1 step 5). One ok=true iff every worker probed
  * cleanly; on partial failure the message lists every failing worker by

@@ -214,6 +214,7 @@ describe("runDoctor", () => {
 			"bwrap",
 			"warren_config",
 			"preview_port_allocator",
+			"preview_auth_strength",
 			"burrow_reachable",
 		]);
 	});

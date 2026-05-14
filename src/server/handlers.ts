@@ -43,6 +43,7 @@ import {
 	checkCanopyClean,
 	checkCanopyClone,
 	checkDatabaseReachable,
+	checkPreviewAuthStrength,
 	checkPreviewMaxLive,
 	checkPreviewPortAllocator,
 	checkWarrenConfig,
@@ -708,6 +709,90 @@ function cancelRunHandler(deps: ServerDeps): RouteHandler {
 	};
 }
 
+/**
+ * `GET /runs/:id/preview/login?token=<bearer>&redirect=<absolute-url>`
+ * (R-19 / SPEC §11.L, warren-8a10).
+ *
+ * The signed-cookie handshake the preview proxy depends on. A browser
+ * hitting `run-<id>.<host>` directly can't carry an Authorization
+ * header, so the operator opens this URL on the warren host, the
+ * handler validates the bearer in the query, sets a domain-scoped
+ * `warren_preview` cookie, and redirects to the preview subdomain.
+ *
+ * This route is auth-exempt (`isAuthExempt` whitelists `/preview/login`)
+ * because the standard bearer gate would 401 the browser before the
+ * handler ever ran. The handler does its own bearer check via
+ * `previewAuth.verifyLoginToken` (constant-time compare against the
+ * configured `WARREN_API_TOKEN`).
+ *
+ * `redirect` must be an absolute URL pointing at the run's preview
+ * subdomain — anything else is rejected so a stolen login link can't
+ * become an open redirect.
+ *
+ * 503 when `previewAuth` is null (no `WARREN_PREVIEW_HOST` configured,
+ * or `WARREN_API_TOKEN` unset under `--no-auth`); the proxy is also
+ * disabled in those configurations so the handshake has nothing to
+ * issue against.
+ */
+function previewLoginHandler(deps: ServerDeps): RouteHandler {
+	return async (ctx) => {
+		const runId = requireParam(ctx, "id");
+		if (deps.previewAuth === undefined || deps.previewHost === undefined) {
+			throw new ValidationError("preview surface is not configured on this warren", {
+				recoveryHint:
+					"set WARREN_PREVIEW_HOST (and ensure WARREN_API_TOKEN is set) to enable per-run previews",
+			});
+		}
+		const token = ctx.url.searchParams.get("token");
+		if (!deps.previewAuth.verifyLoginToken(token)) {
+			return jsonResponse(401, {
+				error: {
+					code: "unauthorized",
+					message: "preview login requires a valid ?token=<WARREN_API_TOKEN>",
+				},
+			});
+		}
+		// 404 fast if the run isn't known — issuing a cookie for a nonexistent
+		// run would let an attacker pre-seed a session keyed off a future id.
+		await deps.repos.runs.require(runId);
+
+		const redirect = ctx.url.searchParams.get("redirect");
+		const redirectTarget = resolvePreviewRedirect(redirect, runId, deps.previewHost);
+		if (redirectTarget === null) {
+			return jsonResponse(400, {
+				error: {
+					code: "preview_redirect_invalid",
+					message: `redirect must be an absolute URL under https://run-${runId}.${deps.previewHost}/`,
+				},
+			});
+		}
+
+		const now = deps.now?.() ?? new Date();
+		const cookie = deps.previewAuth.signCookie(runId, now);
+		return new Response(null, {
+			status: 302,
+			headers: {
+				location: redirectTarget,
+				"set-cookie": cookie.setCookieHeader,
+			},
+		});
+	};
+}
+
+function resolvePreviewRedirect(raw: string | null, runId: string, host: string): string | null {
+	const fallback = `https://run-${runId}.${host}/`;
+	if (raw === null || raw.length === 0) return fallback;
+	let parsed: URL;
+	try {
+		parsed = new URL(raw);
+	} catch {
+		return null;
+	}
+	if (parsed.protocol !== "https:") return null;
+	if (parsed.hostname !== `run-${runId}.${host}`) return null;
+	return parsed.toString();
+}
+
 function streamRunEventsHandler(deps: ServerDeps): RouteHandler {
 	return async (ctx) => {
 		const id = requireParam(ctx, "id");
@@ -849,6 +934,12 @@ function readyz(deps: ServerDeps): RouteHandler {
 		);
 		checks.push(await previewPortAllocatorReadyzCheck(deps));
 		checks.push(await previewMaxLiveReadyzCheck(deps));
+		// Auth-strength probe (R-19 / SPEC §11.L, warren-8a10) reads from
+		// process.env directly: server boot already validated the token shape,
+		// so /readyz only needs to surface the strength heuristic against the
+		// live env. Tests that don't override `process.env` get the inert
+		// "preview disabled" branch.
+		checks.push(checkPreviewAuthStrength({ env: process.env }));
 
 		const allOk = checks.every((c) => c.ok);
 		return jsonResponse(allOk ? 200 : 503, {
@@ -965,7 +1056,15 @@ const ROUTE_TABLE: readonly RouteEntry[] = [
 	{ method: "GET", pattern: "/runs/:id/events", build: streamRunEventsHandler },
 	{ method: "POST", pattern: "/runs/:id/steer", build: steerRunHandler },
 	{ method: "POST", pattern: "/runs/:id/cancel", build: cancelRunHandler },
+	{ method: "GET", pattern: "/runs/:id/preview/login", build: previewLoginHandler },
 ];
+
+/**
+ * Matches `/runs/<id>/preview/login` (the auth-exempt signed-cookie
+ * handshake from SPEC §11.L). Kept module-scoped so the request gate
+ * doesn't compile a regex per request.
+ */
+const PREVIEW_LOGIN_PATH_RE = /^\/runs\/[^/]+\/preview\/login\/?$/;
 
 export function buildApiRoutes(deps: ServerDeps): Route[] {
 	return ROUTE_TABLE.map((entry) => ({
@@ -1023,6 +1122,11 @@ export function isApiPath(pathname: string): boolean {
  */
 export function isAuthExempt(pathname: string): boolean {
 	if (pathname === "/healthz") return true;
+	// Preview login handshake (R-19 / SPEC §11.L): the browser arrives
+	// without an Authorization header and validates the bearer via
+	// `?token=<WARREN_API_TOKEN>`. The handler does its own constant-time
+	// compare, so the global gate must let the request through.
+	if (PREVIEW_LOGIN_PATH_RE.test(pathname)) return true;
 	return !isApiPath(pathname);
 }
 
