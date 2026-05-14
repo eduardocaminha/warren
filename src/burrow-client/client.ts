@@ -32,7 +32,14 @@
  *     wire types untouched.
  */
 
-import { HttpClient, type HttpClientOptions } from "@os-eco/burrow-cli";
+import {
+	NotFoundError as BurrowNotFoundError,
+	ValidationError as BurrowValidationError,
+	CredentialError,
+	HttpClient,
+	HttpClientError,
+	type HttpClientOptions,
+} from "@os-eco/burrow-cli";
 import { type BurrowClientConfig, type EnvLike, loadBurrowClientConfigFromEnv } from "./config.ts";
 import { BurrowUnreachableError } from "./errors.ts";
 
@@ -47,9 +54,11 @@ export interface BurrowClientOptions {
 export class BurrowClient {
 	readonly http: HttpClient;
 	readonly config: BurrowClientConfig;
+	private readonly fetchImpl: typeof fetch;
 
 	constructor(opts: BurrowClientOptions) {
 		this.config = opts.config;
+		this.fetchImpl = opts.fetch ?? fetch;
 		const httpOpts: HttpClientOptions = { transport: opts.config.transport };
 		if (opts.config.token !== undefined) httpOpts.token = opts.config.token;
 		if (opts.fetch !== undefined) httpOpts.fetch = opts.fetch;
@@ -96,6 +105,84 @@ export class BurrowClient {
 
 	async close(): Promise<void> {
 		await this.http.close();
+	}
+
+	/**
+	 * Flip the burrow worker's admin drain bit (warren-0f0c / pl-9ba1 step 6).
+	 * `POST /admin/drain` on the burrow side rejects new `POST /burrows` and
+	 * `POST /burrows/:id/runs` with a 503 `worker_draining`; in-flight runs
+	 * and read endpoints keep working so warren can still observe the
+	 * worker's terminal state. See burrow's `src/server/admin.ts`.
+	 *
+	 * `HttpClient` does not expose the admin namespace, so we hand-roll the
+	 * request against the same transport (unix socket / TCP + bearer token)
+	 * the rest of the client uses. Transport-layer failures rethrow as
+	 * `BurrowUnreachableError` so warren's HTTP layer returns 503 with a
+	 * structured envelope; server-side error envelopes (e.g. an older
+	 * burrow without `/admin/drain` returning 404 `not_found`) pass through
+	 * as the rehydrated `BurrowError` subclass.
+	 */
+	async setDrain(drain: boolean): Promise<{ drain: boolean }> {
+		return withTransportMapping(this.config, async () => {
+			const url = buildAdminUrl(this.config);
+			const headers: Record<string, string> = { "content-type": "application/json" };
+			if (this.config.token !== undefined) headers.authorization = `Bearer ${this.config.token}`;
+			const init: RequestInit & { unix?: string } = {
+				method: "POST",
+				headers,
+				body: JSON.stringify({ drain }),
+			};
+			if (this.config.transport.kind === "unix") init.unix = this.config.transport.path;
+			const res = await this.fetchImpl(url, init);
+			if (!res.ok) {
+				throw await rehydrateAdminError(res);
+			}
+			return (await res.json()) as { drain: boolean };
+		});
+	}
+}
+
+function buildAdminUrl(config: BurrowClientConfig): string {
+	const base =
+		config.transport.kind === "unix"
+			? "http://localhost"
+			: `http://${config.transport.hostname}:${config.transport.port}`;
+	return `${base}/admin/drain`;
+}
+
+/**
+ * Re-shape a non-2xx response from `/admin/drain` into the same shape
+ * `HttpClient`'s namespaces throw. `@os-eco/burrow-cli` does not export
+ * its private `rehydrateError`, so we cover the codes the admin endpoint
+ * can plausibly emit (not_found, validation_error, credential_error) and
+ * fall through to the public `HttpClientError` for everything else.
+ * Warren's `renderError` (`src/server/errors.ts`) already maps each of
+ * these.
+ */
+interface AdminErrorEnvelope {
+	error?: { code?: string; message?: string; hint?: string };
+}
+
+async function rehydrateAdminError(res: Response): Promise<Error> {
+	let envelope: AdminErrorEnvelope | null = null;
+	try {
+		envelope = (await res.json()) as AdminErrorEnvelope;
+	} catch {
+		// Non-JSON body — fall through to a generic HttpClientError below.
+	}
+	const code = envelope?.error?.code ?? "internal_error";
+	const message = envelope?.error?.message ?? `burrow /admin/drain returned HTTP ${res.status}`;
+	const hint = envelope?.error?.hint;
+	const opts = hint !== undefined ? { recoveryHint: hint } : undefined;
+	switch (code) {
+		case "not_found":
+			return new BurrowNotFoundError(message, opts);
+		case "validation_error":
+			return new BurrowValidationError(message, opts);
+		case "credential_error":
+			return new CredentialError(message, opts);
+		default:
+			return new HttpClientError(res.status, code, message, hint);
 	}
 }
 

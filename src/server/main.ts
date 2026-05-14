@@ -41,6 +41,7 @@ import { createWarrenConfigCache } from "../warren-config/index.ts";
 import { NO_AUTH, resolveAuth } from "./auth.ts";
 import { bootBridges } from "./bridges.ts";
 import { type EnvLike, loadServerConfigFromEnv } from "./config.ts";
+import { loadWorkerProbeConfigFromEnv, startWorkerProbe } from "./probe.ts";
 import { bootScheduler } from "./scheduler.ts";
 import { startServer } from "./server.ts";
 import type { AuthProvider, Logger, ServeHandle, ServerDeps } from "./types.ts";
@@ -142,6 +143,25 @@ export async function bootServer(opts: BootServerOptions = {}): Promise<WarrenSe
 	const warrenConfigs = createWarrenConfigCache();
 	const runBranchPrefixDefault = loadRunBranchPrefixFromEnv(env);
 
+	const probeConfig = loadWorkerProbeConfigFromEnv(env);
+	const workerProbe = startWorkerProbe({
+		pool: burrowClientPool,
+		workers: repos.workers,
+		config: probeConfig,
+		logger: probeLoggerFromPino(logger),
+	});
+	if (probeConfig.disabled === true) {
+		logger.info({}, "worker probe disabled via WARREN_WORKER_PROBE_DISABLED");
+	} else {
+		logger.info(
+			{
+				intervalMs: probeConfig.intervalMs ?? 30_000,
+				timeoutMs: probeConfig.timeoutMs ?? 2_000,
+			},
+			"worker probe running",
+		);
+	}
+
 	const schedulerConfig = loadTriggerSchedulerConfigFromEnv(env);
 	const scheduler = bootScheduler({
 		repos,
@@ -202,10 +222,25 @@ export async function bootServer(opts: BootServerOptions = {}): Promise<WarrenSe
 			// spawnRun before bridges/burrow/db disappear under it.
 			await handle.stop();
 			await scheduler.stop();
+			await workerProbe.stop();
 			await bridgesBoot.registry.stopAll();
 			await burrowClientPool.close();
 			closeDatabase(db);
 		},
+	};
+}
+
+function probeLoggerFromPino(logger: Logger): {
+	info(obj: object, msg?: string): void;
+	warn(obj: object, msg?: string): void;
+	error(obj: object, msg?: string): void;
+	debug?(obj: object, msg?: string): void;
+} {
+	return {
+		info: (obj, msg) => logger.info(obj, msg),
+		warn: (obj, msg) => logger.warn(obj, msg),
+		error: (obj, msg) => logger.error(obj, msg),
+		debug: (obj, msg) => logger.debug?.(obj, msg),
 	};
 }
 

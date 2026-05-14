@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { NotFoundError as BurrowNotFoundError } from "@os-eco/burrow-cli";
+import {
+	NotFoundError as BurrowNotFoundError,
+	ValidationError as BurrowValidationError,
+	CredentialError,
+	HttpClientError,
+} from "@os-eco/burrow-cli";
 import {
 	BurrowClient,
 	BurrowUnreachableError,
@@ -100,6 +105,117 @@ describe("BurrowClient.probe", () => {
 			fetch: stubFetch,
 		});
 		await expect(c.probe(50)).rejects.toBeInstanceOf(BurrowUnreachableError);
+	});
+});
+
+describe("BurrowClient.setDrain", () => {
+	test("POSTs /admin/drain with the requested drain flag and returns the echoed state", async () => {
+		const calls: { url: string; method: string; body: string; auth: string | null }[] = [];
+		const stubFetch = stub(async (input, init?: RequestInit) => {
+			const url = String(input);
+			calls.push({
+				url,
+				method: init?.method ?? "GET",
+				body: typeof init?.body === "string" ? init.body : "",
+				auth: (init?.headers as Record<string, string> | undefined)?.authorization ?? null,
+			});
+			return jsonResponse(200, { drain: true });
+		});
+		const c = new BurrowClient({
+			config: {
+				transport: { kind: "tcp", hostname: "burrow.local", port: 9410 },
+				token: "secret",
+			},
+			fetch: stubFetch,
+		});
+		const out = await c.setDrain(true);
+		expect(out).toEqual({ drain: true });
+		expect(calls).toHaveLength(1);
+		const call = calls[0];
+		if (!call) throw new Error("expected one call");
+		expect(call.method).toBe("POST");
+		expect(call.url).toBe("http://burrow.local:9410/admin/drain");
+		expect(JSON.parse(call.body)).toEqual({ drain: true });
+		expect(call.auth).toBe("Bearer secret");
+	});
+
+	test("forwards `unix` socket path when the transport is unix", async () => {
+		let observedUnix: string | undefined;
+		const stubFetch = ((_input: URL | RequestInfo, init?: RequestInit & { unix?: string }) => {
+			observedUnix = init?.unix;
+			return Promise.resolve(jsonResponse(200, { drain: false }));
+		}) as unknown as typeof fetch;
+		const c = new BurrowClient({
+			config: { transport: { kind: "unix", path: "/var/run/burrow.sock" } },
+			fetch: stubFetch,
+		});
+		await c.setDrain(false);
+		expect(observedUnix).toBe("/var/run/burrow.sock");
+	});
+
+	test("converts a transport-layer fetch failure into BurrowUnreachableError", async () => {
+		const stubFetch = stub(async () => {
+			const err = new TypeError("fetch failed");
+			(err as unknown as { cause: { code: string } }).cause = { code: "ECONNREFUSED" };
+			throw err;
+		});
+		const c = new BurrowClient({
+			config: { transport: { kind: "tcp", hostname: "burrow.local", port: 9410 } },
+			fetch: stubFetch,
+		});
+		await expect(c.setDrain(true)).rejects.toBeInstanceOf(BurrowUnreachableError);
+	});
+
+	test("rehydrates a 404 not_found envelope as BurrowNotFoundError (older burrow)", async () => {
+		const stubFetch = stub(async () =>
+			jsonResponse(404, {
+				error: { code: "not_found", message: "no route matches /admin/drain" },
+			}),
+		);
+		const c = new BurrowClient({
+			config: { transport: { kind: "tcp", hostname: "burrow.local", port: 9410 } },
+			fetch: stubFetch,
+		});
+		await expect(c.setDrain(true)).rejects.toBeInstanceOf(BurrowNotFoundError);
+	});
+
+	test("rehydrates a 400 validation_error envelope as BurrowValidationError", async () => {
+		const stubFetch = stub(async () =>
+			jsonResponse(400, {
+				error: { code: "validation_error", message: "field 'drain' must be a boolean" },
+			}),
+		);
+		const c = new BurrowClient({
+			config: { transport: { kind: "unix", path: "/tmp/x.sock" } },
+			fetch: stubFetch,
+		});
+		await expect(c.setDrain(true)).rejects.toBeInstanceOf(BurrowValidationError);
+	});
+
+	test("rehydrates a 401 credential_error envelope as CredentialError", async () => {
+		const stubFetch = stub(async () =>
+			jsonResponse(401, {
+				error: { code: "credential_error", message: "missing bearer token" },
+			}),
+		);
+		const c = new BurrowClient({
+			config: { transport: { kind: "unix", path: "/tmp/x.sock" } },
+			fetch: stubFetch,
+		});
+		await expect(c.setDrain(true)).rejects.toBeInstanceOf(CredentialError);
+	});
+
+	test("falls back to HttpClientError for unmapped codes", async () => {
+		const stubFetch = stub(async () =>
+			jsonResponse(500, {
+				error: { code: "weird_unknown", message: "boom" },
+			}),
+		);
+		const c = new BurrowClient({
+			config: { transport: { kind: "unix", path: "/tmp/x.sock" } },
+			fetch: stubFetch,
+		});
+		await expect(c.setDrain(true)).rejects.toBeInstanceOf(HttpClientError);
 	});
 });
 
