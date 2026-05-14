@@ -80,6 +80,70 @@ const TimezoneSchema = z.string().min(1, "timezone must be non-empty if provided
 
 const PromptSchema = z.string().min(1, "prompt must be non-empty if provided");
 
+// warren-7be9 / SPEC §11.L: idle_ttl and max_lifetime are both string-duration
+// fields (e.g. "30m", "8h", "1h30m"). The launcher / eviction worker parses
+// these into milliseconds; the schema only validates shape so malformed input
+// surfaces in the per-file errors envelope before reap-time. Compound forms
+// like "1h30m" are accepted so operators don't have to pre-do the math.
+const DurationStringSchema = z
+	.string()
+	.min(1, "duration must be non-empty if provided")
+	.regex(
+		/^(\d+(ms|s|m|h|d))+$/,
+		'duration must be one or more <number><unit> pairs (units: ms, s, m, h, d) — e.g. "30m", "8h", "1h30m"',
+	);
+
+const PreviewCommandSchema = z.string().min(1, "preview.command must be non-empty");
+
+// TCP port the preview server binds to inside the sandbox. Privileged ports
+// (1-1023) are accepted because the sandbox runs unprivileged-by-namespace —
+// rejecting them here would surprise operators whose dev server binds 80/443.
+const PreviewPortSchema = z
+	.number()
+	.int("preview.port must be an integer")
+	.min(1, "preview.port must be between 1 and 65535")
+	.max(65535, "preview.port must be between 1 and 65535");
+
+const PreviewReadinessPathSchema = z
+	.string()
+	.min(1, "preview.readiness_path must be non-empty if provided")
+	.regex(/^\//, "preview.readiness_path must start with '/'");
+
+// warren-7be9 / SPEC §11.L: the schema carries a `type` discriminator from
+// day one so V2 can add `type: 'static'` (build step + dir to serve) without
+// breaking the config. V1 implements only `type: 'server'`. `type: 'static'`
+// is accepted by the parser but rejected at launch time by the reap-step
+// launcher (warren-f156) with an error that names the follow-up seed.
+const ServerPreviewConfigSchema = z
+	.object({
+		type: z.literal("server"),
+		command: PreviewCommandSchema,
+		port: PreviewPortSchema,
+		readiness_path: PreviewReadinessPathSchema.optional(),
+		idle_ttl: DurationStringSchema.optional(),
+		max_lifetime: DurationStringSchema.optional(),
+	})
+	.strict();
+
+// Static preview shape is intentionally permissive at the schema layer — the
+// follow-up seed under pl-2c59 will lock its fields. We pin only the `type`
+// discriminator so the launcher can recognize and reject it with a
+// "not yet implemented" message that names that seed.
+const StaticPreviewConfigSchema = z
+	.object({
+		type: z.literal("static"),
+	})
+	.passthrough();
+
+export const PreviewConfigSchema = z.discriminatedUnion("type", [
+	ServerPreviewConfigSchema,
+	StaticPreviewConfigSchema,
+]);
+
+export type ServerPreviewConfig = z.infer<typeof ServerPreviewConfigSchema>;
+export type StaticPreviewConfig = z.infer<typeof StaticPreviewConfigSchema>;
+export type PreviewConfig = z.infer<typeof PreviewConfigSchema>;
+
 const CronTriggerSchema = z
 	.object({
 		id: TriggerIdSchema,
@@ -128,6 +192,12 @@ export const DefaultsConfigSchema = z
 		// to burrows.up. Precedence project default > WARREN_RUN_BRANCH_PREFIX
 		// env > built-in "burrow" (kept as the default for backward compat).
 		runBranchPrefix: RunBranchPrefixSchema.optional(),
+		// warren-7be9 / SPEC §11.L: per-run preview environments (R-19).
+		// Missing-block is not an error — projects without a `preview` field
+		// simply skip the reap-time preview launch sub-step. File location
+		// stays `.warren/defaults.json` for V1; the broader `.warren/` YAML
+		// reorg lives in a follow-up seed under pl-2c59.
+		preview: PreviewConfigSchema.optional(),
 	})
 	.strict();
 

@@ -172,6 +172,49 @@ describe("loadWarrenConfig", () => {
 		expect(result.errors).toEqual([]);
 	});
 
+	// warren-7be9 / SPEC §11.L: malformed preview block surfaces in the per-file
+	// errors envelope (mx-66d478) — same pattern as any other `.warren/` field.
+	test("malformed preview block in defaults.json → defaults null, schemaError entry", async () => {
+		const result = await loadWarrenConfig({
+			projectPath: PROJECT,
+			...fs({
+				[DEFAULTS_PATH]: JSON.stringify({
+					preview: { type: "server", command: "bun run dev" /* missing port */ },
+				}),
+			}),
+		});
+		expect(result.defaults).toBeNull();
+		expect(result.errors).toHaveLength(1);
+		expect(result.errors[0]?.code).toBe(WARREN_CONFIG_FILE_ERROR_CODES.schemaError);
+		expect(result.errors[0]?.file).toBe(`${WARREN_CONFIG_DIR}/${WARREN_CONFIG_FILES.defaults}`);
+		expect(result.errors[0]?.message).toMatch(/preview/);
+	});
+
+	test("valid preview block in defaults.json → parsed through to LoadedWarrenConfig", async () => {
+		const result = await loadWarrenConfig({
+			projectPath: PROJECT,
+			...fs({
+				[DEFAULTS_PATH]: JSON.stringify({
+					preview: {
+						type: "server",
+						command: "bun run dev",
+						port: 3000,
+						readiness_path: "/healthz",
+						idle_ttl: "30m",
+						max_lifetime: "8h",
+					},
+				}),
+			}),
+		});
+		expect(result.errors).toEqual([]);
+		expect(result.defaults?.preview).toBeDefined();
+		if (result.defaults?.preview && result.defaults.preview.type === "server") {
+			expect(result.defaults.preview.command).toBe("bun run dev");
+			expect(result.defaults.preview.port).toBe(3000);
+			expect(result.defaults.preview.idle_ttl).toBe("30m");
+		}
+	});
+
 	test("readFile throws (e.g. EACCES) → recorded as parseError, no throw", async () => {
 		const present = new Set<string>([PROJECT, DIR_PATH, TRIGGERS_PATH]);
 		const result = await loadWarrenConfig({
