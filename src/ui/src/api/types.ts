@@ -20,6 +20,8 @@ export interface AgentRow {
 	renderedJson: unknown;
 	registeredAt: string;
 	lastRefreshed: string;
+	/** Provenance decorated by the server (warren-f6ad / readAgentSource). */
+	source?: "builtin" | "library";
 }
 
 export interface ProjectRow {
