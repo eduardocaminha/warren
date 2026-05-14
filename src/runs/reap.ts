@@ -80,6 +80,7 @@ import { promisify } from "node:util";
 import { NotFoundError } from "@os-eco/burrow-cli";
 import type { BurrowClient } from "../burrow-client/client.ts";
 import { withTransportMapping } from "../burrow-client/client.ts";
+import type { BurrowClientPool } from "../burrow-client/pool.ts";
 import type { Repos } from "../db/repos/index.ts";
 import type { EventRow, RunFailureReason, RunTerminalState } from "../db/schema.ts";
 import { parseGitHubUrl } from "../projects/url.ts";
@@ -123,7 +124,14 @@ export interface ReapRunInput {
 	/** The burrow-observed terminal state to transition the warren row into. */
 	readonly outcome: RunTerminalState;
 	readonly repos: Repos;
-	readonly burrowClient: BurrowClient;
+	/**
+	 * Multi-worker burrow pool (warren-c0c9 / pl-9ba1 step 5). reap resolves
+	 * the owning worker via `pool.clientFor({burrowId: run.burrowId})` for
+	 * the workspace lookup + seeds-close mirror http calls. Propagates
+	 * `StickyWorkerUnreachableError` (503 via src/server/errors.ts) when the
+	 * pinned worker is `unreachable`.
+	 */
+	readonly burrowClientPool: BurrowClientPool;
 	/** If supplied, every reap-emitted event is published here too. */
 	readonly broker?: RunEventBroker;
 	readonly fs?: ReapFs;
@@ -286,12 +294,14 @@ export async function reapRun(input: ReapRunInput): Promise<ReapRunResult> {
 
 	let workspacePath: string | null = null;
 	let branch: string | null = null;
+	let workerClient: BurrowClient | null = null;
 	if (run.burrowId === null) {
 		fail("workspace_lookup", new Error("run has no burrow_id; nothing to reap from"));
 	} else {
 		try {
-			const burrow = await withTransportMapping(input.burrowClient.config, () =>
-				input.burrowClient.http.burrows.get(run.burrowId as string),
+			workerClient = input.burrowClientPool.clientFor({ burrowId: run.burrowId }).client;
+			const burrow = await withTransportMapping(workerClient.config, () =>
+				(workerClient as BurrowClient).http.burrows.get(run.burrowId as string),
 			);
 			workspacePath = burrow.workspacePath;
 			branch = typeof burrow.branch === "string" && burrow.branch !== "" ? burrow.branch : null;
@@ -319,8 +329,10 @@ export async function reapRun(input: ReapRunInput): Promise<ReapRunResult> {
 		}
 
 		try {
+			// workerClient is set whenever workspacePath !== null (both land in
+			// the same try-block above), so the cast is sound.
 			seedsClosed = await mirrorClosedSeeds({
-				burrowClient: input.burrowClient,
+				burrowClient: workerClient as BurrowClient,
 				burrowId: run.burrowId as string,
 				projectPath: project.localPath,
 				fs,

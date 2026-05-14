@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { BurrowClient } from "../burrow-client/index.ts";
+import { BurrowClient, BurrowClientPool } from "../burrow-client/index.ts";
 import { openDatabase, type WarrenDb } from "../db/client.ts";
 import { createRepos, type Repos } from "../db/repos/index.ts";
 import type { RunTerminalState } from "../db/schema.ts";
@@ -10,6 +10,19 @@ import {
 	RunEventBroker,
 } from "../runs/index.ts";
 import { bootBridges, createBridgeRegistry } from "./bridges.ts";
+
+/**
+ * One-worker pool wired to a stub burrow client (warren-c0c9). Upserts a
+ * `local` worker row; tests that drive the live `runWithReconnect` need an
+ * additional `burrows` row pointing burrowId → local, which the per-test
+ * setup handles inline.
+ */
+function makePool(repos: Repos, client?: BurrowClient, workerName = "local"): BurrowClientPool {
+	repos.workers.upsert({ name: workerName, url: "unix:///tmp/x.sock" });
+	const pool = new BurrowClientPool({ repos });
+	pool.register(workerName, client ?? makeBurrowClient());
+	return pool;
+}
 
 function reapStub(outcome: RunTerminalState): ReapRunResult {
 	return {
@@ -63,16 +76,16 @@ describe("createBridgeRegistry", () => {
 		const registry = createBridgeRegistry({
 			repos,
 			broker: new RunEventBroker(),
-			burrowClient: makeBurrowClient(),
+			burrowClientPool: makePool(repos),
 			bridge: async (input) => {
 				calls.push(input);
 				return { written: 0, skipped: 0, errored: false };
 			},
 		});
 
-		registry.start("run_aaaaaaaaaaaa", "burrow_run_xxxxxxxxxx");
-		registry.start("run_aaaaaaaaaaaa", "burrow_run_xxxxxxxxxx"); // idempotent
-		registry.start("run_bbbbbbbbbbbb", "burrow_run_yyyyyyyyyy");
+		registry.start("run_aaaaaaaaaaaa", "burrow_run_xxxxxxxxxx", "bur_a");
+		registry.start("run_aaaaaaaaaaaa", "burrow_run_xxxxxxxxxx", "bur_a"); // idempotent
+		registry.start("run_bbbbbbbbbbbb", "burrow_run_yyyyyyyyyy", "bur_b");
 
 		expect(calls.length).toBe(2);
 		expect(registry.size()).toBe(2);
@@ -83,14 +96,14 @@ describe("createBridgeRegistry", () => {
 		const registry = createBridgeRegistry({
 			repos,
 			broker: new RunEventBroker(),
-			burrowClient: makeBurrowClient(),
+			burrowClientPool: makePool(repos),
 			bridge: () =>
 				new Promise<BridgeRunStreamResult>((resolve) => {
 					resolvers.push(() => resolve({ written: 0, skipped: 0, errored: false }));
 				}),
 		});
 
-		registry.start("run_aaaaaaaaaaaa", "burrow_run_xxxxxxxxxx");
+		registry.start("run_aaaaaaaaaaaa", "burrow_run_xxxxxxxxxx", "bur_a");
 		expect(registry.size()).toBe(1);
 
 		for (const r of resolvers) r();
@@ -103,7 +116,7 @@ describe("createBridgeRegistry", () => {
 		const registry = createBridgeRegistry({
 			repos,
 			broker: new RunEventBroker(),
-			burrowClient: makeBurrowClient(),
+			burrowClientPool: makePool(repos),
 			bridge: (input) =>
 				new Promise<BridgeRunStreamResult>((resolve) => {
 					input.signal?.addEventListener("abort", () => {
@@ -113,7 +126,7 @@ describe("createBridgeRegistry", () => {
 				}),
 		});
 
-		registry.start("run_aaaaaaaaaaaa", "burrow_run_xxxxxxxxxx");
+		registry.start("run_aaaaaaaaaaaa", "burrow_run_xxxxxxxxxx", "bur_a");
 		await registry.stopAll();
 		expect(abortObserved).toBe(true);
 		expect(registry.size()).toBe(0);
@@ -140,7 +153,7 @@ describe("createBridgeRegistry", () => {
 		const registry = createBridgeRegistry({
 			repos,
 			broker: new RunEventBroker(),
-			burrowClient: makeBurrowClient(),
+			burrowClientPool: makePool(repos),
 			bridge: async () => {
 				calls += 1;
 				// First two attempts fail mid-stream (e.g., burrow's 10s
@@ -153,7 +166,7 @@ describe("createBridgeRegistry", () => {
 			reconnectBackoffMs: [0],
 		});
 
-		registry.start(run.id, "rb_a");
+		registry.start(run.id, "rb_a", "bur_a");
 		while (registry.size() > 0) await new Promise((r) => setTimeout(r, 0));
 		expect(calls).toBe(3);
 	});
@@ -179,7 +192,7 @@ describe("createBridgeRegistry", () => {
 		const registry = createBridgeRegistry({
 			repos,
 			broker: new RunEventBroker(),
-			burrowClient: makeBurrowClient(),
+			burrowClientPool: makePool(repos),
 			bridge: async () => {
 				calls += 1;
 				// Simulate the reaper finalizing between the first errored
@@ -193,7 +206,7 @@ describe("createBridgeRegistry", () => {
 			reconnectBackoffMs: [0],
 		});
 
-		registry.start(run.id, "rb_a");
+		registry.start(run.id, "rb_a", "bur_a");
 		while (registry.size() > 0) await new Promise((r) => setTimeout(r, 0));
 		expect(calls).toBe(1);
 		expect(repos.runs.require(run.id).state).toBe("succeeded");
@@ -221,7 +234,7 @@ describe("createBridgeRegistry", () => {
 		const registry = createBridgeRegistry({
 			repos,
 			broker: new RunEventBroker(),
-			burrowClient: makeBurrowClient(),
+			burrowClientPool: makePool(repos),
 			bridge: async () => {
 				bridgeCalls += 1;
 				return {
@@ -238,7 +251,7 @@ describe("createBridgeRegistry", () => {
 			reconnectBackoffMs: [0],
 		});
 
-		registry.start(run.id, "rb_a");
+		registry.start(run.id, "rb_a", "bur_a");
 		while (registry.size() > 0) await new Promise((r) => setTimeout(r, 0));
 		expect(bridgeCalls).toBe(1);
 		expect(reapCalls).toEqual([{ runId: run.id, outcome: "failed" }]);
@@ -264,7 +277,7 @@ describe("createBridgeRegistry", () => {
 		const registry = createBridgeRegistry({
 			repos,
 			broker: new RunEventBroker(),
-			burrowClient: makeBurrowClient(),
+			burrowClientPool: makePool(repos),
 			bridge: async () => ({
 				written: 1,
 				skipped: 0,
@@ -277,7 +290,7 @@ describe("createBridgeRegistry", () => {
 			reconnectBackoffMs: [0],
 		});
 
-		registry.start(run.id, "rb_a");
+		registry.start(run.id, "rb_a", "bur_a");
 		while (registry.size() > 0) await new Promise((r) => setTimeout(r, 0));
 		// No reconnect after terminalDetected even when reap throws.
 		expect(registry.size()).toBe(0);
@@ -304,7 +317,7 @@ describe("createBridgeRegistry", () => {
 		const registry = createBridgeRegistry({
 			repos,
 			broker: new RunEventBroker(),
-			burrowClient: makeBurrowClient(),
+			burrowClientPool: makePool(repos),
 			bridge: async () => {
 				calls += 1;
 				return { written: 0, skipped: 0, errored: true };
@@ -313,7 +326,7 @@ describe("createBridgeRegistry", () => {
 			reconnectBackoffMs: [60_000],
 		});
 
-		registry.start(run.id, "rb_a");
+		registry.start(run.id, "rb_a", "bur_a");
 		await new Promise((r) => setTimeout(r, 5));
 		await registry.stopAll();
 		expect(calls).toBe(1);
@@ -369,7 +382,7 @@ describe("bootBridges", () => {
 		const result = bootBridges({
 			repos,
 			broker: new RunEventBroker(),
-			burrowClient: makeBurrowClient(),
+			burrowClientPool: makePool(repos),
 			bridge: async (input) => {
 				calls.push(input.runId);
 				return { written: 0, skipped: 0, errored: false };
@@ -386,7 +399,7 @@ describe("bootBridges", () => {
 		const result = bootBridges({
 			repos,
 			broker: new RunEventBroker(),
-			burrowClient: makeBurrowClient(),
+			burrowClientPool: makePool(repos),
 		});
 		expect(result.resumed.length).toBe(0);
 		expect(result.skipped.length).toBe(0);

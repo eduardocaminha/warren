@@ -84,19 +84,14 @@ function poolWith(
 
 function depsFor(repos: Repos, pool: BurrowClientPool): ServerDeps {
 	const broker = new RunEventBroker();
-	const first =
-		pool.names().length > 0
-			? pool.get(pool.names()[0] ?? "")
-			: new BurrowClient({ config: { transport: { kind: "unix", path: "/tmp/empty.sock" } } });
 	return {
 		repos,
-		burrowClient: first,
 		burrowClientPool: pool,
 		broker,
 		bridges: createBridgeRegistry({
 			repos,
 			broker,
-			burrowClient: first,
+			burrowClientPool: pool,
 			bridge: async () => ({ written: 0, skipped: 0, errored: false }),
 		}),
 		projectsConfig: { root: "/tmp/projects", gitBinary: "git" },

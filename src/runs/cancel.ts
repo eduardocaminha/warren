@@ -42,8 +42,8 @@
  */
 
 import type { Run as BurrowRun } from "@os-eco/burrow-cli";
-import type { BurrowClient } from "../burrow-client/client.ts";
 import { withTransportMapping } from "../burrow-client/client.ts";
+import type { BurrowClientPool } from "../burrow-client/pool.ts";
 import { ValidationError } from "../core/errors.ts";
 import type { Repos } from "../db/repos/index.ts";
 import { RUN_TERMINAL_STATES, type RunState, type RunTerminalState } from "../db/schema.ts";
@@ -56,7 +56,14 @@ export interface CancelRunInput {
 	readonly runId: string;
 	readonly reason?: string;
 	readonly repos: Repos;
-	readonly burrowClient: BurrowClient;
+	/**
+	 * Multi-worker burrow pool (warren-c0c9 / pl-9ba1 step 5). cancel resolves
+	 * the owning worker via `pool.clientFor({burrowId: run.burrowId})` so the
+	 * cancel POST routes to the worker that hosts the burrow. Propagates
+	 * `StickyWorkerUnreachableError` (503 via src/server/errors.ts) when the
+	 * pinned worker is `unreachable`.
+	 */
+	readonly burrowClientPool: BurrowClientPool;
 	/** If supplied, the audit event is published here too. */
 	readonly broker?: RunEventBroker;
 	readonly now?: () => Date;
@@ -109,8 +116,16 @@ export async function cancelRun(input: CancelRunInput): Promise<CancelRunResult>
 	}
 
 	const burrowRunId = run.burrowRunId;
-	const burrowRun = await withTransportMapping(input.burrowClient.config, () =>
-		input.burrowClient.http.runs.cancel(
+	if (run.burrowId === null) {
+		// A run with a burrowRunId always has a burrowId (spawn writes them
+		// in that order). Defensive narrowing for noUncheckedIndexedAccess.
+		throw new ValidationError(
+			`run '${run.id}' has burrow_run_id but no burrow_id; cannot resolve worker`,
+		);
+	}
+	const { client } = input.burrowClientPool.clientFor({ burrowId: run.burrowId });
+	const burrowRun = await withTransportMapping(client.config, () =>
+		client.http.runs.cancel(
 			burrowRunId,
 			input.reason !== undefined ? { reason: input.reason } : {},
 		),
@@ -136,7 +151,7 @@ export async function cancelRun(input: CancelRunInput): Promise<CancelRunResult>
 				runId: run.id,
 				outcome: burrowRun.state,
 				repos: input.repos,
-				burrowClient: input.burrowClient,
+				burrowClientPool: input.burrowClientPool,
 				...(input.broker !== undefined ? { broker: input.broker } : {}),
 				...(input.now !== undefined ? { now: input.now } : {}),
 				...(input.logger !== undefined ? { logger: input.logger } : {}),

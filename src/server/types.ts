@@ -9,7 +9,6 @@
  * `db/repos/` — this file just declares the seams the wiring rides on.
  */
 
-import type { BurrowClient } from "../burrow-client/client.ts";
 import type { BurrowClientPool } from "../burrow-client/pool.ts";
 import type { Repos } from "../db/repos/index.ts";
 import type { SpawnFn } from "../projects/clone.ts";
@@ -98,14 +97,11 @@ export interface Logger {
  */
 export interface ServerDeps {
 	readonly repos: Repos;
-	readonly burrowClient: BurrowClient;
 	/**
-	 * Multi-worker burrow client pool (warren-39c3 / pl-9ba1 step 4).
-	 * `POST /runs` and `POST /projects/:id/triggers/:triggerId/run` thread
-	 * this into `spawnRun` so placement (`placeFor`) picks the worker that
-	 * owns each new burrow. Cancel / steer / readyz still read from the
-	 * legacy `burrowClient` field until step 5 routes them through
-	 * `clientFor`.
+	 * Multi-worker burrow client pool (warren-39c3 / warren-c0c9 / pl-9ba1).
+	 * Every burrow-targeting handler routes through this: `placeFor` for new
+	 * burrows, `clientFor` for per-resource reads (cancel / steer / reap /
+	 * bridges / GET /burrows/:id), and `probe()` for /readyz.
 	 */
 	readonly burrowClientPool: BurrowClientPool;
 	readonly broker: RunEventBroker;
@@ -160,8 +156,12 @@ export interface ServerDeps {
  * pass. Concrete impl lives in `./bridges.ts`.
  */
 export interface BridgeRegistry {
-	/** Start a bridge for the given run; idempotent against a running bridge. */
-	start(runId: string, burrowRunId: string): void;
+	/**
+	 * Start a bridge for the given run; idempotent against a running bridge.
+	 * `burrowId` is required so the bridge can resolve the owning worker via
+	 * `BurrowClientPool.clientFor` (warren-c0c9).
+	 */
+	start(runId: string, burrowRunId: string, burrowId: string): void;
 	/** Abort all in-flight bridges and await their drain. */
 	stopAll(): Promise<void>;
 	/** Test/diagnostic surface — number of currently-attached bridges. */

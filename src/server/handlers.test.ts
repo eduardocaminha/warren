@@ -106,17 +106,17 @@ function makeBurrowClient(
 
 function depsFor(repos: Repos, burrowClient: BurrowClient, bridges?: BridgeRegistry): ServerDeps {
 	const broker = new RunEventBroker();
+	const burrowClientPool = poolFor(repos, burrowClient);
 	return {
 		repos,
-		burrowClient,
-		burrowClientPool: poolFor(repos, burrowClient),
+		burrowClientPool,
 		broker,
 		bridges:
 			bridges ??
 			createBridgeRegistry({
 				repos,
 				broker,
-				burrowClient,
+				burrowClientPool,
 				bridge: async () => ({ written: 0, skipped: 0, errored: false }),
 			}),
 		canopyConfig: {
@@ -673,7 +673,6 @@ describe("POST /agents/refresh without canopy library (warren-d3e9)", () => {
 		// Strip canopyConfig — equivalent to booting without CANOPY_REPO_URL.
 		const noCanopyDeps: ServerDeps = {
 			repos: deps.repos,
-			burrowClient: deps.burrowClient,
 			burrowClientPool: deps.burrowClientPool,
 			broker: deps.broker,
 			bridges: deps.bridges,

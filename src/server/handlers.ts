@@ -38,7 +38,7 @@ import { fanOutAcrossWorkers } from "../burrow-client/fanout.ts";
 import { NotFoundError, ValidationError } from "../core/errors.ts";
 import type { AgentRow } from "../db/schema.ts";
 import {
-	checkBurrowReachable,
+	checkBurrowPoolReachable,
 	checkBwrap,
 	checkCanopyClean,
 	checkCanopyClone,
@@ -352,7 +352,7 @@ function runProjectTriggerHandler(deps: ServerDeps): RouteHandler {
 
 		// Hand off to the bridge so events start flowing into warren.events —
 		// same posture as POST /runs (mx-…).
-		deps.bridges.start(result.run.id, result.burrowRun.id);
+		deps.bridges.start(result.run.id, result.burrowRun.id, result.burrow.id);
 
 		// Stamp the trigger row so the UI shows this manual fire as the most
 		// recent dispatch. Roll nextFireAt forward when the cron parses; on
@@ -651,7 +651,7 @@ function createRunHandler(deps: ServerDeps): RouteHandler {
 		// Hand off to the bridge so events start flowing into warren.events
 		// — without this the dispatched run would emit events into burrow
 		// but the warren wire would never see them.
-		deps.bridges.start(result.run.id, result.burrowRun.id);
+		deps.bridges.start(result.run.id, result.burrowRun.id, result.burrow.id);
 		return jsonResponse(201, {
 			run: result.run,
 			burrow: { id: result.burrow.id, workspacePath: result.burrow.workspacePath },
@@ -667,7 +667,7 @@ function steerRunHandler(deps: ServerDeps): RouteHandler {
 			runId: id,
 			body: requireString(body, "body"),
 			repos: deps.repos,
-			burrowClient: deps.burrowClient,
+			burrowClientPool: deps.burrowClientPool,
 			broker: deps.broker,
 			...(optionalString(body, "priority") !== undefined
 				? { priority: optionalString(body, "priority") as MessagePriority }
@@ -689,7 +689,7 @@ function cancelRunHandler(deps: ServerDeps): RouteHandler {
 		const result = await cancelRun({
 			runId: id,
 			repos: deps.repos,
-			burrowClient: deps.burrowClient,
+			burrowClientPool: deps.burrowClientPool,
 			broker: deps.broker,
 			...(reason !== undefined ? { reason } : {}),
 			...(deps.now !== undefined ? { now: deps.now } : {}),
@@ -825,7 +825,7 @@ function readyz(deps: ServerDeps): RouteHandler {
 				: {};
 
 		const checks: DiagnosticCheck[] = [];
-		checks.push(await checkBurrowReachable({ burrowClient: deps.burrowClient }));
+		checks.push(await checkBurrowPoolReachable(deps.burrowClientPool));
 		checks.push(checkAgentsRegistered(deps));
 		checks.push(checkCanopyClone({ env }));
 		checks.push(await checkCanopyClean({ env, spawn }));

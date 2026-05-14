@@ -237,13 +237,8 @@ function depsFor(repos: Repos, pool: BurrowClientPool, logger: Logger): ServerDe
 		stopAll: async () => {},
 		size: () => 0,
 	};
-	// `burrowClient` is still required on ServerDeps for legacy callers
-	// (cancel/steer/reap) that the integration scenarios don't exercise.
-	// Pointing it at any registered client keeps the field non-null.
-	const first = pool.get(pool.names()[0] ?? "");
 	return {
 		repos,
-		burrowClient: first,
 		burrowClientPool: pool,
 		broker: new RunEventBroker(),
 		bridges,

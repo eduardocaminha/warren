@@ -107,16 +107,17 @@ export function buildProgram(context: CliContext): Command {
 					// a canopy library (warren-d3e9). Idempotent against existing
 					// rows.
 					seedBuiltinAgents(repos.agents, undefined, context.now);
-					// warren-39c3: build a single-worker pool from env so spawnRun
-					// can resolve placement. The pool registers a synthetic `local`
-					// row in `workers` and forwards the env-derived BurrowClient as
-					// its only entry, mirroring the zero-config bootServer path.
+					// warren-39c3 / warren-c0c9: build a single-worker pool from env
+					// so spawnRun can resolve placement and the bridge/reap/state-
+					// fetch paths can resolve per-burrow workers via `clientFor`.
+					// The pool registers a synthetic `local` row in `workers` and
+					// forwards the env-derived BurrowClient as its only entry,
+					// mirroring the zero-config bootServer path.
 					const burrowClientPool = BurrowClientPool.fromEnv({ env: context.env, repos });
-					const burrowClient = burrowClientPool.singleton();
 					try {
 						const result = await runRun(
 							context,
-							{ repos, burrowClient, burrowClientPool },
+							{ repos, burrowClientPool },
 							{
 								agent,
 								project,

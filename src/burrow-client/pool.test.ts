@@ -358,39 +358,6 @@ describe("BurrowClientPool.placeFor / clientFor", () => {
 	});
 });
 
-describe("BurrowClientPool.singleton", () => {
-	let db: WarrenDb;
-	let repos: Repos;
-
-	beforeEach(async () => {
-		db = await openDatabase({ path: ":memory:" });
-		repos = createRepos(db);
-	});
-
-	afterEach(() => {
-		db.close();
-	});
-
-	test("returns the only client when the pool holds exactly one", () => {
-		const pool = new BurrowClientPool({ repos });
-		const c = makeClient();
-		pool.register("alpha", c);
-		expect(pool.singleton()).toBe(c);
-	});
-
-	test("throws ValidationError on an empty pool", () => {
-		const pool = new BurrowClientPool({ repos });
-		expect(() => pool.singleton()).toThrow(ValidationError);
-	});
-
-	test("throws ValidationError on a multi-worker pool", () => {
-		const pool = new BurrowClientPool({ repos });
-		pool.register("alpha", makeClient());
-		pool.register("beta", makeClient());
-		expect(() => pool.singleton()).toThrow(ValidationError);
-	});
-});
-
 describe("BurrowClientPool.probe", () => {
 	let db: WarrenDb;
 	let repos: Repos;

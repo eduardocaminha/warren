@@ -98,11 +98,6 @@ export async function bootServer(opts: BootServerOptions = {}): Promise<WarrenSe
 					repos,
 					...(opts.now !== undefined ? { now: opts.now } : {}),
 				});
-	// `pool.singleton()` is back-compat scaffolding: bridges / steer /
-	// cancel / the boot probe still consume the legacy `burrowClient`
-	// variable. Single-worker `[workers]` configs work today; multi-worker
-	// boot will throw here until those consumers migrate to `clientFor`.
-	const burrowClient = burrowClientPool.singleton();
 	const broker = new RunEventBroker();
 
 	logger.info(
@@ -135,7 +130,7 @@ export async function bootServer(opts: BootServerOptions = {}): Promise<WarrenSe
 	const bridgesBoot = bootBridges({
 		repos,
 		broker,
-		burrowClient,
+		burrowClientPool,
 		logger: bridgeLoggerFromPino(logger),
 		autoOpenPr,
 	});
@@ -152,15 +147,25 @@ export async function bootServer(opts: BootServerOptions = {}): Promise<WarrenSe
 		);
 	}
 
-	// Best-effort startup probe so the operator sees a clear error if
-	// burrow is down at boot — but we don't refuse to start, since
-	// /readyz reports the live state and a freshly-installed warren
-	// often boots before burrow's socket lands.
-	burrowClient.probe().catch((err) => {
-		logger.warn(
-			{ err: err instanceof Error ? err.message : String(err) },
-			"burrow probe failed at boot — /readyz will reflect this",
-		);
+	// Best-effort startup probe so the operator sees a clear error if any
+	// worker's burrow is down at boot — but we don't refuse to start, since
+	// /readyz reports the live state and a freshly-installed warren often
+	// boots before burrow's socket lands. `pool.probe()` aggregates per-
+	// worker results without throwing, so a degraded multi-worker pool
+	// surfaces every failing worker on one log line.
+	burrowClientPool.probe().then((results) => {
+		const failed = results.filter((r) => !r.ok);
+		if (failed.length > 0) {
+			logger.warn(
+				{
+					failed: failed.map((r) => ({
+						worker: r.workerName,
+						err: r.error?.message ?? "unknown",
+					})),
+				},
+				"burrow probe failed at boot — /readyz will reflect this",
+			);
+		}
 	});
 
 	const warrenConfigs = createWarrenConfigCache();
@@ -209,7 +214,6 @@ export async function bootServer(opts: BootServerOptions = {}): Promise<WarrenSe
 
 	const deps: ServerDeps = {
 		repos,
-		burrowClient,
 		burrowClientPool,
 		broker,
 		bridges: bridgesBoot.registry,

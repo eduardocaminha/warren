@@ -29,8 +29,8 @@
  */
 
 import type { Message, MessagePriority } from "@os-eco/burrow-cli";
-import type { BurrowClient } from "../burrow-client/client.ts";
 import { withTransportMapping } from "../burrow-client/client.ts";
+import type { BurrowClientPool } from "../burrow-client/pool.ts";
 import { ValidationError } from "../core/errors.ts";
 import type { Repos } from "../db/repos/index.ts";
 import type { RunEventBroker } from "./events.ts";
@@ -41,7 +41,14 @@ export interface SteerRunInput {
 	readonly priority?: MessagePriority;
 	readonly fromActor?: string;
 	readonly repos: Repos;
-	readonly burrowClient: BurrowClient;
+	/**
+	 * Multi-worker burrow pool (warren-c0c9 / pl-9ba1 step 5). steer resolves
+	 * the owning worker via `pool.clientFor({burrowId: run.burrowId})` so an
+	 * inbox send routes to the same worker that hosts the burrow. Propagates
+	 * `StickyWorkerUnreachableError` (503 via src/server/errors.ts) when the
+	 * pinned worker is `unreachable`.
+	 */
+	readonly burrowClientPool: BurrowClientPool;
 	/** If supplied, the audit event is published here too. */
 	readonly broker?: RunEventBroker;
 	readonly now?: () => Date;
@@ -69,8 +76,9 @@ export async function steerRun(input: SteerRunInput): Promise<SteerRunResult> {
 	}
 
 	const burrowId = run.burrowId;
-	const message = await withTransportMapping(input.burrowClient.config, () =>
-		input.burrowClient.http.inbox.send({
+	const { client } = input.burrowClientPool.clientFor({ burrowId });
+	const message = await withTransportMapping(client.config, () =>
+		client.http.inbox.send({
 			burrowId,
 			body: input.body,
 			...(input.priority !== undefined ? { priority: input.priority } : {}),

@@ -47,6 +47,7 @@
 import type { RunEvent } from "@os-eco/burrow-cli";
 import type { BurrowClient } from "../burrow-client/client.ts";
 import { withTransportMapping } from "../burrow-client/client.ts";
+import type { BurrowClientPool } from "../burrow-client/pool.ts";
 import type { Repos } from "../db/repos/index.ts";
 import type { EventStream, RunTerminalState } from "../db/schema.ts";
 import { EVENT_STREAMS } from "../db/schema.ts";
@@ -106,9 +107,21 @@ export interface BridgeRunStreamInput {
 	readonly runId: string;
 	/** Burrow's run id (column `runs.burrow_run_id`). */
 	readonly burrowRunId: string;
+	/**
+	 * Burrow's burrow id (column `runs.burrow_id`). The bridge uses this to
+	 * resolve the owning worker via `burrowClientPool.clientFor({burrowId})`
+	 * so the stream poll lands on the same worker that hosts the burrow.
+	 */
+	readonly burrowId: string;
 	readonly repos: Repos;
 	readonly broker: RunEventBroker;
-	readonly burrowClient: BurrowClient;
+	/**
+	 * Multi-worker burrow pool (warren-c0c9 / pl-9ba1 step 5). bridge resolves
+	 * the owning worker via `pool.clientFor({burrowId})` for the
+	 * `http.runs.stream` poll. Propagates `StickyWorkerUnreachableError`
+	 * (503 via src/server/errors.ts) when the pinned worker is `unreachable`.
+	 */
+	readonly burrowClientPool: BurrowClientPool;
 	readonly signal?: AbortSignal;
 	/** Override the stream source (tests). Default: `client.http.runs.stream`. */
 	readonly source?: (signal: AbortSignal) => AsyncIterable<RunEvent>;
@@ -158,7 +171,13 @@ export async function bridgeRunStream(input: BridgeRunStreamInput): Promise<Brid
 	}
 
 	const resumeSeq = repos.events.maxSeqForRun(runId) ?? 0;
-	const source = input.source ?? defaultSource(input.burrowClient, burrowRunId);
+	// warren-c0c9: route the stream poll through the worker that owns this
+	// burrow. The source override (tests) bypasses the pool entirely.
+	const sourceClient =
+		input.source !== undefined
+			? null
+			: input.burrowClientPool.clientFor({ burrowId: input.burrowId }).client;
+	const source = input.source ?? defaultSource(sourceClient as BurrowClient, burrowRunId);
 
 	let written = 0;
 	let skipped = 0;
@@ -619,7 +638,7 @@ function persistInStreamPiUsage(input: PersistInStreamUsageInput): void {
 export interface RecoverActiveRunStreamsInput {
 	readonly repos: Repos;
 	readonly broker: RunEventBroker;
-	readonly burrowClient: BurrowClient;
+	readonly burrowClientPool: BurrowClientPool;
 	readonly logger?: BridgeLogger;
 	/** Override the bridge factory (tests). Defaults to `bridgeRunStream`. */
 	readonly bridge?: (input: BridgeRunStreamInput) => Promise<BridgeRunStreamResult>;
@@ -634,7 +653,10 @@ export interface ActiveBridge {
 
 export interface RecoverActiveRunStreamsResult {
 	readonly bridges: readonly ActiveBridge[];
-	readonly skipped: readonly { runId: string; reason: "no_burrow_run_id" }[];
+	readonly skipped: readonly {
+		runId: string;
+		reason: "no_burrow_run_id" | "no_burrow_id";
+	}[];
 }
 
 /**
@@ -652,12 +674,12 @@ export interface RecoverActiveRunStreamsResult {
 export function recoverActiveRunStreams(
 	input: RecoverActiveRunStreamsInput,
 ): RecoverActiveRunStreamsResult {
-	const { repos, broker, burrowClient, logger } = input;
+	const { repos, broker, burrowClientPool, logger } = input;
 	const bridge = input.bridge ?? bridgeRunStream;
 	const candidates = repos.runs.listByState(["queued", "running"]);
 
 	const bridges: ActiveBridge[] = [];
-	const skipped: { runId: string; reason: "no_burrow_run_id" }[] = [];
+	const skipped: { runId: string; reason: "no_burrow_run_id" | "no_burrow_id" }[] = [];
 
 	for (const run of candidates) {
 		if (run.burrowRunId === null) {
@@ -668,13 +690,25 @@ export function recoverActiveRunStreams(
 			);
 			continue;
 		}
+		if (run.burrowId === null) {
+			// Active row with a burrow_run_id but no burrow_id is malformed
+			// (spawn writes burrow_id first). Skip rather than crash; warren
+			// doctor surfaces orphaned rows.
+			skipped.push({ runId: run.id, reason: "no_burrow_id" });
+			logger?.warn?.(
+				{ runId: run.id, state: run.state, burrowRunId: run.burrowRunId },
+				"skipping recovery: run has burrow_run_id but no burrow_id",
+			);
+			continue;
+		}
 		const abort = new AbortController();
 		const bridgeInput: BridgeRunStreamInput = {
 			runId: run.id,
 			burrowRunId: run.burrowRunId,
+			burrowId: run.burrowId,
 			repos,
 			broker,
-			burrowClient,
+			burrowClientPool,
 			signal: abort.signal,
 			...(logger !== undefined ? { logger } : {}),
 		};

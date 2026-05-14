@@ -30,7 +30,7 @@
  * unbounded. Tests inject a stub bridge factory to avoid a real burrow.
  */
 
-import type { BurrowClient } from "../burrow-client/client.ts";
+import type { BurrowClientPool } from "../burrow-client/pool.ts";
 import type { Repos } from "../db/repos/index.ts";
 import type { RunState } from "../db/schema.ts";
 import {
@@ -62,7 +62,13 @@ export const DEFAULT_RECONNECT_BACKOFF_MS: readonly number[] = [
 export interface CreateBridgeRegistryInput {
 	readonly repos: Repos;
 	readonly broker: RunEventBroker;
-	readonly burrowClient: BurrowClient;
+	/**
+	 * Multi-worker burrow pool (warren-c0c9 / pl-9ba1 step 5). The registry
+	 * threads this into every bridge it starts so `bridgeRunStream` can
+	 * resolve the owning worker via `pool.clientFor({burrowId})`. The inline
+	 * reap path on `terminalDetected` consumes the same pool.
+	 */
+	readonly burrowClientPool: BurrowClientPool;
 	readonly logger?: BridgeLogger;
 	/**
 	 * Override the per-run bridge factory (tests). Defaults to the live
@@ -98,15 +104,16 @@ export function createBridgeRegistry(input: CreateBridgeRegistryInput): BridgeRe
 	const backoff = input.reconnectBackoffMs ?? DEFAULT_RECONNECT_BACKOFF_MS;
 	const sleep = input.sleep ?? defaultSleep;
 
-	function start(runId: string, burrowRunId: string): void {
+	function start(runId: string, burrowRunId: string, burrowId: string): void {
 		if (live.has(runId)) return;
 		const abort = new AbortController();
 		const done = runWithReconnect({
 			runId,
 			burrowRunId,
+			burrowId,
 			repos: input.repos,
 			broker: input.broker,
-			burrowClient: input.burrowClient,
+			burrowClientPool: input.burrowClientPool,
 			signal: abort.signal,
 			bridge,
 			reap,
@@ -139,9 +146,10 @@ export function createBridgeRegistry(input: CreateBridgeRegistryInput): BridgeRe
 interface RunWithReconnectInput {
 	readonly runId: string;
 	readonly burrowRunId: string;
+	readonly burrowId: string;
 	readonly repos: Repos;
 	readonly broker: RunEventBroker;
-	readonly burrowClient: BurrowClient;
+	readonly burrowClientPool: BurrowClientPool;
 	readonly signal: AbortSignal;
 	readonly bridge: (input: BridgeRunStreamInput) => Promise<BridgeRunStreamResult>;
 	readonly reap: (input: ReapRunInput) => Promise<ReapRunResult>;
@@ -165,9 +173,10 @@ async function runWithReconnect(input: RunWithReconnectInput): Promise<BridgeRun
 		const bridgeInput: BridgeRunStreamInput = {
 			runId: input.runId,
 			burrowRunId: input.burrowRunId,
+			burrowId: input.burrowId,
 			repos: input.repos,
 			broker: input.broker,
-			burrowClient: input.burrowClient,
+			burrowClientPool: input.burrowClientPool,
 			signal: input.signal,
 			...(input.logger !== undefined ? { logger: input.logger } : {}),
 		};
@@ -186,7 +195,7 @@ async function runWithReconnect(input: RunWithReconnectInput): Promise<BridgeRun
 					runId: input.runId,
 					outcome: result.terminalDetected.outcome,
 					repos: input.repos,
-					burrowClient: input.burrowClient,
+					burrowClientPool: input.burrowClientPool,
 					broker: input.broker,
 					...(input.logger !== undefined ? { logger: input.logger } : {}),
 					...(input.autoOpenPr !== undefined ? { autoOpenPr: input.autoOpenPr } : {}),
@@ -296,7 +305,15 @@ export function bootBridges(input: CreateBridgeRegistryInput): BootBridgesResult
 			);
 			continue;
 		}
-		registry.start(run.id, run.burrowRunId);
+		if (run.burrowId === null) {
+			skipped.push({ runId: run.id, reason: "no_burrow_id" });
+			input.logger?.warn?.(
+				{ runId: run.id, state: run.state, burrowRunId: run.burrowRunId },
+				"skipping recovery: run has burrow_run_id but no burrow_id",
+			);
+			continue;
+		}
+		registry.start(run.id, run.burrowRunId, run.burrowId);
 		resumed.push({ runId: run.id, burrowRunId: run.burrowRunId });
 		input.logger?.info?.(
 			{ runId: run.id, burrowRunId: run.burrowRunId, state: run.state },

@@ -19,6 +19,7 @@
 import { existsSync } from "node:fs";
 import type { BurrowClient } from "../burrow-client/client.ts";
 import { withTransportMapping } from "../burrow-client/client.ts";
+import type { BurrowClientPool } from "../burrow-client/pool.ts";
 import type { SpawnFn } from "../projects/clone.ts";
 import { type CanopyRegistryConfig, loadCanopyRegistryConfigFromEnv } from "../registry/config.ts";
 import {
@@ -276,7 +277,10 @@ function defaultWarrenConfigLoad(projectPath: string): Promise<LoadedWarrenConfi
 /**
  * Probe burrow's socket via `BurrowClient.probe()`. Wraps transport
  * errors into the same readable shape `withTransportMapping` produces
- * for §4.3 spawn-flow callers.
+ * for §4.3 spawn-flow callers. Used by `warren doctor`, which probes a
+ * single env-derived client. The server's /readyz handler uses
+ * `checkBurrowPoolReachable` instead so a multi-worker deploy surfaces
+ * every failing worker.
  */
 export async function checkBurrowReachable(deps: {
 	readonly burrowClient: BurrowClient;
@@ -292,4 +296,27 @@ export async function checkBurrowReachable(deps: {
 			hint: "check that burrow serve is running and WARREN_BURROW_SOCKET / WARREN_BURROW_HOST point to it",
 		};
 	}
+}
+
+/**
+ * Aggregate `BurrowClientPool.probe()` across every registered worker
+ * (warren-c0c9 / pl-9ba1 step 5). One ok=true iff every worker probed
+ * cleanly; on partial failure the message lists every failing worker by
+ * name. Used by the server's /readyz handler so a single failing worker
+ * in a multi-worker deploy degrades the global readyz envelope without
+ * masking the healthy workers' probe results.
+ */
+export async function checkBurrowPoolReachable(pool: BurrowClientPool): Promise<DiagnosticCheck> {
+	const results = await pool.probe();
+	const failed = results.filter((r) => !r.ok);
+	if (failed.length === 0) {
+		return { name: "burrow_reachable", ok: true };
+	}
+	const message = failed.map((r) => `${r.workerName}: ${r.error?.message ?? "unknown"}`).join("; ");
+	return {
+		name: "burrow_reachable",
+		ok: false,
+		message,
+		hint: "check `GET /workers` for state; bring the listed workers back online or drain them",
+	};
 }

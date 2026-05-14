@@ -21,13 +21,6 @@
  * Both return `{ workerName, client }` so callers can record the worker on
  * `runs.worker_id` / `burrows.worker_id` while issuing the HTTP call.
  *
- * `singleton()` is a back-compat shim for the step 3 → 4 → 5 migration:
- * `bootServer` derives the legacy `burrowClient` variable from it so the
- * un-migrated consumers (bridges, scheduler, spawnRun, reap, cancel) keep
- * working until steps 4 and 5 route them through `placeFor` / `clientFor`.
- * Once those land, every `pool.singleton()` call site disappears and the
- * method can be deleted.
- *
  * The pool does not own the probe loop or state transitions — that lives in
  * step 6 (probe + drain admin API). What it does own:
  *   - constructing the local BurrowClient from env (today's zero-config path),
@@ -257,26 +250,6 @@ export class BurrowClientPool {
 	clientFor(input: { burrowId: string }): PlacementResult {
 		const workerName = placeForBurrow({ repos: this.deps.repos }, input);
 		return { workerName, client: this.get(workerName) };
-	}
-
-	/**
-	 * Return THE client when the pool has exactly one entry. Back-compat
-	 * shim during the step 3 → 4 → 5 migration; gone once spawnRun and the
-	 * read-fan-out wiring route through `placeFor` / `clientFor` directly.
-	 */
-	singleton(): BurrowClient {
-		if (this.clients.size !== 1) {
-			throw new ValidationError(
-				`BurrowClientPool.singleton() requires exactly 1 worker, found ${this.clients.size}`,
-				{
-					recoveryHint:
-						"this method is back-compat scaffolding; multi-worker callers must use placeFor / clientFor",
-				},
-			);
-		}
-		const first = this.clients.values().next();
-		// size===1 invariant: iterator yields one entry before `done`.
-		return first.value as BurrowClient;
 	}
 
 	/**

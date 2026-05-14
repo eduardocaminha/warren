@@ -60,7 +60,6 @@ function depsFor(
 	const broker = new RunEventBroker();
 	return {
 		repos,
-		burrowClient,
 		burrowClientPool,
 		broker,
 		bridges:
@@ -68,7 +67,7 @@ function depsFor(
 			createBridgeRegistry({
 				repos,
 				broker,
-				burrowClient,
+				burrowClientPool,
 				bridge: async () => ({ written: 0, skipped: 0, errored: false }),
 			}),
 		canopyConfig: {
@@ -418,7 +417,6 @@ describe("startServer — routes", () => {
 		const deps = depsFor(repos);
 		const noCanopyDeps: ServerDeps = {
 			repos: deps.repos,
-			burrowClient: deps.burrowClient,
 			burrowClientPool: deps.burrowClientPool,
 			broker: deps.broker,
 			bridges: deps.bridges,

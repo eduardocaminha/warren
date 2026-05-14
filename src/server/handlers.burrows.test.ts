@@ -129,17 +129,8 @@ function depsFor(
 	bridges?: BridgeRegistry,
 ): ServerDeps {
 	const broker = new RunEventBroker();
-	const burrowClient = pool.names().length === 1 ? pool.get(pool.names()[0] ?? "") : undefined;
 	return {
 		repos,
-		// Legacy `burrowClient` is still required on ServerDeps for callers
-		// that haven't migrated to `clientFor` (cancel/steer/reap/bridges) —
-		// fanout tests don't exercise those paths so we point it at any
-		// registered client. Tests with zero or multiple workers reach for
-		// the first pool entry; an empty pool falls back to a fresh stub.
-		burrowClient:
-			burrowClient ??
-			new BurrowClient({ config: { transport: { kind: "unix", path: "/tmp/empty.sock" } } }),
 		burrowClientPool: pool,
 		broker,
 		bridges:
@@ -147,9 +138,7 @@ function depsFor(
 			createBridgeRegistry({
 				repos,
 				broker,
-				burrowClient:
-					burrowClient ??
-					new BurrowClient({ config: { transport: { kind: "unix", path: "/tmp/empty.sock" } } }),
+				burrowClientPool: pool,
 				bridge: async () => ({ written: 0, skipped: 0, errored: false }),
 			}),
 		projectsConfig: { root: "/tmp/projects", gitBinary: "git" },

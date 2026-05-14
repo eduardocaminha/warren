@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { RunEvent } from "@os-eco/burrow-cli";
-import { BurrowClient } from "../burrow-client/index.ts";
+import { BurrowClient, BurrowClientPool } from "../burrow-client/index.ts";
 import { openDatabase, type WarrenDb } from "../db/client.ts";
 import { createRepos, type Repos } from "../db/repos/index.ts";
 import { RunEventBroker } from "./events.ts";
@@ -17,6 +17,18 @@ function makeBurrowClient(): BurrowClient {
 		config: { transport: { kind: "unix", path: "/tmp/x.sock" } },
 		fetch: fetchImpl,
 	});
+}
+
+/**
+ * One-worker pool wired to a stub burrow client (warren-c0c9). Upserts a
+ * `local` worker row so `pool.clientFor` resolves cleanly; tests that exercise
+ * a non-test source (i.e. don't pass `source: ...`) also seed a `burrows` row.
+ */
+function makePool(repos: Repos, client?: BurrowClient, workerName = "local"): BurrowClientPool {
+	repos.workers.upsert({ name: workerName, url: "unix:///tmp/x.sock" });
+	const pool = new BurrowClientPool({ repos });
+	pool.register(workerName, client ?? makeBurrowClient());
+	return pool;
 }
 
 function evt(burrowRunId: string, seq: number, overrides: Partial<RunEvent> = {}): RunEvent {
@@ -95,7 +107,8 @@ describe("bridgeRunStream", () => {
 			burrowRunId,
 			repos,
 			broker,
-			burrowClient: makeBurrowClient(),
+			burrowId: "bur_aaaaaaaaaaaa",
+			burrowClientPool: makePool(repos),
 			source: source([evt(burrowRunId, 1), evt(burrowRunId, 2), evt(burrowRunId, 3)]),
 		});
 		expect(result.written).toBe(3);
@@ -120,7 +133,8 @@ describe("bridgeRunStream", () => {
 			burrowRunId,
 			repos,
 			broker,
-			burrowClient: makeBurrowClient(),
+			burrowId: "bur_aaaaaaaaaaaa",
+			burrowClientPool: makePool(repos),
 			source: source([evt(burrowRunId, 1), evt(burrowRunId, 2)]),
 		});
 		await consumer;
@@ -154,7 +168,8 @@ describe("bridgeRunStream", () => {
 			burrowRunId,
 			repos,
 			broker,
-			burrowClient: makeBurrowClient(),
+			burrowId: "bur_aaaaaaaaaaaa",
+			burrowClientPool: makePool(repos),
 			source: source([
 				evt(burrowRunId, 1),
 				evt(burrowRunId, 2),
@@ -174,7 +189,8 @@ describe("bridgeRunStream", () => {
 			burrowRunId,
 			repos,
 			broker,
-			burrowClient: makeBurrowClient(),
+			burrowId: "bur_aaaaaaaaaaaa",
+			burrowClientPool: makePool(repos),
 			source: source([evt(burrowRunId, 1, { stream: "weird" as unknown as RunEvent["stream"] })]),
 		});
 		const row = repos.events.listByRun(runId)[0];
@@ -194,7 +210,8 @@ describe("bridgeRunStream", () => {
 			burrowRunId,
 			repos,
 			broker,
-			burrowClient: makeBurrowClient(),
+			burrowId: "bur_aaaaaaaaaaaa",
+			burrowClientPool: makePool(repos),
 			source: () => source(),
 			logger: {
 				error(obj) {
@@ -225,7 +242,8 @@ describe("bridgeRunStream", () => {
 			burrowRunId,
 			repos,
 			broker,
-			burrowClient: makeBurrowClient(),
+			burrowId: "bur_aaaaaaaaaaaa",
+			burrowClientPool: makePool(repos),
 			signal: ctrl.signal,
 			source: (s) => source(s),
 		});
@@ -248,7 +266,8 @@ describe("bridgeRunStream", () => {
 			burrowRunId,
 			repos,
 			broker,
-			burrowClient: makeBurrowClient(),
+			burrowId: "bur_aaaaaaaaaaaa",
+			burrowClientPool: makePool(repos),
 			source: source([evt(burrowRunId, 1)]),
 		});
 
@@ -263,7 +282,8 @@ describe("bridgeRunStream", () => {
 			burrowRunId,
 			repos,
 			broker,
-			burrowClient: makeBurrowClient(),
+			burrowId: "bur_aaaaaaaaaaaa",
+			burrowClientPool: makePool(repos),
 			source: source([]),
 		});
 		const after = repos.runs.require(runId);
@@ -281,7 +301,8 @@ describe("bridgeRunStream", () => {
 			burrowRunId,
 			repos,
 			broker,
-			burrowClient: makeBurrowClient(),
+			burrowId: "bur_aaaaaaaaaaaa",
+			burrowClientPool: makePool(repos),
 			source: source([evt(burrowRunId, 1)]),
 		});
 
@@ -303,7 +324,8 @@ describe("bridgeRunStream", () => {
 			burrowRunId,
 			repos,
 			broker,
-			burrowClient: makeBurrowClient(),
+			burrowId: "bur_aaaaaaaaaaaa",
+			burrowClientPool: makePool(repos),
 			source: source([claudeResult, trailing]),
 		});
 		expect(result.terminalDetected).toEqual({ outcome: "succeeded" });
@@ -323,7 +345,8 @@ describe("bridgeRunStream", () => {
 			burrowRunId,
 			repos,
 			broker,
-			burrowClient: makeBurrowClient(),
+			burrowId: "bur_aaaaaaaaaaaa",
+			burrowClientPool: makePool(repos),
 			source: source([claudeFail]),
 		});
 		expect(result.terminalDetected).toEqual({ outcome: "failed" });
@@ -340,7 +363,8 @@ describe("bridgeRunStream", () => {
 			burrowRunId,
 			repos,
 			broker,
-			burrowClient: makeBurrowClient(),
+			burrowId: "bur_aaaaaaaaaaaa",
+			burrowClientPool: makePool(repos),
 			source: source([init]),
 		});
 		expect(result.terminalDetected).toBeUndefined();
@@ -358,7 +382,8 @@ describe("bridgeRunStream", () => {
 			burrowRunId,
 			repos,
 			broker,
-			burrowClient: makeBurrowClient(),
+			burrowId: "bur_aaaaaaaaaaaa",
+			burrowClientPool: makePool(repos),
 			source: source([piEnd, trailing]),
 		});
 		expect(result.terminalDetected).toEqual({ outcome: "succeeded" });
@@ -380,7 +405,8 @@ describe("bridgeRunStream", () => {
 			burrowRunId,
 			repos,
 			broker,
-			burrowClient: makeBurrowClient(),
+			burrowId: "bur_aaaaaaaaaaaa",
+			burrowClientPool: makePool(repos),
 			source: source([offStream]),
 		});
 		expect(result.terminalDetected).toBeUndefined();
@@ -416,7 +442,8 @@ describe("bridgeRunStream", () => {
 			burrowRunId,
 			repos,
 			broker,
-			burrowClient: makeBurrowClient(),
+			burrowId: "bur_aaaaaaaaaaaa",
+			burrowClientPool: makePool(repos),
 			piStats,
 			source: source([
 				evt(burrowRunId, 1, { kind: "agent_start" }),
@@ -439,7 +466,8 @@ describe("bridgeRunStream", () => {
 			burrowRunId,
 			repos,
 			broker,
-			burrowClient: makeBurrowClient(),
+			burrowId: "bur_aaaaaaaaaaaa",
+			burrowClientPool: makePool(repos),
 			source: source([evt(burrowRunId, 1, { kind: "agent_start" }), piAgentEnd(burrowRunId, 2)]),
 		});
 		const after = repos.runs.require(runId);
@@ -466,7 +494,8 @@ describe("bridgeRunStream", () => {
 			burrowRunId,
 			repos,
 			broker,
-			burrowClient: makeBurrowClient(),
+			burrowId: "bur_aaaaaaaaaaaa",
+			burrowClientPool: makePool(repos),
 			piStats,
 			source: source([
 				evt(burrowRunId, 1, { kind: "agent_start" }),
@@ -505,7 +534,8 @@ describe("bridgeRunStream", () => {
 			burrowRunId,
 			repos,
 			broker,
-			burrowClient: makeBurrowClient(),
+			burrowId: "bur_aaaaaaaaaaaa",
+			burrowClientPool: makePool(repos),
 			piStats,
 			logger: {
 				warn(obj) {
@@ -542,7 +572,8 @@ describe("bridgeRunStream", () => {
 			burrowRunId,
 			repos,
 			broker,
-			burrowClient: makeBurrowClient(),
+			burrowId: "bur_aaaaaaaaaaaa",
+			burrowClientPool: makePool(repos),
 			piStats,
 			source: source([evt(burrowRunId, 1, { kind: "agent_start" }), piAgentEnd(burrowRunId, 2)]),
 		});
@@ -576,7 +607,8 @@ describe("bridgeRunStream", () => {
 			burrowRunId,
 			repos,
 			broker,
-			burrowClient: makeBurrowClient(),
+			burrowId: "bur_aaaaaaaaaaaa",
+			burrowClientPool: makePool(repos),
 			piStats: {
 				async fetch() {
 					terminalCalled = true;
@@ -643,7 +675,8 @@ describe("bridgeRunStream", () => {
 			burrowRunId,
 			repos,
 			broker,
-			burrowClient: makeBurrowClient(),
+			burrowId: "bur_aaaaaaaaaaaa",
+			burrowClientPool: makePool(repos),
 			source: source([
 				evt(burrowRunId, 1, { kind: "agent_start" }),
 				piTurnEnd(burrowRunId, 2, { input: 446, output: 44, costTotal: 0.000666 }),
@@ -664,7 +697,8 @@ describe("bridgeRunStream", () => {
 			burrowRunId,
 			repos,
 			broker,
-			burrowClient: makeBurrowClient(),
+			burrowId: "bur_aaaaaaaaaaaa",
+			burrowClientPool: makePool(repos),
 			source: source([
 				evt(burrowRunId, 1, { kind: "agent_start" }),
 				piTurnEnd(burrowRunId, 2, { input: 1658, output: 128, costTotal: 0.002298 }),
@@ -684,7 +718,8 @@ describe("bridgeRunStream", () => {
 			burrowRunId,
 			repos,
 			broker,
-			burrowClient: makeBurrowClient(),
+			burrowId: "bur_aaaaaaaaaaaa",
+			burrowClientPool: makePool(repos),
 			source: source([evt(burrowRunId, 1, { kind: "agent_start" }), piAgentEnd(burrowRunId, 2)]),
 		});
 		const after = repos.runs.require(runId);
@@ -709,7 +744,8 @@ describe("bridgeRunStream", () => {
 			burrowRunId,
 			repos,
 			broker,
-			burrowClient: makeBurrowClient(),
+			burrowId: "bur_aaaaaaaaaaaa",
+			burrowClientPool: makePool(repos),
 			piStats,
 			source: source([
 				piTurnEnd(burrowRunId, 1, { input: 500, output: 200, costTotal: 0.123 }),
@@ -730,7 +766,8 @@ describe("bridgeRunStream", () => {
 			burrowRunId,
 			repos,
 			broker,
-			burrowClient: makeBurrowClient(),
+			burrowId: "bur_aaaaaaaaaaaa",
+			burrowClientPool: makePool(repos),
 			source: source([
 				piTurnEnd(burrowRunId, 1, { input: 100, output: 25, costTotal: 0.001 }),
 				evt(burrowRunId, 2, {
@@ -754,7 +791,8 @@ describe("bridgeRunStream", () => {
 			burrowRunId,
 			repos,
 			broker,
-			burrowClient: makeBurrowClient(),
+			burrowId: "bur_aaaaaaaaaaaa",
+			burrowClientPool: makePool(repos),
 			source: source([
 				// turn_end with no usage field at all — defensive shape from a
 				// hypothetical future pi version. Should not crash, and should
@@ -783,7 +821,8 @@ describe("bridgeRunStream", () => {
 			burrowRunId,
 			repos,
 			broker,
-			burrowClient: makeBurrowClient(),
+			burrowId: "bur_aaaaaaaaaaaa",
+			burrowClientPool: makePool(repos),
 			source: source([evt(burrowRunId, 1)]),
 		});
 		await consumer;
@@ -864,7 +903,7 @@ describe("recoverActiveRunStreams", () => {
 		const result = recoverActiveRunStreams({
 			repos,
 			broker,
-			burrowClient: makeBurrowClient(),
+			burrowClientPool: makePool(repos),
 			bridge: async (input) => {
 				calls.push({ runId: input.runId, burrowRunId: input.burrowRunId });
 				return { written: 0, skipped: 0, errored: false };
@@ -882,7 +921,7 @@ describe("recoverActiveRunStreams", () => {
 		const result = recoverActiveRunStreams({
 			repos,
 			broker,
-			burrowClient: makeBurrowClient(),
+			burrowClientPool: makePool(repos),
 			bridge: async (input) => {
 				await new Promise<void>((resolve) => {
 					if (input.signal === undefined) {

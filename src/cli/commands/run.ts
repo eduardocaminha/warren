@@ -20,7 +20,6 @@
  * UI does. The CLI prints a hint on first SIGINT, exits on the second.
  */
 
-import type { BurrowClient } from "../../burrow-client/client.ts";
 import { withTransportMapping } from "../../burrow-client/client.ts";
 import type { BurrowClientPool } from "../../burrow-client/pool.ts";
 import type { Repos } from "../../db/repos/index.ts";
@@ -59,12 +58,11 @@ export interface RunArgs {
 
 export interface RunDeps {
 	readonly repos: Repos;
-	readonly burrowClient: BurrowClient;
 	/**
-	 * Multi-worker burrow pool (warren-39c3 / pl-9ba1 step 4). `spawnRun`
-	 * consumes this for placement; the legacy `burrowClient` field is still
-	 * used by `bridgeRunStream`, `reapRun`, and `fetchBurrowRunState` until
-	 * step 5 routes them through `pool.clientFor`.
+	 * Multi-worker burrow pool (warren-39c3 / warren-c0c9 / pl-9ba1).
+	 * `spawnRun` consumes it for placement; `bridgeRunStream`, `reapRun`,
+	 * and `fetchBurrowRunState` resolve the owning worker via
+	 * `pool.clientFor({burrowId})`.
 	 */
 	readonly burrowClientPool: BurrowClientPool;
 	/** Optional broker injection — defaults to a fresh broker per run. */
@@ -128,7 +126,7 @@ export async function runRun(
 			? undefined
 			: (deps.runBranchPrefixDefault ?? loadRunBranchPrefixFromEnv());
 	const fetchBurrowRunState =
-		deps.fetchBurrowRunState ?? defaultFetchBurrowRunState(deps.burrowClient);
+		deps.fetchBurrowRunState ?? defaultFetchBurrowRunState(deps.burrowClientPool);
 
 	let spawnResult: SpawnRunResult;
 	try {
@@ -166,9 +164,10 @@ export async function runRun(
 	const bridgePromise: Promise<BridgeRunStreamResult> = bridge({
 		runId,
 		burrowRunId: spawnResult.burrowRun.id,
+		burrowId: spawnResult.burrow.id,
 		repos: deps.repos,
 		broker,
-		burrowClient: deps.burrowClient,
+		burrowClientPool: deps.burrowClientPool,
 		signal: bridgeAbort.signal,
 	});
 
@@ -220,7 +219,7 @@ export async function runRun(
 			runId,
 			outcome,
 			repos: deps.repos,
-			burrowClient: deps.burrowClient,
+			burrowClientPool: deps.burrowClientPool,
 			broker,
 			autoOpenPr,
 			...(context.now !== undefined ? { now: context.now } : {}),
@@ -255,15 +254,30 @@ export async function runRun(
 }
 
 function defaultFetchBurrowRunState(
-	client: BurrowClient,
+	pool: BurrowClientPool,
 ): (burrowRunId: string) => Promise<RunTerminalState> {
 	return async (burrowRunId) => {
-		const row = await withTransportMapping(client.config, () => client.http.runs.get(burrowRunId));
-		const state = row.state;
-		if (state === "succeeded" || state === "failed" || state === "cancelled") return state;
-		// Stream returned but burrow says not-yet-terminal — race or stale read;
-		// treat as failed so warren transitions out of running and the operator
-		// gets a non-zero exit. Reap's emit("reap_failed", ...) will surface it.
-		return "failed";
+		// warren-c0c9: the CLI deploy registers exactly one worker via
+		// `BurrowClientPool.fromEnv`, but rather than special-case the
+		// single-entry shape, walk every registered client and use whichever
+		// owns the run. The zero-config CLI path has one entry today; the
+		// fan-out keeps the lookup correct under any future multi-worker CLI.
+		const errors: unknown[] = [];
+		for (const { client } of pool.entries()) {
+			try {
+				const row = await withTransportMapping(client.config, () =>
+					client.http.runs.get(burrowRunId),
+				);
+				const state = row.state;
+				if (state === "succeeded" || state === "failed" || state === "cancelled") return state;
+				return "failed";
+			} catch (err) {
+				errors.push(err);
+			}
+		}
+		// Surface the most-recent transport failure rather than masking it as
+		// "failed" — `runRun` translates the throw into a non-zero exit code
+		// and a stderr line.
+		throw errors[errors.length - 1] ?? new Error("no workers registered");
 	};
 }
