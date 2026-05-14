@@ -38,7 +38,7 @@ describe("runInit (--cwd mode)", () => {
 
 	beforeEach(async () => {
 		db = await openDatabase({ path: ":memory:" });
-		projects = new ProjectsRepo(db.drizzle);
+		projects = new ProjectsRepo(DrizzleAdapter.for(db));
 		agents = new AgentsRepo(DrizzleAdapter.for(db));
 		tmp = await mkdtemp(join(tmpdir(), "warren-init-test-"));
 	});
@@ -151,7 +151,7 @@ describe("runInit (--project mode)", () => {
 
 	beforeEach(async () => {
 		db = await openDatabase({ path: ":memory:" });
-		projects = new ProjectsRepo(db.drizzle);
+		projects = new ProjectsRepo(DrizzleAdapter.for(db));
 		agents = new AgentsRepo(DrizzleAdapter.for(db));
 		tmp = await mkdtemp(join(tmpdir(), "warren-init-prj-"));
 	});

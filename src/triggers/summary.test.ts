@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { openDatabase } from "../db/client.ts";
+import { DrizzleAdapter } from "../db/repos/drizzle-adapter.ts";
 import { ProjectsRepo } from "../db/repos/projects.ts";
 import { TriggersRepo } from "../db/repos/triggers.ts";
 import type { CronTrigger } from "../warren-config/schema.ts";
@@ -11,7 +12,7 @@ async function makeRepo(): Promise<{
 	close: () => Promise<void>;
 }> {
 	const db = await openDatabase({ path: ":memory:" });
-	const projects = new ProjectsRepo(db.drizzle);
+	const projects = new ProjectsRepo(DrizzleAdapter.for(db));
 	const repo = new TriggersRepo(db.drizzle);
 	const p = await projects.create({
 		gitUrl: "https://github.com/x/y.git",

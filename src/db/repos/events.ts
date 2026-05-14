@@ -8,8 +8,9 @@
  */
 
 import { and, asc, desc, eq, gt, sql } from "drizzle-orm";
-import type { DrizzleDb } from "../client.ts";
-import { type EventRow, type EventStream, events } from "../schema.ts";
+import type { SqliteDrizzleDb } from "../client.ts";
+import type { EventRow, EventStream } from "../schema.ts";
+import type { DrizzleAdapter } from "./drizzle-adapter.ts";
 
 export interface AppendEventInput {
 	runId: string;
@@ -21,21 +22,30 @@ export interface AppendEventInput {
 }
 
 export class EventsRepo {
-	constructor(private readonly db: DrizzleDb) {}
+	constructor(private readonly adapter: DrizzleAdapter) {}
+
+	private get db(): SqliteDrizzleDb {
+		return this.adapter.drizzle as SqliteDrizzleDb;
+	}
+
+	private get events() {
+		return this.adapter.schema.events;
+	}
 
 	async append(input: AppendEventInput): Promise<EventRow> {
-		return this.db
-			.insert(events)
-			.values({
-				runId: input.runId,
-				burrowEventSeq: input.burrowEventSeq,
-				ts: input.ts,
-				kind: input.kind,
-				stream: input.stream ?? null,
-				payloadJson: input.payload,
-			})
-			.returning()
-			.get();
+		return this.adapter.runReturningOne<EventRow>(
+			this.db
+				.insert(this.events)
+				.values({
+					runId: input.runId,
+					burrowEventSeq: input.burrowEventSeq,
+					ts: input.ts,
+					kind: input.kind,
+					stream: input.stream ?? null,
+					payloadJson: input.payload,
+				})
+				.returning(),
+		);
 	}
 
 	async listByRun(
@@ -44,10 +54,14 @@ export class EventsRepo {
 	): Promise<EventRow[]> {
 		const where =
 			opts.sinceSeq !== undefined
-				? and(eq(events.runId, runId), gt(events.burrowEventSeq, opts.sinceSeq))
-				: eq(events.runId, runId);
-		const q = this.db.select().from(events).where(where).orderBy(asc(events.burrowEventSeq));
-		return opts.limit ? q.limit(opts.limit).all() : q.all();
+				? and(eq(this.events.runId, runId), gt(this.events.burrowEventSeq, opts.sinceSeq))
+				: eq(this.events.runId, runId);
+		const q = this.db
+			.select()
+			.from(this.events)
+			.where(where)
+			.orderBy(asc(this.events.burrowEventSeq));
+		return this.adapter.pickAll(opts.limit ? q.limit(opts.limit) : q);
 	}
 
 	/**
@@ -57,13 +71,14 @@ export class EventsRepo {
 	 */
 	async listTail(runId: string, limit: number): Promise<EventRow[]> {
 		if (limit <= 0) return [];
-		const rows = this.db
-			.select()
-			.from(events)
-			.where(eq(events.runId, runId))
-			.orderBy(desc(events.burrowEventSeq))
-			.limit(limit)
-			.all();
+		const rows = await this.adapter.pickAll(
+			this.db
+				.select()
+				.from(this.events)
+				.where(eq(this.events.runId, runId))
+				.orderBy(desc(this.events.burrowEventSeq))
+				.limit(limit),
+		);
 		return rows.reverse();
 	}
 
@@ -73,20 +88,23 @@ export class EventsRepo {
 	 * (SPEC §9 "MAX(events.burrow_event_seq) + 1").
 	 */
 	async maxSeqForRun(runId: string): Promise<number | null> {
-		const row = this.db
-			.select({ max: sql<number | null>`max(${events.burrowEventSeq})` })
-			.from(events)
-			.where(eq(events.runId, runId))
-			.get();
-		return row?.max ?? null;
+		const row = await this.adapter.pickOne<{ max: number | null }>(
+			this.db
+				.select({ max: sql<number | null>`max(${this.events.burrowEventSeq})` })
+				.from(this.events)
+				.where(eq(this.events.runId, runId)),
+		);
+		const raw = row?.max ?? null;
+		return raw === null ? null : Number(raw);
 	}
 
 	async countByRun(runId: string): Promise<number> {
-		const row = this.db
-			.select({ n: sql<number>`count(*)` })
-			.from(events)
-			.where(eq(events.runId, runId))
-			.get();
-		return row?.n ?? 0;
+		const row = await this.adapter.pickOne<{ n: number | string }>(
+			this.db
+				.select({ n: sql<number>`count(*)` })
+				.from(this.events)
+				.where(eq(this.events.runId, runId)),
+		);
+		return Number(row?.n ?? 0);
 	}
 }

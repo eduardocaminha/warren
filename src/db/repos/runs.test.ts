@@ -41,7 +41,7 @@ describe("RunsRepo", () => {
 	beforeEach(async () => {
 		db = await openDatabase({ path: ":memory:" });
 		const agents = new AgentsRepo(DrizzleAdapter.for(db));
-		const projects = new ProjectsRepo(db.drizzle);
+		const projects = new ProjectsRepo(DrizzleAdapter.for(db));
 		const a = await agents.upsert({ name: "refactor-bot", renderedJson: { sections: {} } });
 		const p = await projects.create({
 			gitUrl: "https://github.com/x/y.git",

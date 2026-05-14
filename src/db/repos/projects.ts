@@ -9,8 +9,9 @@
 import { asc, eq } from "drizzle-orm";
 import { NotFoundError } from "../../core/errors.ts";
 import { generateId } from "../../core/ids.ts";
-import type { DrizzleDb } from "../client.ts";
-import { type ProjectRow, projects } from "../schema.ts";
+import type { SqliteDrizzleDb } from "../client.ts";
+import type { ProjectRow } from "../schema.ts";
+import type { DrizzleAdapter } from "./drizzle-adapter.ts";
 
 export interface CreateProjectInput {
 	id?: string;
@@ -27,7 +28,15 @@ export interface RecordRefreshInput {
 }
 
 export class ProjectsRepo {
-	constructor(private readonly db: DrizzleDb) {}
+	constructor(private readonly adapter: DrizzleAdapter) {}
+
+	private get db(): SqliteDrizzleDb {
+		return this.adapter.drizzle as SqliteDrizzleDb;
+	}
+
+	private get projects() {
+		return this.adapter.schema.projects;
+	}
 
 	async create(input: CreateProjectInput): Promise<ProjectRow> {
 		const row: ProjectRow = {
@@ -39,22 +48,26 @@ export class ProjectsRepo {
 			lastFetchedAt: null,
 			lastHeadSha: null,
 		};
-		this.db.insert(projects).values(row).run();
+		await this.adapter.runWrite(this.db.insert(this.projects).values(row));
 		return row;
 	}
 
 	async recordRefresh(input: RecordRefreshInput): Promise<ProjectRow> {
 		const lastFetchedAt = (input.now ?? new Date()).toISOString();
-		this.db
-			.update(projects)
-			.set({ lastFetchedAt, lastHeadSha: input.headSha })
-			.where(eq(projects.id, input.id))
-			.run();
+		await this.adapter.runWrite(
+			this.db
+				.update(this.projects)
+				.set({ lastFetchedAt, lastHeadSha: input.headSha })
+				.where(eq(this.projects.id, input.id)),
+		);
 		return this.require(input.id);
 	}
 
 	async get(id: string): Promise<ProjectRow | null> {
-		return this.db.select().from(projects).where(eq(projects.id, id)).get() ?? null;
+		const row = await this.adapter.pickOne(
+			this.db.select().from(this.projects).where(eq(this.projects.id, id)),
+		);
+		return row ?? null;
 	}
 
 	async require(id: string): Promise<ProjectRow> {
@@ -68,14 +81,19 @@ export class ProjectsRepo {
 	}
 
 	async findByGitUrl(gitUrl: string): Promise<ProjectRow | null> {
-		return this.db.select().from(projects).where(eq(projects.gitUrl, gitUrl)).get() ?? null;
+		const row = await this.adapter.pickOne(
+			this.db.select().from(this.projects).where(eq(this.projects.gitUrl, gitUrl)),
+		);
+		return row ?? null;
 	}
 
 	async listAll(): Promise<ProjectRow[]> {
-		return this.db.select().from(projects).orderBy(asc(projects.addedAt)).all();
+		return this.adapter.pickAll(
+			this.db.select().from(this.projects).orderBy(asc(this.projects.addedAt)),
+		);
 	}
 
 	async delete(id: string): Promise<void> {
-		this.db.delete(projects).where(eq(projects.id, id)).run();
+		await this.adapter.runWrite(this.db.delete(this.projects).where(eq(this.projects.id, id)));
 	}
 }

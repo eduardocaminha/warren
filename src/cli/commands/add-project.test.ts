@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { openDatabase, type WarrenDb } from "../../db/client.ts";
+import { DrizzleAdapter } from "../../db/repos/drizzle-adapter.ts";
 import { ProjectsRepo } from "../../db/repos/projects.ts";
 import type { ProjectsConfig } from "../../projects/config.ts";
 import type { CliContext, SpawnResult } from "../output.ts";
@@ -36,7 +37,7 @@ describe("runAddProject", () => {
 
 	beforeEach(async () => {
 		db = await openDatabase({ path: ":memory:" });
-		projects = new ProjectsRepo(db.drizzle);
+		projects = new ProjectsRepo(DrizzleAdapter.for(db));
 	});
 
 	afterEach(async () => {

@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import yaml from "js-yaml";
 import { openDatabase, type WarrenDb } from "../../db/client.ts";
+import { DrizzleAdapter } from "../../db/repos/drizzle-adapter.ts";
 import { ProjectsRepo } from "../../db/repos/projects.ts";
 import type { CliContext } from "../output.ts";
 import { runConfigMigrate } from "./config-migrate.ts";
@@ -34,7 +35,7 @@ describe("runConfigMigrate (--cwd mode)", () => {
 
 	beforeEach(async () => {
 		db = await openDatabase({ path: ":memory:" });
-		projects = new ProjectsRepo(db.drizzle);
+		projects = new ProjectsRepo(DrizzleAdapter.for(db));
 		tmp = await mkdtemp(join(tmpdir(), "warren-config-migrate-"));
 		warrenDir = join(tmp, ".warren");
 		await mkdir(warrenDir, { recursive: true });

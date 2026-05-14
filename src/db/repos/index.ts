@@ -24,16 +24,17 @@ export interface Repos {
 }
 
 export function createRepos(db: WarrenDb): Repos {
-	// pl-f1be migration: AgentsRepo + BurrowsRepo (step 2) take the
-	// dialect-polymorphic adapter; the remaining repos still take the raw
-	// sqlite drizzle handle and will migrate in steps 3-5. Step 7 widens
-	// this factory to AnyWarrenDb once every repo is on the adapter.
+	// pl-f1be migration: AgentsRepo + BurrowsRepo + ProjectsRepo + EventsRepo
+	// (steps 2-3) take the dialect-polymorphic adapter; RunsRepo / TriggersRepo /
+	// WorkersRepo still take the raw sqlite drizzle handle and will migrate in
+	// steps 4-5. Step 7 widens this factory to AnyWarrenDb once every repo is
+	// on the adapter.
 	const adapter = DrizzleAdapter.for(db);
 	return {
 		agents: new AgentsRepo(adapter),
-		projects: new ProjectsRepo(db.drizzle),
+		projects: new ProjectsRepo(adapter),
 		runs: new RunsRepo(db.drizzle),
-		events: new EventsRepo(db.drizzle),
+		events: new EventsRepo(adapter),
 		triggers: new TriggersRepo(db.drizzle),
 		workers: new WorkersRepo(db.drizzle),
 		burrows: new BurrowsRepo(adapter),

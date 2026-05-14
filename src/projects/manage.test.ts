@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { ValidationError } from "../core/errors.ts";
 import { isId } from "../core/ids.ts";
 import { openDatabase, type WarrenDb } from "../db/client.ts";
+import { DrizzleAdapter } from "../db/repos/drizzle-adapter.ts";
 import { ProjectsRepo } from "../db/repos/projects.ts";
 import { RunsRepo } from "../db/repos/runs.ts";
 import type { WarrenConfigCache } from "../warren-config/index.ts";
@@ -59,7 +60,7 @@ describe("addProject", () => {
 
 	beforeEach(async () => {
 		db = await openDatabase({ path: ":memory:" });
-		repo = new ProjectsRepo(db.drizzle);
+		repo = new ProjectsRepo(DrizzleAdapter.for(db));
 	});
 
 	afterEach(async () => {
@@ -173,7 +174,7 @@ describe("listProjects", () => {
 
 	beforeEach(async () => {
 		db = await openDatabase({ path: ":memory:" });
-		repo = new ProjectsRepo(db.drizzle);
+		repo = new ProjectsRepo(DrizzleAdapter.for(db));
 	});
 
 	afterEach(async () => {
@@ -207,7 +208,7 @@ describe("deleteProject", () => {
 
 	beforeEach(async () => {
 		db = await openDatabase({ path: ":memory:" });
-		repo = new ProjectsRepo(db.drizzle);
+		repo = new ProjectsRepo(DrizzleAdapter.for(db));
 	});
 
 	afterEach(async () => {
@@ -404,7 +405,7 @@ describe("refreshProject", () => {
 
 	beforeEach(async () => {
 		db = await openDatabase({ path: ":memory:" });
-		repo = new ProjectsRepo(db.drizzle);
+		repo = new ProjectsRepo(DrizzleAdapter.for(db));
 	});
 
 	afterEach(async () => {
