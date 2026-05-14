@@ -6,7 +6,9 @@ src/ui/*.tsbuildinfo
 data/
 .env
 .env.local
+.env.deployed
 *.log
 .DS_Store
 bun.lockb.bak
 .run-plan-logs/
+supabase/
