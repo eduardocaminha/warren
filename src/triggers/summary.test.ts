@@ -12,8 +12,9 @@ async function makeRepo(): Promise<{
 	close: () => Promise<void>;
 }> {
 	const db = await openDatabase({ path: ":memory:" });
-	const projects = new ProjectsRepo(DrizzleAdapter.for(db));
-	const repo = new TriggersRepo(db.drizzle);
+	const adapter = DrizzleAdapter.for(db);
+	const projects = new ProjectsRepo(adapter);
+	const repo = new TriggersRepo(adapter);
 	const p = await projects.create({
 		gitUrl: "https://github.com/x/y.git",
 		localPath: "/data/projects/x/y",

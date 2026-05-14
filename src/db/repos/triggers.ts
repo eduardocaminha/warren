@@ -17,8 +17,9 @@
 
 import { asc, eq } from "drizzle-orm";
 import { NotFoundError } from "../../core/errors.ts";
-import type { DrizzleDb } from "../client.ts";
-import { makeTriggerRowId, type TriggerRow, triggers } from "../schema.ts";
+import type { SqliteDrizzleDb } from "../client.ts";
+import { makeTriggerRowId, type TriggerRow } from "../schema.ts";
+import type { DrizzleAdapter } from "./drizzle-adapter.ts";
 
 export interface TriggerKey {
 	projectId: string;
@@ -38,7 +39,15 @@ export interface RecordFireInput extends TriggerKey {
 }
 
 export class TriggersRepo {
-	constructor(private readonly db: DrizzleDb) {}
+	constructor(private readonly adapter: DrizzleAdapter) {}
+
+	private get db(): SqliteDrizzleDb {
+		return this.adapter.drizzle as SqliteDrizzleDb;
+	}
+
+	private get triggers() {
+		return this.adapter.schema.triggers;
+	}
 
 	/**
 	 * Insert-or-merge a scheduler row. Fields omitted from the patch keep
@@ -47,16 +56,18 @@ export class TriggersRepo {
 	 * the most recent dispatch.
 	 */
 	async upsert(input: UpsertTriggerInput): Promise<TriggerRow> {
-		return this.db.transaction((tx) => {
+		return this.adapter.runInTransaction(async (tx) => {
+			const txDb = tx.drizzle as SqliteDrizzleDb;
+			const triggers = tx.schema.triggers;
 			const id = makeTriggerRowId(input.projectId, input.triggerId);
-			const existing = tx.select().from(triggers).where(eq(triggers.id, id)).get();
+			const existing = await tx.pickOne(txDb.select().from(triggers).where(eq(triggers.id, id)));
 			if (existing) {
 				const patch: Partial<TriggerRow> = {};
 				if (input.lastFiredAt !== undefined) patch.lastFiredAt = input.lastFiredAt;
 				if (input.nextFireAt !== undefined) patch.nextFireAt = input.nextFireAt;
 				if (input.lastRunId !== undefined) patch.lastRunId = input.lastRunId;
 				if (Object.keys(patch).length === 0) return existing;
-				tx.update(triggers).set(patch).where(eq(triggers.id, id)).run();
+				await tx.runWrite(txDb.update(triggers).set(patch).where(eq(triggers.id, id)));
 				return { ...existing, ...patch };
 			}
 			const row: TriggerRow = {
@@ -67,7 +78,7 @@ export class TriggersRepo {
 				nextFireAt: input.nextFireAt ?? null,
 				lastRunId: input.lastRunId ?? null,
 			};
-			tx.insert(triggers).values(row).run();
+			await tx.runWrite(txDb.insert(triggers).values(row));
 			return row;
 		});
 	}
@@ -91,7 +102,10 @@ export class TriggersRepo {
 
 	async get(key: TriggerKey): Promise<TriggerRow | null> {
 		const id = makeTriggerRowId(key.projectId, key.triggerId);
-		return this.db.select().from(triggers).where(eq(triggers.id, id)).get() ?? null;
+		const row = await this.adapter.pickOne(
+			this.db.select().from(this.triggers).where(eq(this.triggers.id, id)),
+		);
+		return row ?? null;
 	}
 
 	async require(key: TriggerKey): Promise<TriggerRow> {
@@ -105,24 +119,26 @@ export class TriggersRepo {
 	}
 
 	async listByProject(projectId: string): Promise<TriggerRow[]> {
-		return this.db
-			.select()
-			.from(triggers)
-			.where(eq(triggers.projectId, projectId))
-			.orderBy(asc(triggers.triggerId))
-			.all();
+		return this.adapter.pickAll(
+			this.db
+				.select()
+				.from(this.triggers)
+				.where(eq(this.triggers.projectId, projectId))
+				.orderBy(asc(this.triggers.triggerId)),
+		);
 	}
 
 	async listAll(): Promise<TriggerRow[]> {
-		return this.db
-			.select()
-			.from(triggers)
-			.orderBy(asc(triggers.projectId), asc(triggers.triggerId))
-			.all();
+		return this.adapter.pickAll(
+			this.db
+				.select()
+				.from(this.triggers)
+				.orderBy(asc(this.triggers.projectId), asc(this.triggers.triggerId)),
+		);
 	}
 
 	async delete(key: TriggerKey): Promise<void> {
 		const id = makeTriggerRowId(key.projectId, key.triggerId);
-		this.db.delete(triggers).where(eq(triggers.id, id)).run();
+		await this.adapter.runWrite(this.db.delete(this.triggers).where(eq(this.triggers.id, id)));
 	}
 }

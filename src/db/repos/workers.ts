@@ -19,8 +19,9 @@
 
 import { asc, eq } from "drizzle-orm";
 import { NotFoundError } from "../../core/errors.ts";
-import type { DrizzleDb } from "../client.ts";
-import { type WorkerRow, type WorkerState, workers } from "../schema.ts";
+import type { SqliteDrizzleDb } from "../client.ts";
+import type { WorkerRow, WorkerState } from "../schema.ts";
+import type { DrizzleAdapter } from "./drizzle-adapter.ts";
 
 export interface UpsertWorkerInput {
 	name: string;
@@ -30,7 +31,15 @@ export interface UpsertWorkerInput {
 }
 
 export class WorkersRepo {
-	constructor(private readonly db: DrizzleDb) {}
+	constructor(private readonly adapter: DrizzleAdapter) {}
+
+	private get db(): SqliteDrizzleDb {
+		return this.adapter.drizzle as SqliteDrizzleDb;
+	}
+
+	private get workers() {
+		return this.adapter.schema.workers;
+	}
 
 	/**
 	 * Insert-or-merge a worker row. New rows take the supplied `state`
@@ -41,12 +50,16 @@ export class WorkersRepo {
 	 * (step 6) stays the source of truth for liveness.
 	 */
 	async upsert(input: UpsertWorkerInput): Promise<WorkerRow> {
-		return this.db.transaction((tx) => {
-			const existing = tx.select().from(workers).where(eq(workers.name, input.name)).get();
+		return this.adapter.runInTransaction(async (tx) => {
+			const txDb = tx.drizzle as SqliteDrizzleDb;
+			const workers = tx.schema.workers;
+			const existing = await tx.pickOne(
+				txDb.select().from(workers).where(eq(workers.name, input.name)),
+			);
 			if (existing) {
 				const patch: Partial<WorkerRow> = { url: input.url };
 				if (input.state !== undefined) patch.state = input.state;
-				tx.update(workers).set(patch).where(eq(workers.name, input.name)).run();
+				await tx.runWrite(txDb.update(workers).set(patch).where(eq(workers.name, input.name)));
 				return { ...existing, ...patch };
 			}
 			const row: WorkerRow = {
@@ -55,18 +68,23 @@ export class WorkersRepo {
 				state: input.state ?? "healthy",
 				addedAt: (input.now ?? new Date()).toISOString(),
 			};
-			tx.insert(workers).values(row).run();
+			await tx.runWrite(txDb.insert(workers).values(row));
 			return row;
 		});
 	}
 
 	async setState(name: string, state: WorkerState): Promise<WorkerRow> {
-		this.db.update(workers).set({ state }).where(eq(workers.name, name)).run();
+		await this.adapter.runWrite(
+			this.db.update(this.workers).set({ state }).where(eq(this.workers.name, name)),
+		);
 		return this.require(name);
 	}
 
 	async get(name: string): Promise<WorkerRow | null> {
-		return this.db.select().from(workers).where(eq(workers.name, name)).get() ?? null;
+		const row = await this.adapter.pickOne(
+			this.db.select().from(this.workers).where(eq(this.workers.name, name)),
+		);
+		return row ?? null;
 	}
 
 	async require(name: string): Promise<WorkerRow> {
@@ -80,10 +98,12 @@ export class WorkersRepo {
 	}
 
 	async listAll(): Promise<WorkerRow[]> {
-		return this.db.select().from(workers).orderBy(asc(workers.name)).all();
+		return this.adapter.pickAll(
+			this.db.select().from(this.workers).orderBy(asc(this.workers.name)),
+		);
 	}
 
 	async delete(name: string): Promise<void> {
-		this.db.delete(workers).where(eq(workers.name, name)).run();
+		await this.adapter.runWrite(this.db.delete(this.workers).where(eq(this.workers.name, name)));
 	}
 }

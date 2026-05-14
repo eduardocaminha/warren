@@ -175,7 +175,7 @@ describe("dispatchCronTrigger", () => {
 	});
 
 	test("does not double-fire on a rapid tick after a fire", async () => {
-		repos.triggers.upsert({
+		await repos.triggers.upsert({
 			projectId,
 			triggerId: TRIGGER_ID,
 			lastFiredAt: "2026-05-11T00:05:00.000Z",
