@@ -7,6 +7,83 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-05-13
+
+Closes the last warren↔burrow disk-seam violations on the spawn and reap
+paths by adopting burrow's R-07 HTTP file surface end-to-end. Warren no
+longer writes the burrow workspace's `.canopy/` / `.mulch/` / `.seeds/` /
+`.pi/` drops through shared `/data` — `src/runs/seed.ts` becomes a pure
+builder returning `HttpWorkspaceFile[]`, and `spawnRun` threads the list
+through `HttpClient.burrows.up({ seed: { files } })` so provisioning and
+seeding land in a single atomic round-trip. Reap's `seeds_close` sub-step
+flips to `HttpClient.files.read('.seeds/issues.jsonl')`; the
+`mulch_merge` sub-step stays disk-bound pending burrow's file-listing
+endpoint (`burrow-18ca`, tracked by `warren-7f7c`). Mechanical refactor,
+no user-facing API changes — but the minor bump signals that the
+warren↔burrow contract is now HTTP-only on every code path except
+`mulch_merge` and `branch_push`, which unblocks the remote-burrow
+topology that R-12 needs (warren plan `pl-a31c`, parent `warren-0a83`;
+burrow plan `bur-pl-2467`).
+
+### Changed
+
+- **`refactor(runs)`** — `seedBurrowWorkspace` is gone; `buildSeedFiles(agent)`
+  replaces it as a pure builder returning `HttpWorkspaceFile[]` with
+  workspace-relative paths for the five drops (`.canopy/agent.json`,
+  `.mulch/expertise/<domain>.jsonl` from `expertise_seed`, `.seeds/workflow.txt`,
+  `.pi/skills/<name>/SKILL.md` from `pi_skills`, `.pi/prompts/<name>.md` from
+  `pi_prompts`). `src/runs/seed.ts` no longer imports `node:fs/promises`; the
+  `SeedFs` injection seam is removed. Same validation errors as the prior
+  writer — malformed JSONL, missing `domain`, missing/invalid pi `name`/`body`,
+  duplicate or unsafe pi names all surface as `RunSpawnError` at build time
+  (warren-e238, pl-a31c step 1).
+- **`feat(runs)`** — `spawnRun` ships the `buildSeedFiles` output as the
+  `seed.files` payload on `HttpClient.burrows.up({ seed: { files } })`, so
+  provisioning + workspace seed land in one atomic burrow round-trip.
+  `buildSeedFiles` runs before the warren run row is created, so
+  `expertise_seed` / `pi_skills` / `pi_prompts` validation surfaces as a
+  clean `RunSpawnError` with no half-spawned row. Seed-validation failures
+  inside `burrows.up` roll back on burrow's side before warren observes a
+  `burrow_id` — the catch path sees `burrow === null` and no `DELETE
+  /burrows/:id` fires. `SeedWorkspaceInput`, the `seedWorkspace` injection
+  seam, and the temporary `writeSeedFilesToDisk` adapter are deleted;
+  `src/runs/spawn.ts` no longer imports `node:fs/promises`. `spawn.test.ts`
+  asserts on the `seed.files` payload posted to `/burrows` and replaces the
+  old "seeding fails" case with an atomic-rollback case
+  (`burrowsUpStatus: 422`, no DELETE) (warren-eaee, pl-a31c step 2).
+- **`refactor(runs)`** — reap's `seeds_close` sub-step reads
+  `<burrow-workspace>/.seeds/issues.jsonl` via
+  `input.burrowClient.http.files.read('.seeds/issues.jsonl')` wrapped in
+  `withTransportMapping` instead of `fs.readFile`. `NotFoundError` from
+  `@os-eco/burrow-cli` is the no-op shape (agent never created the file →
+  zero closures, no `reap_failed`); any other thrown error rethrows so
+  `reapRun`'s outer catch records it as `reap_failed step=seeds_close`. The
+  project-side `.seeds/issues.jsonl` write still flows through `ReapFs`
+  because reap remains co-tenanted with the project clone on warren's disk.
+  `reap.test.ts`'s `fakeBurrowClient` grows a `FakeBurrowClientOpts` arg
+  with `seedsIssuesBody` + `filesRead` knobs; default behaviour throws
+  `NotFoundError`, so every other test silently exercises the no-op path
+  (warren-ae92, pl-a31c step 3).
+
+### Docs
+
+- **`docs(spec)`** — `SPEC.md` §4.3 step 3 + step 6 and §11.A "Seeding" /
+  "Reap" / "Why HTTP-and-not-shared-disk" bullets re-pin the burrow-side
+  seam as HTTP, not shared disk. §12's mulch row clarifies that warren
+  reads/writes the project-side `.mulch/` directly on the host but seeds
+  the per-run `.mulch/` via `seed.files`. The §5 ASCII diagram drops the
+  stale `ml record` shell-out from warren's outgoing shell calls.
+
+### Tracked follow-ups
+
+- `warren-7f7c` — burrow follow-up filed as `burrow-18ca` (workspace
+  file-listing endpoint). Once shipped, reap's `mulch_merge` sub-step
+  becomes a mechanical change in `src/runs/reap.ts` `mergeMulch`:
+  `HttpClient.files.list` + `.files.read` replace `fs.readdir` +
+  `fs.readFile`, and the last warren↔burrow read-side disk seam closes.
+  `branch_push` remains workspace-local and out of scope (would need a
+  separate burrow primitive for remote-burrow topologies).
+
 ## [0.1.7] — 2026-05-13
 
 Pi lands as the third inline built-in (alongside `claude-code` and
