@@ -1,7 +1,15 @@
 import { describe, expect, test } from "bun:test";
+import { openDatabase } from "../db/client.ts";
 import type { SpawnFn } from "../projects/clone.ts";
 import { type LoadedWarrenConfig, WarrenConfigUnavailableError } from "../warren-config/index.ts";
-import { checkBwrap, checkCanopyClean, checkCanopyClone, checkWarrenConfig } from "./checks.ts";
+import {
+	checkBwrap,
+	checkCanopyClean,
+	checkCanopyClone,
+	checkDatabaseReachable,
+	checkWarrenConfig,
+	checkWarrenDb,
+} from "./checks.ts";
 
 const captureSpawnCalls = (
 	results: Record<string, { stdout?: string; stderr?: string; exitCode: number }>,
@@ -269,9 +277,90 @@ describe("checkWarrenConfig", () => {
 		const result = await checkWarrenConfig({
 			projects: [{ id: "prj_a", localPath: "/c/a" }],
 			cache,
-			load: async () => empty, // ignored when cache is supplied
+			load: async () => empty,
 		});
 		expect(seen).toEqual([{ id: "prj_a", path: "/c/a" }]);
 		expect(result.ok).toBe(true);
+	});
+});
+
+describe("checkWarrenDb", () => {
+	test("ok with informational message when neither env var is set", () => {
+		const result = checkWarrenDb({ env: {} });
+		expect(result.ok).toBe(true);
+		expect(result.message).toContain("will default to sqlite");
+	});
+
+	test("ok and reports sqlite path when WARREN_DB_URL is sqlite://", () => {
+		const result = checkWarrenDb({ env: { WARREN_DB_URL: "sqlite:///data/warren.db" } });
+		expect(result.ok).toBe(true);
+		expect(result.message).toBe("sqlite /data/warren.db");
+	});
+
+	test("ok and reports postgres when WARREN_DB_URL is postgres://", () => {
+		const result = checkWarrenDb({ env: { WARREN_DB_URL: "postgres://u:p@h/db" } });
+		expect(result.ok).toBe(true);
+		expect(result.message).toBe("postgres");
+	});
+
+	test("synthesizes a sqlite url from legacy WARREN_DB_PATH", () => {
+		const result = checkWarrenDb({ env: { WARREN_DB_PATH: "/srv/warren.db" } });
+		expect(result.ok).toBe(true);
+		expect(result.message).toBe("sqlite /srv/warren.db");
+	});
+
+	test("ok when WARREN_DB_URL and WARREN_DB_PATH agree (sqlite synthesis matches URL)", () => {
+		const result = checkWarrenDb({
+			env: {
+				WARREN_DB_URL: "sqlite:///srv/warren.db",
+				WARREN_DB_PATH: "/srv/warren.db",
+			},
+		});
+		expect(result.ok).toBe(true);
+	});
+
+	test("fails when WARREN_DB_URL (postgres) and WARREN_DB_PATH (sqlite) disagree", () => {
+		const result = checkWarrenDb({
+			env: {
+				WARREN_DB_URL: "postgres://h/db",
+				WARREN_DB_PATH: "/srv/legacy.sqlite",
+			},
+		});
+		expect(result.ok).toBe(false);
+		expect(result.message).toContain("disagree");
+		expect(result.hint).toContain("WARREN_DB_URL wins");
+	});
+
+	test("fails when WARREN_DB_URL is malformed", () => {
+		const result = checkWarrenDb({ env: { WARREN_DB_URL: "sqlite://" } });
+		expect(result.ok).toBe(false);
+		expect(result.message).toContain("sqlite URL has no path");
+	});
+});
+
+describe("checkDatabaseReachable", () => {
+	test("degrades to informational ok when no db handle wired", async () => {
+		const result = await checkDatabaseReachable({});
+		expect(result.ok).toBe(true);
+		expect(result.message).toContain("no db handle wired");
+	});
+
+	test("pings a live sqlite handle and reports dialect=sqlite", async () => {
+		const db = await openDatabase({ url: ":memory:" });
+		try {
+			const result = await checkDatabaseReachable({ db });
+			expect(result.ok).toBe(true);
+			expect(result.message).toBe("dialect=sqlite");
+		} finally {
+			await db.close();
+		}
+	});
+
+	test("returns ok=false with the underlying error when ping throws", async () => {
+		const db = await openDatabase({ url: ":memory:" });
+		await db.close();
+		const result = await checkDatabaseReachable({ db });
+		expect(result.ok).toBe(false);
+		expect(result.hint).toContain("sqlite");
 	});
 });

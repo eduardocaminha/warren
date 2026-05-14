@@ -20,6 +20,9 @@ import { existsSync } from "node:fs";
 import type { BurrowClient } from "../burrow-client/client.ts";
 import { withTransportMapping } from "../burrow-client/client.ts";
 import type { BurrowClientPool } from "../burrow-client/pool.ts";
+import { ValidationError } from "../core/errors.ts";
+import { type AnyWarrenDb, pingDatabase } from "../db/client.ts";
+import { parseDatabaseUrl, sqliteUrlForPath } from "../db/url.ts";
 import type { SpawnFn } from "../projects/clone.ts";
 import { type CanopyRegistryConfig, loadCanopyRegistryConfigFromEnv } from "../registry/config.ts";
 import {
@@ -294,6 +297,93 @@ export async function checkBurrowReachable(deps: {
 			ok: false,
 			message: err instanceof Error ? err.message : String(err),
 			hint: "check that burrow serve is running and WARREN_BURROW_SOCKET / WARREN_BURROW_HOST point to it",
+		};
+	}
+}
+
+/**
+ * Parse `WARREN_DB_URL` (or the legacy `WARREN_DB_PATH` alias) and
+ * report the resolved dialect (R-13 pl-f17e step 5, warren-e2ea). Pure:
+ * does NOT open the database — pair with `checkDatabaseReachable` when
+ * a live handle is available. Surfaces three operator-facing failures:
+ *
+ *  - URL is malformed (ValidationError from parseDatabaseUrl).
+ *  - WARREN_DB_URL and WARREN_DB_PATH are both set but disagree (a
+ *    common foot-gun when migrating off the legacy var).
+ *  - Neither var is set AND no default applies in the caller's context.
+ *    (`warren doctor` always synthesizes a default so this branch only
+ *    fires from custom embeddings.)
+ */
+export function checkWarrenDb(deps: { readonly env: EnvLike }): DiagnosticCheck {
+	const url = deps.env.WARREN_DB_URL;
+	const path = deps.env.WARREN_DB_PATH;
+	if ((url === undefined || url === "") && (path === undefined || path === "")) {
+		return {
+			name: "warren_db",
+			ok: true,
+			message:
+				"no WARREN_DB_URL / WARREN_DB_PATH set (will default to sqlite under WARREN_DATA_DIR)",
+		};
+	}
+	if (url !== undefined && url !== "" && path !== undefined && path !== "") {
+		const synthesized = sqliteUrlForPath(path);
+		if (synthesized !== url) {
+			return {
+				name: "warren_db",
+				ok: false,
+				message: `WARREN_DB_URL (${url}) and WARREN_DB_PATH (${path}) disagree`,
+				hint: "unset WARREN_DB_PATH or align it with WARREN_DB_URL — WARREN_DB_URL wins at boot",
+			};
+		}
+	}
+	const effective = url !== undefined && url !== "" ? url : sqliteUrlForPath(path ?? "");
+	try {
+		const parsed = parseDatabaseUrl(effective);
+		const display = parsed.dialect === "sqlite" ? `sqlite ${parsed.path}` : "postgres";
+		return { name: "warren_db", ok: true, message: display };
+	} catch (err) {
+		if (err instanceof ValidationError) {
+			return {
+				name: "warren_db",
+				ok: false,
+				message: err.message,
+				...(err.recoveryHint !== undefined ? { hint: err.recoveryHint } : {}),
+			};
+		}
+		return {
+			name: "warren_db",
+			ok: false,
+			message: err instanceof Error ? err.message : String(err),
+		};
+	}
+}
+
+/**
+ * Probe the live database via `SELECT 1` and report the active dialect
+ * (R-13 pl-f17e step 5 acceptance #2). Used by `warren doctor` (which
+ * opens the db through `withCliDb`) and `GET /readyz` (which forwards
+ * the bootServer-owned handle via `ServerDeps.db`). Returns an
+ * informational `ok: true` when no handle is wired so tests don't have
+ * to populate the seam.
+ */
+export async function checkDatabaseReachable(deps: {
+	readonly db?: AnyWarrenDb;
+}): Promise<DiagnosticCheck> {
+	if (deps.db === undefined) {
+		return { name: "db_reachable", ok: true, message: "no db handle wired (test or partial deps)" };
+	}
+	try {
+		await pingDatabase(deps.db);
+		return { name: "db_reachable", ok: true, message: `dialect=${deps.db.dialect}` };
+	} catch (err) {
+		return {
+			name: "db_reachable",
+			ok: false,
+			message: err instanceof Error ? err.message : String(err),
+			hint:
+				deps.db.dialect === "postgres"
+					? "verify WARREN_DB_URL points at a reachable Postgres and the role can SELECT"
+					: "verify WARREN_DB_URL (or WARREN_DB_PATH) points at a writable sqlite file",
 		};
 	}
 }

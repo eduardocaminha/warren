@@ -20,12 +20,15 @@ import { existsSync } from "node:fs";
 import { BurrowClient } from "../../burrow-client/client.ts";
 import { loadBurrowClientConfigFromEnv } from "../../burrow-client/config.ts";
 import { ValidationError } from "../../core/errors.ts";
+import type { AnyWarrenDb } from "../../db/client.ts";
 import {
 	checkBurrowReachable,
 	checkBwrap,
 	checkCanopyClean,
 	checkCanopyClone,
+	checkDatabaseReachable,
 	checkWarrenConfig,
+	checkWarrenDb,
 	type DiagnosticCheck,
 	type WarrenConfigCheckProject,
 } from "../../diagnostics/checks.ts";
@@ -52,6 +55,12 @@ export interface DoctorDeps {
 	 * informational `ok: true`.
 	 */
 	readonly projects?: ReadonlyArray<WarrenConfigCheckProject>;
+	/**
+	 * Live db handle for the `db_reachable` probe (R-13 pl-f17e step 5,
+	 * warren-e2ea). `main.ts` wires this from `withCliDb`; tests omit
+	 * and the check degrades to an informational `ok: true`.
+	 */
+	readonly db?: AnyWarrenDb;
 }
 
 export interface DoctorResult {
@@ -69,6 +78,9 @@ export async function runDoctor(
 
 	checks.push(envCheck("WARREN_API_TOKEN", context.env, args.noAuth ?? false));
 	checks.push(canopyRepoUrlCheck(context.env));
+
+	checks.push(checkWarrenDb({ env: context.env }));
+	checks.push(await checkDatabaseReachable({ ...(deps.db !== undefined ? { db: deps.db } : {}) }));
 
 	checks.push(checkCanopyClone({ env: context.env, exists }));
 	checks.push(await checkCanopyClean({ env: context.env, spawn: context.spawn, exists }));

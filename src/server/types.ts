@@ -10,6 +10,7 @@
  */
 
 import type { BurrowClientPool } from "../burrow-client/pool.ts";
+import type { AnyWarrenDb } from "../db/client.ts";
 import type { Repos } from "../db/repos/index.ts";
 import type { SpawnFn } from "../projects/clone.ts";
 import type { ProjectsConfig } from "../projects/config.ts";
@@ -97,6 +98,13 @@ export interface Logger {
  */
 export interface ServerDeps {
 	readonly repos: Repos;
+	/**
+	 * Live db handle — used by the `/readyz` `db_reachable` probe
+	 * (R-13 pl-f17e step 5, warren-e2ea) so the diagnostic envelope
+	 * reports the active dialect. Tests can omit; the probe degrades
+	 * to `ok: true` with a "no db wired" message when absent.
+	 */
+	readonly db?: AnyWarrenDb;
 	/**
 	 * Multi-worker burrow client pool (warren-39c3 / warren-c0c9 / pl-9ba1).
 	 * Every burrow-targeting handler routes through this: `placeFor` for new

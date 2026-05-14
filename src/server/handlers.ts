@@ -42,6 +42,7 @@ import {
 	checkBwrap,
 	checkCanopyClean,
 	checkCanopyClone,
+	checkDatabaseReachable,
 	checkWarrenConfig,
 	type DiagnosticCheck,
 } from "../diagnostics/checks.ts";
@@ -825,6 +826,9 @@ function readyz(deps: ServerDeps): RouteHandler {
 				: {};
 
 		const checks: DiagnosticCheck[] = [];
+		checks.push(
+			await checkDatabaseReachable({ ...(deps.db !== undefined ? { db: deps.db } : {}) }),
+		);
 		checks.push(await checkBurrowPoolReachable(deps.burrowClientPool));
 		checks.push(await checkAgentsRegistered(deps));
 		checks.push(checkCanopyClone({ env }));

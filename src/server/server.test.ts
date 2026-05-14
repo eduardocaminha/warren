@@ -51,7 +51,12 @@ const okSpawn: SpawnFn = async (cmd) => {
 async function depsFor(
 	repos: Repos,
 	bridges?: BridgeRegistry,
-	overrides: { spawn?: SpawnFn; canopyDir?: string; uiDistDir?: string | null } = {},
+	overrides: {
+		spawn?: SpawnFn;
+		canopyDir?: string;
+		uiDistDir?: string | null;
+		db?: WarrenDb;
+	} = {},
 ): Promise<ServerDeps> {
 	const burrowClient = makeBurrowClient();
 	await repos.workers.upsert({ name: "local", url: "unix:///tmp/x.sock" });
@@ -60,6 +65,7 @@ async function depsFor(
 	const broker = new RunEventBroker();
 	return {
 		repos,
+		...(overrides.db !== undefined ? { db: overrides.db } : {}),
 		burrowClientPool,
 		broker,
 		bridges:
@@ -368,15 +374,18 @@ describe("startServer — routes", () => {
 		// probe succeeds (stubbed) + bwrap + canopy_clean stubbed clean.
 		const canopyDir = mkdtempSync(join(tmpdir(), "warren-readyz-"));
 		try {
-			handle = startServer(await depsFor(repos, undefined, { canopyDir }), tcpOpts());
+			handle = startServer(await depsFor(repos, undefined, { canopyDir, db }), tcpOpts());
 			const res = await fetch(`${tcpUrl(handle)}/readyz`);
 			expect(res.status).toBe(200);
 			const body = (await res.json()) as {
 				ok: boolean;
-				checks: { name: string; ok: boolean }[];
+				checks: { name: string; ok: boolean; message?: string }[];
 			};
 			expect(body.ok).toBe(true);
 			expect(body.checks.every((c) => c.ok)).toBe(true);
+			const dbCheck = body.checks.find((c) => c.name === "db_reachable");
+			expect(dbCheck?.ok).toBe(true);
+			expect(dbCheck?.message).toBe("dialect=sqlite");
 		} finally {
 			await handle?.stop();
 			handle = null;

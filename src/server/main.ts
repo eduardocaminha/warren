@@ -25,8 +25,9 @@
 
 import pino from "pino";
 import { BurrowClientPool } from "../burrow-client/index.ts";
-import { openDatabase, type WarrenDb } from "../db/client.ts";
+import { type AnyWarrenDb, openDatabase, WARREN_DB_POOL_MAX_ENV } from "../db/client.ts";
 import { createRepos } from "../db/repos/index.ts";
+import { parseDatabaseUrl } from "../db/url.ts";
 import type { SpawnFn, SpawnOptions, SpawnResult } from "../projects/clone.ts";
 import { loadProjectsConfigFromEnv } from "../projects/config.ts";
 import { seedBuiltinAgents } from "../registry/builtins/index.ts";
@@ -75,8 +76,18 @@ export async function bootServer(opts: BootServerOptions = {}): Promise<WarrenSe
 	const canopyConfig = loadCanopyRegistryConfigFromEnv(env);
 	const projectsConfig = loadProjectsConfigFromEnv(env);
 
-	const db = await openDatabase({ path: serverConfig.dbPath });
-	const repos = createRepos(db);
+	if (serverConfig.dbUrlConflict !== null) {
+		logger.warn(
+			{ url: serverConfig.dbUrl, path: serverConfig.dbUrlConflict },
+			"WARREN_DB_URL and WARREN_DB_PATH are both set and disagree; WARREN_DB_URL wins",
+		);
+	}
+	const pgPoolMax = resolvePgPoolMax(env);
+	const db = await openDatabase({
+		url: serverConfig.dbUrl,
+		...(pgPoolMax !== undefined ? { pgPoolMax } : {}),
+	});
+	const repos = createReposForDialect(db);
 
 	// Load the operator-facing TOML config (pl-9ba1 step 7 / warren-3909).
 	// `workers` is `[]` when `[workers]` is absent — the zero-config path
@@ -101,7 +112,11 @@ export async function bootServer(opts: BootServerOptions = {}): Promise<WarrenSe
 	const broker = new RunEventBroker();
 
 	logger.info(
-		{ dbPath: serverConfig.dbPath, transport: serverConfig.transport },
+		{
+			dbUrl: redactDbUrl(serverConfig.dbUrl),
+			dialect: db.dialect,
+			transport: serverConfig.transport,
+		},
 		"warren server starting",
 	);
 	if (fileConfig.path !== null) {
@@ -214,6 +229,7 @@ export async function bootServer(opts: BootServerOptions = {}): Promise<WarrenSe
 
 	const deps: ServerDeps = {
 		repos,
+		db,
 		burrowClientPool,
 		broker,
 		bridges: bridgesBoot.registry,
@@ -301,11 +317,68 @@ const defaultSpawn: SpawnFn = async (
 	return { stdout, stderr, exitCode: exitCode ?? 0 };
 };
 
-async function closeDatabase(db: WarrenDb): Promise<void> {
+async function closeDatabase(db: AnyWarrenDb): Promise<void> {
 	try {
 		await db.close();
 	} catch {
 		// Closing twice during a panicked shutdown is fine.
+	}
+}
+
+/**
+ * Repo layer is sqlite-only today (R-13 pl-f17e: pg widening lands in a
+ * later step alongside the test substrate and scenario 19). The boot
+ * path opens the URL-driven db but explicitly refuses pg until the
+ * repos can speak both dialects — fail-fast with a clear error rather
+ * than letting a `.run()` call on a pg drizzle handle throw deep in a
+ * request.
+ */
+function createReposForDialect(db: AnyWarrenDb): ReturnType<typeof createRepos> {
+	if (db.dialect !== "sqlite") {
+		throw new Error(
+			`WARREN_DB_URL selected the '${db.dialect}' dialect, but the repo layer is sqlite-only today. ` +
+				"Postgres boot lands with pl-f17e step 7 (warren-480a) — keep WARREN_DB_URL unset (or sqlite://) until then.",
+		);
+	}
+	return createRepos(db);
+}
+
+/**
+ * Read `WARREN_DB_POOL_MAX` (pg pool max). Undefined / blank → use the
+ * `openDatabase` default. The pool size only matters on the postgres
+ * branch; the sqlite branch ignores it.
+ */
+function resolvePgPoolMax(env: EnvLike): number | undefined {
+	const raw = env[WARREN_DB_POOL_MAX_ENV];
+	if (raw === undefined || raw === "") return undefined;
+	const parsed = Number.parseInt(raw, 10);
+	if (!Number.isInteger(parsed) || parsed <= 0) {
+		throw new Error(
+			`${WARREN_DB_POOL_MAX_ENV} must be a positive integer (got ${JSON.stringify(raw)})`,
+		);
+	}
+	return parsed;
+}
+
+/**
+ * Strip the userinfo (`user:password@`) from a postgres URL before
+ * logging. sqlite URLs and bare sentinels pass through unchanged.
+ * Defensive: any URL-parse failure falls back to the dialect-and-scheme
+ * shorthand so a malformed URL never leaks creds into the log.
+ */
+function redactDbUrl(url: string): string {
+	const parsed = parseDatabaseUrl(url);
+	if (parsed.dialect === "sqlite") return url;
+	try {
+		const u = new URL(parsed.connectionString);
+		if (u.username !== "" || u.password !== "") {
+			u.username = "";
+			u.password = "";
+			return u.toString();
+		}
+		return parsed.connectionString;
+	} catch {
+		return "postgres://<unparseable>";
 	}
 }
 

@@ -213,4 +213,19 @@ function configureSqlitePragmas(raw: Database, inMemory: boolean): void {
 	raw.exec("PRAGMA busy_timeout = 5000");
 }
 
+/**
+ * Dialect-aware reachability probe. Runs `SELECT 1` against the live
+ * handle so `warren doctor` / `/readyz` can report `db_reachable` per
+ * acceptance #2 of pl-f17e. SQLite uses the synchronous bun-sqlite query
+ * surface; Postgres awaits the pool query. Returns void on success;
+ * throws (caller maps to the diagnostic envelope).
+ */
+export async function pingDatabase(db: AnyWarrenDb): Promise<void> {
+	if (db.dialect === "sqlite") {
+		db.raw.query<{ one: number }, []>("SELECT 1 AS one").get();
+		return;
+	}
+	await db.raw.query("SELECT 1");
+}
+
 export { schema };

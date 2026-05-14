@@ -184,12 +184,12 @@ export function buildProgram(context: CliContext): Command {
 			// registered project. A missing DB file is fine — withCliDb's
 			// openDatabase creates one on first use; an empty projects
 			// table produces an informational `ok: true`.
-			const exitCode = await withCliDb({ env: context.env }, async ({ repos }) => {
+			const exitCode = await withCliDb({ env: context.env }, async ({ db, repos }) => {
 				const projects = (await repos.projects.listAll()).map((p) => ({
 					id: p.id,
 					localPath: p.localPath,
 				}));
-				const result = await runDoctor(context, { projects }, { noAuth: opts.auth === false });
+				const result = await runDoctor(context, { projects, db }, { noAuth: opts.auth === false });
 				return result.exitCode;
 			});
 			process.exit(exitCode);

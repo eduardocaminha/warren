@@ -206,6 +206,8 @@ describe("runDoctor", () => {
 		expect(names).toEqual([
 			"WARREN_API_TOKEN",
 			"CANOPY_REPO_URL",
+			"warren_db",
+			"db_reachable",
 			"canopy_clone",
 			"canopy_clean",
 			"projects_root",
@@ -213,6 +215,74 @@ describe("runDoctor", () => {
 			"warren_config",
 			"burrow_reachable",
 		]);
+	});
+
+	test("warren_db reports the resolved dialect for WARREN_DB_URL", async () => {
+		const { context } = captureContext({
+			WARREN_API_TOKEN: "tok",
+			WARREN_DB_URL: "postgres://u:p@host/db",
+		});
+		const result = await runDoctor(
+			context,
+			{ existsSync: () => true, probeBurrow: async () => undefined },
+			{},
+		);
+		const dbCheck = result.checks.find((c: DoctorCheck) => c.name === "warren_db");
+		expect(dbCheck?.ok).toBe(true);
+		expect(dbCheck?.message).toBe("postgres");
+	});
+
+	test("warren_db flags a WARREN_DB_URL/WARREN_DB_PATH conflict", async () => {
+		const { context } = captureContext({
+			WARREN_API_TOKEN: "tok",
+			WARREN_DB_URL: "postgres://h/db",
+			WARREN_DB_PATH: "/srv/warren.sqlite",
+		});
+		const result = await runDoctor(
+			context,
+			{ existsSync: () => true, probeBurrow: async () => undefined },
+			{},
+		);
+		const dbCheck = result.checks.find((c: DoctorCheck) => c.name === "warren_db");
+		expect(dbCheck?.ok).toBe(false);
+		expect(dbCheck?.message).toContain("disagree");
+		expect(result.exitCode).toBe(1);
+	});
+
+	test("db_reachable degrades to informational ok when no db handle is wired", async () => {
+		const { context } = captureContext({
+			WARREN_API_TOKEN: "tok",
+			CANOPY_REPO_URL: "https://example.com/agents.git",
+		});
+		const result = await runDoctor(
+			context,
+			{ existsSync: () => true, probeBurrow: async () => undefined },
+			{},
+		);
+		const db = result.checks.find((c: DoctorCheck) => c.name === "db_reachable");
+		expect(db?.ok).toBe(true);
+		expect(db?.message).toContain("no db handle wired");
+	});
+
+	test("db_reachable pings a live sqlite handle and reports the dialect", async () => {
+		const { openDatabase } = await import("../../db/client.ts");
+		const db = await openDatabase({ url: ":memory:" });
+		try {
+			const { context } = captureContext({
+				WARREN_API_TOKEN: "tok",
+				CANOPY_REPO_URL: "https://example.com/agents.git",
+			});
+			const result = await runDoctor(
+				context,
+				{ existsSync: () => true, probeBurrow: async () => undefined, db },
+				{},
+			);
+			const reach = result.checks.find((c: DoctorCheck) => c.name === "db_reachable");
+			expect(reach?.ok).toBe(true);
+			expect(reach?.message).toBe("dialect=sqlite");
+		} finally {
+			await db.close();
+		}
 	});
 
 	test("warren_config is ok with no projects registered", async () => {

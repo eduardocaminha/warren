@@ -16,7 +16,8 @@ describe("loadServerConfigFromEnv", () => {
 			expect(config.transport.port).toBe(DEFAULT_BIND_PORT);
 		}
 		expect(config.dataDir).toBe(DEFAULT_DATA_DIR);
-		expect(config.dbPath).toBe("/data/warren.db");
+		expect(config.dbUrl).toBe("sqlite:///data/warren.db");
+		expect(config.dbUrlConflict).toBeNull();
 		expect(config.token).toBe("x");
 	});
 
@@ -34,19 +35,54 @@ describe("loadServerConfigFromEnv", () => {
 		}
 	});
 
-	test("custom data dir threads through to db path", () => {
+	test("custom data dir threads through to db url", () => {
 		const config = loadServerConfigFromEnv({
 			env: { WARREN_API_TOKEN: "x", WARREN_DATA_DIR: "/var/lib/warren" },
 		});
 		expect(config.dataDir).toBe("/var/lib/warren");
-		expect(config.dbPath).toBe("/var/lib/warren/warren.db");
+		expect(config.dbUrl).toBe("sqlite:///var/lib/warren/warren.db");
 	});
 
-	test("explicit WARREN_DB_PATH wins over data dir join", () => {
+	test("WARREN_DB_PATH synthesizes a sqlite:// url (back-compat)", () => {
 		const config = loadServerConfigFromEnv({
 			env: { WARREN_API_TOKEN: "x", WARREN_DB_PATH: "/srv/warren.sqlite" },
 		});
-		expect(config.dbPath).toBe("/srv/warren.sqlite");
+		expect(config.dbUrl).toBe("sqlite:///srv/warren.sqlite");
+		expect(config.dbUrlConflict).toBeNull();
+	});
+
+	test("WARREN_DB_URL wins over WARREN_DB_PATH (sqlite)", () => {
+		const config = loadServerConfigFromEnv({
+			env: {
+				WARREN_API_TOKEN: "x",
+				WARREN_DB_URL: "sqlite:///srv/warren.sqlite",
+				WARREN_DB_PATH: "/srv/warren.sqlite",
+			},
+		});
+		expect(config.dbUrl).toBe("sqlite:///srv/warren.sqlite");
+		expect(config.dbUrlConflict).toBeNull();
+	});
+
+	test("WARREN_DB_URL=postgres:// passes through unchanged", () => {
+		const config = loadServerConfigFromEnv({
+			env: {
+				WARREN_API_TOKEN: "x",
+				WARREN_DB_URL: "postgres://u:p@host:5432/db",
+			},
+		});
+		expect(config.dbUrl).toBe("postgres://u:p@host:5432/db");
+	});
+
+	test("conflicting WARREN_DB_URL + WARREN_DB_PATH surfaces dbUrlConflict", () => {
+		const config = loadServerConfigFromEnv({
+			env: {
+				WARREN_API_TOKEN: "x",
+				WARREN_DB_URL: "postgres://u:p@host/db",
+				WARREN_DB_PATH: "/srv/legacy.sqlite",
+			},
+		});
+		expect(config.dbUrl).toBe("postgres://u:p@host/db");
+		expect(config.dbUrlConflict).toBe("/srv/legacy.sqlite");
 	});
 
 	test("WARREN_DISABLE_UI=1 disables UI", () => {
