@@ -21,7 +21,7 @@ Engineering teams self-hosting their own agent infrastructure. The deployment un
 
 ## Status
 
-Stable (`0.3.11`), running on Fly.io in continuous use against real GitHub repos. The end-to-end path is covered by 23 scenario-based acceptance tests in [`scripts/acceptance/`](scripts/acceptance/): manual runs, cron triggers, multi-worker placement, Postgres backend, per-run preview environments, restart recovery, cost tracking, seeds-extensions roundtrip. The active frontier is the org-readiness cluster: SSO, remote workers, MCP, audit, budgets, GitHub App auth. See [ROADMAP.md](ROADMAP.md).
+Stable (`0.3.12`), running on Fly.io in continuous use against real GitHub repos. The end-to-end path is covered by 23 scenario-based acceptance tests in [`scripts/acceptance/`](scripts/acceptance/): manual runs, cron triggers, multi-worker placement, Postgres backend, per-run preview environments, restart recovery, cost tracking, seeds-extensions roundtrip. The active frontier is the org-readiness cluster: SSO, remote workers, MCP, audit, budgets, GitHub App auth. See [ROADMAP.md](ROADMAP.md).
 
 ## What you get
 

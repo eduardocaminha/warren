@@ -7,12 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.12] — 2026-05-15
+
 R-03: per-project `.canopy/` role tier. Warren's agent registry now has
 three tiers — built-in, library, and per-project — with precedence
 project > library > built-in. Per-project roles travel with the project
 they belong to, no more forking a shared canopy repo to add a
 project-specific refactor-bot. Plan: `pl-fef5` (parent seed
-`warren-2842`).
+`warren-2842`). Also raises the per-run preview readiness timeout
+default to 5m and makes it project-overridable.
 
 ### Added
 
@@ -70,6 +73,12 @@ project-specific refactor-bot. Plan: `pl-fef5` (parent seed
   on every read path. Listed + per-project refresh outcomes share the
   same `decorateRefreshResult` helper so the wire shape is identical
   across `POST /agents/refresh` and `POST /projects/:id/agents/refresh`.
+- **`preview(launch)`** — per-run preview readiness timeout default
+  raised from 60s to 5m and made project-overridable via
+  `.warren/preview.yaml` (`readiness_timeout`, bounds-checked 1s..1h at
+  config load). Cold `pnpm install` commonly exceeds the old default;
+  `launchPreview` accepts the override and `reapRun` parses + forwards
+  it. (`warren-0928`)
 
 ## [0.3.11] — 2026-05-15
 
