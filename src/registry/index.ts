@@ -53,9 +53,12 @@ export {
 export { AgentSchemaError, CanopyUnavailableError } from "./errors.ts";
 export {
 	type RefreshOptions,
+	type RefreshProjectOptions,
+	type RefreshProjectResult,
 	type RefreshResult,
 	type RefreshSkipped,
 	refreshAgentRegistry,
+	refreshProjectAgents,
 } from "./refresh.ts";
 export {
 	type AgentDefinition,

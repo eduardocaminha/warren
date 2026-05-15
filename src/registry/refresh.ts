@@ -24,6 +24,7 @@
 
 import type { AgentsRepo } from "../db/repos/agents.ts";
 import type { AgentRow } from "../db/schema.ts";
+import { makeProjectAgentSource, stampAgentSource } from "./builtins/index.ts";
 import type { AgentSummary, CanopyClient } from "./canopy.ts";
 import { type CloneOptions, type CloneResult, cloneOrUpdateCanopyRepo } from "./clone.ts";
 import { AgentSchemaError, CanopyUnavailableError } from "./errors.ts";
@@ -95,28 +96,122 @@ type RegisterOutcome =
 	| { kind: "skipped"; skipped: RefreshSkipped };
 
 async function registerOne(opts: RefreshOptions, summary: AgentSummary): Promise<RegisterOutcome> {
+	const rendered = await renderAndParse(opts.client, summary);
+	if (rendered.kind === "skipped") return rendered;
+	const row = await opts.agents.upsert({
+		name: rendered.definition.name,
+		renderedJson: rendered.definition,
+		now: opts.now?.(),
+	});
+	return { kind: "registered", row };
+}
+
+export interface RefreshProjectOptions {
+	readonly client: CanopyClient;
+	readonly agents: AgentsRepo;
+	/** Project whose `.canopy/` is being scanned. Stamped onto each row's source. */
+	readonly projectId: string;
+	readonly now?: () => Date;
+}
+
+export interface RefreshProjectResult {
+	readonly projectId: string;
+	readonly registered: AgentRow[];
+	readonly skipped: RefreshSkipped[];
+	readonly removed: string[];
+}
+
+/**
+ * Project-tier counterpart to `refreshAgentRegistry`. Scans the project's
+ * `.canopy/` (via a `CanopyClient.forProjectPath(...)` the caller wires up),
+ * renders each agent, stamps `frontmatter.source = "project:<projectId>"`,
+ * and upserts at the project scope so global rows of the same name are
+ * untouched.
+ *
+ * Per-agent failures are collected into `skipped` rather than thrown — one
+ * malformed `.canopy/` prompt must not take down the whole project refresh
+ * (and step 6's all-projects loop relies on this).
+ *
+ * Transport-level failures (cn binary missing, `.canopy/` unreadable) abort
+ * the whole refresh; the caller (`POST /agents/refresh`'s all-projects loop)
+ * is responsible for catching them so one bad project doesn't poison the
+ * batch.
+ *
+ * Pruning is always-on for the project tier: the project's `.canopy/` is
+ * the authoritative source for that tier, so any project-scoped row whose
+ * name disappears from the listing is removed. The library refresh defaults
+ * prune=off because a missed git fetch could nuke the registry; the project
+ * tier has no equivalent race.
+ */
+export async function refreshProjectAgents(
+	opts: RefreshProjectOptions,
+): Promise<RefreshProjectResult> {
+	const summaries = await opts.client.listAgents();
+	const seen = new Set<string>();
+	const registered: AgentRow[] = [];
+	const skipped: RefreshSkipped[] = [];
+
+	for (const summary of summaries) {
+		seen.add(summary.name);
+		const outcome = await registerOneProject(opts, summary);
+		if (outcome.kind === "registered") {
+			registered.push(outcome.row);
+		} else {
+			skipped.push(outcome.skipped);
+		}
+	}
+
+	const removed: string[] = [];
+	for (const existing of await opts.agents.listForProject(opts.projectId)) {
+		if (!seen.has(existing.name)) {
+			await opts.agents.delete(existing.name, { projectId: opts.projectId });
+			removed.push(existing.name);
+		}
+	}
+
+	return { projectId: opts.projectId, registered, skipped, removed };
+}
+
+async function registerOneProject(
+	opts: RefreshProjectOptions,
+	summary: AgentSummary,
+): Promise<RegisterOutcome> {
+	const rendered = await renderAndParse(opts.client, summary);
+	if (rendered.kind === "skipped") return rendered;
+	const stamped = stampAgentSource(rendered.definition, makeProjectAgentSource(opts.projectId));
+	const row = await opts.agents.upsert({
+		name: stamped.name,
+		projectId: opts.projectId,
+		renderedJson: stamped,
+		now: opts.now?.(),
+	});
+	return { kind: "registered", row };
+}
+
+type RenderedOutcome =
+	| { kind: "rendered"; definition: AgentDefinition }
+	| { kind: "skipped"; skipped: RefreshSkipped };
+
+async function renderAndParse(
+	client: CanopyClient,
+	summary: AgentSummary,
+): Promise<RenderedOutcome> {
 	let raw: unknown;
 	try {
-		raw = await opts.client.renderAgent(summary.name);
+		raw = await client.renderAgent(summary.name);
 	} catch (err) {
 		if (err instanceof CanopyUnavailableError) {
 			// A render-time canopy error for one prompt (e.g. "Prompt not found"
 			// after a race with `cn archive`) is per-prompt, not catastrophic.
 			return {
 				kind: "skipped",
-				skipped: {
-					name: summary.name,
-					code: err.code,
-					reason: err.message,
-				},
+				skipped: { name: summary.name, code: err.code, reason: err.message },
 			};
 		}
 		throw err;
 	}
-
-	let definition: AgentDefinition;
 	try {
-		definition = parseRenderedAgent(raw, summary.name);
+		return { kind: "rendered", definition: parseRenderedAgent(raw, summary.name) };
 	} catch (err) {
 		if (err instanceof AgentSchemaError) {
 			return {
@@ -126,11 +221,4 @@ async function registerOne(opts: RefreshOptions, summary: AgentSummary): Promise
 		}
 		throw err;
 	}
-
-	const row = await opts.agents.upsert({
-		name: definition.name,
-		renderedJson: definition,
-		now: opts.now?.(),
-	});
-	return { kind: "registered", row };
 }
