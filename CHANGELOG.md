@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.5] — 2026-05-15
+
+Patch release that closes the loop on `warren-ac54`'s phase-4 work
+(CI auto-deploy for the `warren-deployed.fly.dev` dogfood) and folds
+in a small Postgres-init migration fix that surfaced through the
+ci-postgres matrix added in v0.3.4.
+
+### Added
+
+- **`ci`** — auto-deploy to Fly on release. `.github/workflows/release.yml`
+  gains a `deploy` job that runs `flyctl deploy --remote-only --app
+  warren-deployed` after the `release` job tags + publishes a GitHub
+  release. Gated on `needs.release.outputs.release == 'true'` so it
+  only fires when `package.json`'s version is a fresh tag (no-op pushes
+  to `main` don't redeploy). Uses `superfly/flyctl-actions/setup-flyctl@master`
+  + a `FLY_API_TOKEN` repo secret scoped to `warren-deployed` only. A
+  named concurrency group (`fly-deploy-warren-deployed`) serializes
+  overlapping releases without cancelling them. This wires the
+  jayminwest/warren-deployed.fly.dev dogfood to be hands-off across
+  the release flow; per-operator auto-deploy stays opt-in via each
+  operator's own workflow.
+
+### Fixed
+
+- **`fix(db)`** — strip `"public".` qualifier from FK references in
+  the pg init migration (`src/db/migrations/postgres/0000_init.sql`).
+  The five `ALTER TABLE … REFERENCES "public"."<table>"` statements
+  bypassed `search_path`, so the ci-postgres test matrix (which runs
+  every case inside an isolated `warren_test_<hex>` schema via
+  `src/db/testing.ts`) failed every `withDb()` with `relation
+  "public.runs" does not exist` — 30+ failures across `testing.test.ts`,
+  `port-allocator.test.ts`, `eviction.test.ts`, `triggers.test.ts`,
+  and others. Unqualified names resolve via `search_path` cleanly in
+  both production (default `public`) and tests (isolated schema).
+  Drizzle's migrate runner skips already-applied migrations by
+  `folderMillis`, so existing deployments where `0000_init` already
+  applied won't try to re-run.
+
 ## [0.3.4] — 2026-05-14
 
 Cleanup release on top of v0.3.3 — finishes the dialect-polymorphic

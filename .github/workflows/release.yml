@@ -10,6 +10,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    outputs:
+      release: ${{ steps.version-check.outputs.release }}
+      version: ${{ steps.version-check.outputs.version }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -96,3 +99,20 @@ jobs:
               --title "v$VERSION" \
               --generate-notes
           fi
+
+  deploy:
+    needs: release
+    if: needs.release.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: fly-deploy-warren-deployed
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Deploy to Fly
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: flyctl deploy --remote-only --app warren-deployed
