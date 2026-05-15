@@ -17,7 +17,7 @@ Engineering teams self-hosting their own agent infrastructure — not a SaaS, no
 
 ## Status
 
-V1 (`0.3.4`). The manual-run path is end-to-end validated against a deployed Fly.io instance ([SPEC §11.E](SPEC.md#11e-first-run-validation-2026-05-09)) and exercised by 20 scenario-based acceptance tests in [`scripts/acceptance/`](scripts/acceptance/) — including real multi-worker R-12 coverage (scenario 18), an env-gated warren-on-postgres twin (scenario 19, R-13), and per-run preview environments (scenario 20, R-19). The cron half of the scheduler now ships in V1 ([SPEC §11.I](SPEC.md)); GitHub webhook triggers and library API exports remain deferred to V2. V1 is single-user / single-host as shipped; the [org-readiness cluster](ROADMAP.md#org-readiness-cluster-r-12--r-18) (SSO, remote burrow workers, Postgres backend, MCP, audit, budgets, GitHub App) is the active forward direction.
+V1 (`0.3.6`). The manual-run path is end-to-end validated against a deployed Fly.io instance ([SPEC §11.E](SPEC.md#11e-first-run-validation-2026-05-09)) and exercised by 21 scenario-based acceptance tests in [`scripts/acceptance/`](scripts/acceptance/) — including real multi-worker R-12 coverage (scenario 18), an env-gated warren-on-postgres twin (scenario 19, R-13), and per-run preview environments in both subdomain and path mode (scenarios 20 and 20-path, R-19 + §11.L addendum). The cron half of the scheduler now ships in V1 ([SPEC §11.I](SPEC.md)); GitHub webhook triggers and library API exports remain deferred to V2. V1 is single-user / single-host as shipped; the [org-readiness cluster](ROADMAP.md#org-readiness-cluster-r-12--r-18) (SSO, remote burrow workers, Postgres backend, MCP, audit, budgets, GitHub App) is the active forward direction.
 
 ## What you get
 

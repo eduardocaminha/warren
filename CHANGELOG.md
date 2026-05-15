@@ -7,6 +7,114 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.6] — 2026-05-14
+
+Path-based preview mode (SPEC §11.L addendum, `warren-f4d7` / `pl-f4ea`).
+The R-19 preview surface gains a second routing mode, **path mode**,
+that reuses warren's single hostname + cert instead of requiring a
+wildcard DNS record and DNS-01 wildcard cert. Path mode is now the
+**default** for new installs; subdomain mode remains the opt-in for
+multi-tenant operators (`WARREN_PREVIEW_MODE=subdomain`). A
+zero-domain `fly deploy` of warren can now serve per-run previews at
+`https://<warren-host>/p/<run-id>/` end-to-end on a fresh box.
+
+### Added
+
+- **`feat(preview)`** — `WARREN_PREVIEW_MODE=path|subdomain` env
+  selector (`warren-fcb7`, `pl-f4ea` step 2). New `PreviewModeSchema`
+  enum + `DEFAULT_PREVIEW_MODE = 'path'`; `loadPreviewLaunchConfigFromEnv`
+  reads the env var and projects can pin a mode in
+  `.warren/preview.yaml` (env wins on conflict). Invalid env values
+  silently fall back to the default so operator typos never block boot.
+  Downstream consumers (proxy preamble, cookie scope, PR annotator, UI
+  badge) all branch on this single discriminator.
+
+- **`feat(preview)`** — path-mode proxy preamble (`warren-8085`,
+  `pl-f4ea` step 3). `PreviewProxyConfig` becomes a discriminated union
+  on `mode`: subdomain mode keeps the existing `Host: run-<id>.<host>`
+  match, path mode adds a sibling `^/p/<runId>(/<rest>)?$` match that
+  strips the prefix before forwarding. Both branches share one inner
+  pipeline (run lookup, R-12 501, 503 not-live, 426 WS, 401 cookie,
+  debounced `last_hit_at`, 502 unreachable). `previewUnauthorized`'s
+  401 hint is mode-aware. `parsePreviewPathPrefix` is exported
+  alongside the existing `parseRunIdFromHost`.
+
+- **`feat(preview)`** — HTML rewrite middleware for path mode
+  (`warren-ab3a`, `pl-f4ea` step 4). Path-mode proxy applies two
+  best-effort transforms after the upstream fetch resolves: a
+  `<base href="/p/<runId>/">` injection on `text/html` responses, and
+  a `Location:` header rewrite on 3xx responses with same-origin
+  absolute paths. Subdomain mode and non-HTML content types pass
+  through byte-for-byte. Root-relative dev-server URLs (`/assets/foo.js`,
+  `Location: /signin`) now resolve correctly under the `/p/<run-id>/`
+  prefix instead of 404'ing against warren's UI/API routes.
+
+- **`feat(preview)`** — path-scoped signed cookies (`warren-edff`,
+  `pl-f4ea` step 5). In path mode `signCookie` emits
+  `Path=/p/<runId>/` with no `Domain` attribute, so a reviewer can hold
+  simultaneous sessions for sibling runs on the same warren host.
+  `previewLoginHandler` validates redirects against the inbound origin
+  under `/p/<id>/` and no longer requires `WARREN_PREVIEW_HOST` when
+  `WARREN_PREVIEW_MODE=path`. Subdomain mode's `Domain=.<warren-host>;
+  Path=/` scope is unchanged.
+
+- **`feat(preview)`** — mode-aware PR annotation URL shape
+  (`warren-c3c4`, `pl-f4ea` step 6). `formatPreviewUrl` gains a
+  `PreviewMode` arg: subdomain keeps the `https://run-<id>.<host>`
+  shape, path emits `https://<host>/p/<id>/` with a load-bearing
+  trailing slash so the reviewer's browser resolves root-relative
+  HTML under the proxy prefix. reap's `pr_annotate_preview` branch
+  threads `previewLaunchConfig.mode` through both the live-state
+  annotate call and the `previewUrl` returned in the reap result.
+  `WARREN_PREVIEW_HOST` is still required in both modes for annotation
+  (the proxy can derive origin from inbound `Host:`, but GitHub PR
+  comments need an absolute URL).
+
+- **`feat(ui)`** — RunDetail honors path/subdomain mode (`warren-016d`,
+  `pl-f4ea` step 7). New `GET /preview/config` returns `{mode, host}`
+  so the UI can render the canonical preview URL string and adapt the
+  teardown tooltip without duplicating server-side URL-formatting
+  rules. `PreviewCard` caches the config indefinitely (only a warren
+  restart changes it), surfaces a mode badge + URL line, and labels
+  the teardown button with mode-specific copy.
+
+- **`test(acceptance)`** — scenario 20 path-mode sibling
+  (`warren-7b3c`). New `scripts/acceptance/scenarios/20-preview-path.ts`
+  locks down the `pl-f4ea` acceptance contract end-to-end: a
+  fresh-install warren with `WARREN_PREVIEW_MODE=path` and no
+  `WARREN_PREVIEW_HOST` serves a working preview at
+  `<warren-host>/p/<run-id>/` with anonymous 401, `/preview/login`
+  cookies scoped to `Path=/p/<runId>/`, and the injected
+  `<base href="/p/<runId>/">` from the `warren-ab3a` HTML rewriter.
+  Skips on darwin (`mx-1d31f0`) and postgres (`mx-b82a55`) for the
+  same reasons scenario 20 does.
+
+### Changed
+
+- **`docs(spec)`** — SPEC §11.L "Routing modes — path vs subdomain"
+  addendum (`warren-1cce`, `pl-f4ea` step 1, PR #9). Locks in the URL
+  contract, path-prefix preamble, HTML rewrite, cookie scope, PR
+  annotation, and doctor-check behavior across both modes. The
+  existing §11.L "Routing" and "Auth" paragraphs gain forward
+  cross-links so the doc reads cleanly in either direction. Subdomain
+  mode is preserved as the multi-tenant opt-in; eviction, port
+  allocator, and reap sub-steps remain mode-agnostic.
+
+- **`docs(readme)`** — CI auto-deploy recipe under "Deploy to Fly.io".
+  Captures the `deploy` job pattern shipped in v0.3.5's `release.yml`
+  so operators wiring their own warren install can copy it directly.
+  Covers the one-liner token provisioning (`fly tokens create deploy
+  ... | gh secret set`), the workflow snippet with the
+  `needs: release` + `outputs.release` gate and named concurrency
+  group, and the single-app token scope. Closes phase 4 of
+  `warren-ac54`.
+
+- **`docs(env)`** — `.env.example` documents the new
+  `WARREN_PREVIEW_MODE` knob and the path-mode relaxation: when
+  `WARREN_PREVIEW_MODE=path` (the default since `warren-fcb7`),
+  `WARREN_PREVIEW_HOST` can be left unset and previews still resolve
+  on the same host warren already binds.
+
 ## [0.3.5] — 2026-05-15
 
 Patch release that closes the loop on `warren-ac54`'s phase-4 work
