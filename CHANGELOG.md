@@ -7,6 +7,89 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.11] — 2026-05-15
+
+R-01 producer side: warren now writes warren-namespaced runtime metadata
+to `seeds.extensions` after every successful dispatch. Unblocks the R-04
+issues UI (which can read `role` / `trigger` / `lastRunId` off the seed)
+and consolidates the cron tick's post-fire write onto the same facade.
+
+### Added
+
+- **`feat(seeds-cli)`** — `src/seeds-cli/warren-extensions.ts` defines
+  `WarrenTriggerKind` (zod enum: `manual` | `cron` | `scheduled` |
+  `webhook` | `comment` | `cli`) and a strict `WarrenExtensionsSchema`
+  covering `role` / `trigger` / `lastRunId` / `lastRunAt` /
+  `scheduledFor` / `lastScheduledRun`. `updateExtensions(deps,
+  projectPath, seedId, ext)` validates the payload then shells out via
+  `sd update <id> --extensions <json>`. Strict mode rejects unknown
+  keys to lock down trigger-string proliferation (`pl-bb70` risk #6)
+  before write. `clearScheduledFor` becomes a thin wrapper that
+  delegates to `updateExtensions`. (`warren-187b`)
+- **`feat(runs)`** — nullable `runs.seed_id` column on both sqlite
+  (`0010_add_run_seed_id.sql`) and postgres
+  (`postgres/0003_add_run_seed_id.sql`). `POST /runs` accepts an
+  optional `seedId`; `spawnRun` forwards it onto `repos.runs.create`
+  so the post-dispatch `updateExtensions` write has a seed to merge
+  into and the Run API can surface a back-link on RunDetail.
+  (`warren-805a`)
+- **`feat(runs)`** — after `attachBurrow(burrowRunId)` succeeds with
+  `seedId` + `seedsCli` wired, `spawnRun` merges
+  `{role, trigger, lastRunId, lastRunAt}` onto the seed's
+  warren-namespaced extensions via a single `sd update`. Trigger
+  strings outside `WarrenTriggerKind` (e.g. legacy
+  `'manual-trigger'`) are dropped so `role` / `lastRunId` /
+  `lastRunAt` still land. Failures emit a
+  `seeds_extension_write_failed` system event on the run and do **not**
+  roll back the dispatch. `ServerDeps.seedsCli` is wired into
+  `createRunHandler`, `runProjectTriggerHandler`, and
+  `bootScheduler.spawnDispatch` so every dispatch path (manual `POST
+  /runs`, Run-Now on a cron trigger, scheduler tick) writes the same
+  convention. (`warren-46cd`)
+- **`feat(ui)`** — `seedId: string | null` on the UI `RunRow` type and
+  optional `seedId?: string` on `CreateRunInput`, mirroring the wire
+  shape the server already serializes. `RunDetail.tsx` renders a "Seed"
+  MetaCard next to Burrow ID / Burrow Run when `r.seedId !== null`
+  — plain monospaced text for now; R-04 will convert it into a
+  hyperlink without changing the data shape. (`warren-c845`)
+- **`test(acceptance)`** — scenario 22 (`22-seeds-extensions-roundtrip`).
+  Covers `pl-bb70` acceptance #3/#5/#6: manual `POST /runs` with
+  `seedId` stamps `{role, trigger:'manual', lastRunId, lastRunAt}`
+  on the seed via `sd update --extensions`; a bogus `seedId` surfaces
+  a `seeds_extension_write_failed` system event without rolling the
+  run back; `GET /runs/:id` exposes `seedId` for the RunDetail
+  back-link. Brings the harness to 23 scenarios.
+
+### Changed
+
+- **`refactor(seeds-cli)`** — the seeds CLI shell-out facade
+  (`listScheduledSeeds`, `clearScheduledFor`, `SeedsCliError`,
+  envelope schema) moves out of `src/triggers/seeds-extension.ts`
+  into a shared `src/seeds-cli/` module so the post-dispatch
+  `updateExtensions` write can share it without importing through the
+  cron scheduler. `triggers/tick.ts` and `dispatch.ts` import
+  `ScheduledSeed` from the new module; `server/scheduler.ts` imports
+  `listScheduledSeeds` + `clearScheduledFor` directly.
+  `triggers/index.ts` no longer re-exports the seeds-cli symbols.
+  (`warren-5655`)
+- **`feat(triggers)`** — the scheduler tick's `clearScheduledFor`
+  specialization is replaced with the shared `updateExtensions` facade,
+  so the scheduled-seed post-fire write lands as a single `sd update`
+  merging `scheduledFor` clear + `lastScheduledRun` pointer + the
+  warren-namespaced common keys (`role`, `trigger:'scheduled'`,
+  `lastRunId`, `lastRunAt`). `dispatchScheduledSeed` surfaces the
+  resolved role on its fired result; the tick composes the typed
+  `WarrenExtensions` payload and invokes the injected
+  `updateExtensions` dep. Failure semantics (system event on the run,
+  no rollback) are unchanged. (`warren-2064`)
+
+### Docs
+
+- **`docs(roadmap)`** — flip R-01 status to `[shipped]`; update R-04
+  / suggested-sequencing references — warren now writes
+  warren-namespaced `seeds.extensions` after every successful dispatch
+  via the shared `src/seeds-cli/` facade. (`warren-2df2` / `pl-bb70`)
+
 ## [0.3.10] — 2026-05-15
 
 Branding pass on the UI and a sortable Cost column on the runs list.
