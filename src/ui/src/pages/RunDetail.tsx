@@ -534,10 +534,21 @@ function EventTail({
 		ref.current.scrollTop = ref.current.scrollHeight;
 	}, [sorted.length, autoScroll]);
 
+	// Disable autoscroll on user intent (wheel up, touch drag), not on scroll position:
+	// programmatic scrolls also fire `scroll`, and during event bursts the handler
+	// runs after additional content has appended, reading a stale (non-bottom) position
+	// and falsely turning autoscroll off. `scroll` here only re-enables, never disables.
+	const onWheel = (e: React.WheelEvent<HTMLDivElement>): void => {
+		if (e.deltaY < 0) setAutoScroll(false);
+	};
+	const onTouchMove = (): void => {
+		setAutoScroll(false);
+	};
 	const onScroll = (e: React.UIEvent<HTMLDivElement>): void => {
 		const el = e.currentTarget;
-		const atBottom = el.scrollHeight - el.clientHeight - el.scrollTop < 32;
-		setAutoScroll(atBottom);
+		if (el.scrollHeight - el.clientHeight - el.scrollTop < 32) {
+			setAutoScroll(true);
+		}
 	};
 
 	return (
@@ -567,6 +578,8 @@ function EventTail({
 				<div
 					ref={ref}
 					onScroll={onScroll}
+					onWheel={onWheel}
+					onTouchMove={onTouchMove}
 					className="h-[480px] overflow-auto rounded-md border bg-(--color-muted)/30 p-2 font-mono text-xs"
 				>
 					{sorted.length === 0 ? (
