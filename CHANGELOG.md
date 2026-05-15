@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.9] — 2026-05-15
+
+README polish reflecting that warren is in continuous use, not a
+pre-release.
+
+### Changed
+
+- **`docs(readme)`** — drop V1/V2 framing throughout. Status now reads
+  "Stable, running on Fly.io in continuous use against real GitHub
+  repos." Rename "V1 today" → "Operating model" and "Where this is
+  going" → "Roadmap". Condense the per-run previews operator section
+  (drop the lifecycle-knobs table, redundant DNS block, and legacy
+  `defaults.json` migration note). Replace mid-sentence em-dashes and
+  "not X, but Y" structures with normal punctuation. Bump the inline
+  Status version badge to match `package.json`.
+
 ## [0.3.8] — 2026-05-15
 
 Users can now override the OS theme from within warren.
