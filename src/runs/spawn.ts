@@ -69,6 +69,12 @@ import {
 	RenderResponseSchema,
 	withProviderOverrides,
 } from "../registry/schema.ts";
+import {
+	type SeedsCliDeps,
+	updateExtensions,
+	type WarrenExtensions,
+	WarrenTriggerKind,
+} from "../seeds-cli/index.ts";
 import type { DefaultsConfig, WarrenConfigCache } from "../warren-config/index.ts";
 import { composeRunBranch, resolveRunBranchPrefix } from "./branch.ts";
 import { parseBurrowConfig } from "./burrow_config.ts";
@@ -141,6 +147,19 @@ export interface SpawnRunInput {
 	 * existing deployments are unchanged.
 	 */
 	readonly runBranchPrefixDefault?: string;
+	/**
+	 * Seeds CLI shell-out deps for the post-dispatch extension write
+	 * (pl-bb70 step 4, warren-46cd). When both `seedId` and this are
+	 * provided, spawnRun fires a single `sd update --extensions` after
+	 * `attachBurrow(burrowRunId)` succeeds, merging `{role, trigger,
+	 * lastRunId, lastRunAt}` onto the seed. Failure is fire-and-log
+	 * (mirrors the pl-2f15 risk #4 mitigation in src/triggers/tick.ts):
+	 * a `seeds_extension_write_failed` system event lands on the run,
+	 * the run does NOT roll back. Omit on call sites that don't ship a
+	 * project clone (CLI run, tests) — without it, the extension write
+	 * is a no-op even when seedId is set.
+	 */
+	readonly seedsCli?: SeedsCliDeps;
 }
 
 export interface SpawnRunResult {
@@ -269,11 +288,95 @@ export async function spawnRun(input: SpawnRunInput): Promise<SpawnRunResult> {
 			composeBurrowMetadata(input.metadata, agent.frontmatter),
 		);
 		const updated = await input.repos.runs.attachBurrow(run.id, { burrowRunId: burrowRun.id });
+		// pl-bb70 step 4: stamp the seed's warren-namespaced extensions after
+		// dispatch lands. Fire-and-log — anything that throws here (sd not
+		// on PATH, project clone vanished, write race) emits a system event
+		// on the run and DOES NOT roll the dispatch back. Mirrors the cron
+		// tick's clearScheduledFor recovery shape in src/triggers/tick.ts.
+		if (input.seedId !== undefined && input.seedsCli !== undefined) {
+			await writeSeedExtensions({
+				repos: input.repos,
+				seedsCli: input.seedsCli,
+				projectPath: projectAfterRefresh.localPath,
+				seedId: input.seedId,
+				runId: run.id,
+				agentName: agent.name,
+				trigger: input.trigger,
+				now: input.now?.() ?? new Date(),
+			});
+		}
 		return { run: updated, burrow, burrowRun, agent };
 	} catch (err) {
 		await rollback(input, run.id, burrow, placement.client);
 		throw err;
 	}
+}
+
+interface WriteSeedExtensionsInput {
+	readonly repos: Repos;
+	readonly seedsCli: SeedsCliDeps;
+	readonly projectPath: string;
+	readonly seedId: string;
+	readonly runId: string;
+	readonly agentName: string;
+	readonly trigger?: string;
+	readonly now: Date;
+}
+
+/**
+ * Merge warren-namespaced keys (`role`, `trigger`, `lastRunId`, `lastRunAt`)
+ * onto a seed's `extensions` after the run is dispatched. Trigger strings
+ * that don't match `WarrenTriggerKind` (e.g. the legacy `manual-trigger`
+ * used by `POST /projects/:id/triggers/:triggerId/run`) are dropped from
+ * the payload rather than rejected — the strict schema would otherwise
+ * fail the whole merge and lose `role` / `lastRunId` / `lastRunAt` too.
+ *
+ * Failures are surfaced as a `seeds_extension_write_failed` system event
+ * on the run and swallowed: the dispatch already succeeded, and rolling
+ * back here would be worse than a stale seed extension that the operator
+ * can fix manually (or that step 7's acceptance scenario detects).
+ */
+async function writeSeedExtensions(input: WriteSeedExtensionsInput): Promise<void> {
+	const triggerParse = WarrenTriggerKind.safeParse(input.trigger ?? "manual");
+	const payload: WarrenExtensions = {
+		role: input.agentName,
+		lastRunId: input.runId,
+		lastRunAt: input.now.toISOString(),
+		...(triggerParse.success ? { trigger: triggerParse.data } : {}),
+	};
+	try {
+		await updateExtensions(input.seedsCli, input.projectPath, input.seedId, payload);
+	} catch (err) {
+		await recordExtensionWriteFailure(input.repos, input.runId, input.seedId, formatError(err));
+	}
+}
+
+async function recordExtensionWriteFailure(
+	repos: Repos,
+	runId: string,
+	seedId: string,
+	reason: string,
+): Promise<void> {
+	try {
+		const seq = ((await repos.events.maxSeqForRun(runId)) ?? 0) + 1;
+		await repos.events.append({
+			runId,
+			burrowEventSeq: seq,
+			ts: new Date().toISOString(),
+			kind: "seeds_extension_write_failed",
+			stream: "system",
+			payload: { seedId, reason },
+		});
+	} catch {
+		// Event write failed too — db handle is gone or the run row was
+		// finalized in a race. Nothing left to surface; rolling back the
+		// dispatch over a logging failure is unambiguously worse.
+	}
+}
+
+function formatError(err: unknown): string {
+	if (err instanceof Error) return err.message;
+	return String(err);
 }
 
 async function provisionBurrow(

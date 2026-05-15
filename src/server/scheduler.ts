@@ -70,6 +70,8 @@ export interface BootSchedulerInput {
 export function bootScheduler(input: BootSchedulerInput): SchedulerHandle {
 	const spawnRunFn = input.spawnRunFn ?? spawnRun;
 
+	const seedsDeps = { sdBinary: input.config.sdBinary, spawn: input.projectSpawn };
+
 	const spawnDispatch: DispatchSpawnFn = async (
 		args: DispatchSpawnInput,
 	): Promise<DispatchSpawnResult> => {
@@ -84,6 +86,7 @@ export function bootScheduler(input: BootSchedulerInput): SchedulerHandle {
 			projectsConfig: input.projectsConfig,
 			projectSpawn: input.projectSpawn,
 			warrenConfigs: input.warrenConfigs,
+			seedsCli: seedsDeps,
 			...(input.runBranchPrefixDefault !== undefined
 				? { runBranchPrefixDefault: input.runBranchPrefixDefault }
 				: {}),
@@ -95,8 +98,6 @@ export function bootScheduler(input: BootSchedulerInput): SchedulerHandle {
 		input.bridges.start(result.run.id, result.burrowRun.id, result.burrow.id);
 		return { runId: result.run.id };
 	};
-
-	const seedsDeps = { sdBinary: input.config.sdBinary, spawn: input.projectSpawn };
 
 	return startScheduler({
 		tickMs: input.config.tickMs,

@@ -305,6 +305,7 @@ export async function bootServer(opts: BootServerOptions = {}): Promise<WarrenSe
 		logger,
 		uiDistDir: serverConfig.uiDistDir,
 		spawn: defaultSpawn,
+		seedsCli: { sdBinary: schedulerConfig.sdBinary, spawn: defaultSpawn },
 		autoOpenPr,
 		warrenConfigs,
 		...(runBranchPrefixDefault !== undefined ? { runBranchPrefixDefault } : {}),

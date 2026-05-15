@@ -360,6 +360,7 @@ function runProjectTriggerHandler(deps: ServerDeps): RouteHandler {
 			...(deps.runBranchPrefixDefault !== undefined
 				? { runBranchPrefixDefault: deps.runBranchPrefixDefault }
 				: {}),
+			...(deps.seedsCli !== undefined ? { seedsCli: deps.seedsCli } : {}),
 		});
 
 		// Hand off to the bridge so events start flowing into warren.events —
@@ -682,6 +683,7 @@ function createRunHandler(deps: ServerDeps): RouteHandler {
 			...(deps.runBranchPrefixDefault !== undefined
 				? { runBranchPrefixDefault: deps.runBranchPrefixDefault }
 				: {}),
+			...(deps.seedsCli !== undefined ? { seedsCli: deps.seedsCli } : {}),
 		});
 		// Hand off to the bridge so events start flowing into warren.events
 		// — without this the dispatched run would emit events into burrow

@@ -18,6 +18,7 @@ import type { ProjectsConfig } from "../projects/config.ts";
 import type { CanopyRegistryConfig } from "../registry/config.ts";
 import type { RunEventBroker } from "../runs/events.ts";
 import type { AutoOpenPrConfig } from "../runs/pr.ts";
+import type { SeedsCliDeps } from "../seeds-cli/index.ts";
 import type { PreviewMode, WarrenConfigCache } from "../warren-config/index.ts";
 
 /**
@@ -133,6 +134,14 @@ export interface ServerDeps {
 	 * production `Bun.spawn` adapter; tests pass a stub.
 	 */
 	readonly spawn?: SpawnFn;
+	/**
+	 * Seeds CLI deps (pl-bb70 step 4, warren-46cd). Threaded into `spawnRun`
+	 * so a successful manual dispatch with `seedId` stamps the seed's
+	 * warren-namespaced extensions (`role`, `trigger`, `lastRunId`,
+	 * `lastRunAt`). `bootServer` builds this from `WARREN_SD_BINARY` +
+	 * `defaultSpawn`; tests can omit (extension write is a no-op).
+	 */
+	readonly seedsCli?: SeedsCliDeps;
 	/** Provided so tests can override `Date.now()`. */
 	readonly now?: () => Date;
 	/**
