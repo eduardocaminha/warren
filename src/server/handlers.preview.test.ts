@@ -535,7 +535,7 @@ describe("preview proxy preamble in startServer pipeline", () => {
 		const proxy = createPreviewProxyHandler({
 			repos,
 			previewAuth,
-			config: { host: HOST },
+			config: { mode: "subdomain", host: HOST },
 			fetch: (async () => new Response("upstream-ok")) as unknown as typeof fetch,
 		});
 		const cookie = previewAuth.signCookie(run.id, new Date());

@@ -309,12 +309,21 @@ export async function bootServer(opts: BootServerOptions = {}): Promise<WarrenSe
 	const auth: AuthProvider =
 		serverConfig.token !== null ? resolveAuth({ token: serverConfig.token }) : NO_AUTH;
 
+	// Wire the preview proxy preamble. Mode discriminator from
+	// `WARREN_PREVIEW_MODE` (warren-fcb7) picks the routing branch:
+	// subdomain mode keys off `Host: run-<id>.<host>` and so still
+	// requires `WARREN_PREVIEW_HOST`; path mode keys off the request
+	// pathname and the host gating relaxes in a follow-up step
+	// (warren-edff) that owns the cookie-scope half.
 	const previewProxy =
 		previewAuth !== undefined && previewLaunchConfig.host !== null
 			? createPreviewProxyHandler({
 					repos,
 					previewAuth,
-					config: { host: previewLaunchConfig.host },
+					config:
+						previewLaunchConfig.mode === "path"
+							? { mode: "path", host: previewLaunchConfig.host }
+							: { mode: "subdomain", host: previewLaunchConfig.host },
 					...(opts.now !== undefined ? { now: opts.now } : {}),
 				})
 			: undefined;

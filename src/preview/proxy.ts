@@ -1,48 +1,60 @@
 /**
- * Host-match reverse proxy preamble for per-run previews (R-19 / SPEC §11.L,
- * warren-8a10).
+ * Reverse proxy preamble for per-run previews (R-19 / SPEC §11.L,
+ * warren-8a10; path-mode addendum warren-8085 / pl-f4ea).
  *
  * The proxy is an in-process Bun route, not a separate reverse proxy.
  * `tryHandlePreviewProxy` runs *before* the normal auth gate and route
- * match in `src/server/server.ts`:
+ * match in `src/server/server.ts`. There are two routing modes, picked
+ * at config time from `WARREN_PREVIEW_MODE`:
  *
- *   1. **Host parse.** Match `Host: run-<runId>.<previewHost>` against the
- *      operator's `WARREN_PREVIEW_HOST`. Anything else → return null and
- *      the caller falls through to the regular pipeline.
+ *   - **Subdomain mode** (operator owns a wildcard CNAME + cert):
+ *     match `Host: run-<runId>.<previewHost>`. URL forwarded upstream
+ *     keeps `url.pathname` verbatim.
  *
- *   2. **Resolve the run.** `runs.preview_state` must be `live`; anything
- *      else (`starting`, `failed`, `torn-down`, null) → 503 with the
- *      state in the body so a reviewer can tell `still booting` apart
- *      from `evicted`.
+ *   - **Path mode** (default; reuses warren's own host + cert): match
+ *     `^/p/<runId>(/<rest>)?$` on the request path. The `/p/<runId>`
+ *     prefix is stripped before forwarding so the upstream sees a
+ *     request rooted at `<rest>` (or `/` when `rest` is empty).
  *
- *   3. **Cross-host check.** `runs.worker_id !== LOCAL_WORKER_NAME`
+ * In either mode the rest of the seam is identical:
+ *
+ *   1. **Resolve the run.** `runs.preview_state` must be `live`;
+ *      anything else (`starting`, `failed`, `torn-down`, null) → 503
+ *      with the state in the body so a reviewer can tell `still
+ *      booting` apart from `evicted`. Unknown runId → 404.
+ *
+ *   2. **Cross-host check.** `runs.worker_id !== LOCAL_WORKER_NAME`
  *      returns **501** with an explicit R-12 deferral message. Silent
- *      fall-through to a closed loopback port would manifest as "preview
- *      works for some runs, not others"; the SPEC's acceptance scenario
- *      asserts this path explicitly.
+ *      fall-through to a closed loopback port would manifest as
+ *      "preview works for some runs, not others"; the SPEC's
+ *      acceptance scenario asserts this path explicitly.
  *
- *   4. **Signed-cookie auth.** Verify the `warren_preview` cookie against
- *      the runId via `PreviewAuth.verifyCookie`. Missing / invalid /
- *      expired cookie → **401** with a body pointing the browser at
- *      `/runs/:id/preview/login` (one-shot bearer-via-query handshake).
- *      Bearer-in-header is impossible for a browser hitting
- *      `run-<id>.<host>` directly, so cookie is the only auth surface.
+ *   3. **Signed-cookie auth.** Verify the `warren_preview` cookie
+ *      against the runId via `PreviewAuth.verifyCookie`. Missing /
+ *      invalid / expired cookie → **401** with a body pointing the
+ *      browser at the `/runs/:id/preview/login` handshake. Bearer-
+ *      in-header is impossible for a browser hitting the preview
+ *      origin directly, so cookie is the only auth surface.
  *
- *   5. **last_hit_at debounce.** Update `runs.preview_last_hit_at`
- *      **before** forwarding (SPEC §11.L: a slow upstream response must
- *      not make the preview look idle to the eviction worker). Debounced
- *      via an in-memory `Map<runId, lastFlushAtMs>` to ~once per
- *      `DEFAULT_DEBOUNCE_MS` (default 30s) per run — keeps the hot path
- *      cheap. The map is a single-process singleton; a warren restart
- *      forgets it, but the persisted `preview_last_hit_at` is the
- *      source of truth so eviction doesn't false-trigger.
+ *   4. **last_hit_at debounce.** Update `runs.preview_last_hit_at`
+ *      **before** forwarding (SPEC §11.L: a slow upstream response
+ *      must not make the preview look idle to the eviction worker).
+ *      Debounced via an in-memory `Map<runId, lastFlushAtMs>` to
+ *      ~once per `DEFAULT_DEBOUNCE_MS` (default 30s) per run — keeps
+ *      the hot path cheap. The map is a single-process singleton; a
+ *      warren restart forgets it, but the persisted
+ *      `preview_last_hit_at` is the source of truth so eviction
+ *      doesn't false-trigger.
  *
- *   6. **Forward.** Rewrite the URL to `http://127.0.0.1:<preview_port>`
- *      preserving path + query string, strip the inbound `Host` /
+ *   5. **Forward.** Rewrite the URL to
+ *      `http://127.0.0.1:<preview_port>` preserving the (mode-specific)
+ *      upstream path + query string, strip the inbound `Host` /
  *      `Cookie` / `Authorization` headers (preview app should not see
- *      warren's auth state), and stream the body through. The upstream
- *      response is returned as-is so the browser sees the preview
- *      content + headers verbatim.
+ *      warren's auth state), and stream the body through. The
+ *      upstream response is returned as-is so the browser sees the
+ *      preview content + headers verbatim. Path-mode HTML rewriting
+ *      (`<base>` injection + `Location:` rewrite) lands in a
+ *      follow-up step (warren-ab3a); this module is content-agnostic.
  *
  * WebSocket upgrades are not yet supported: Bun.serve's WS surface is
  * accept-then-handle, not transparent-proxy, so a true `Upgrade: websocket`
@@ -59,6 +71,7 @@ import { LOCAL_WORKER_NAME } from "../burrow-client/pool.ts";
 import type { Repos } from "../db/repos/index.ts";
 import type { RunRow } from "../db/schema.ts";
 import type { PreviewProxyHandler } from "../server/types.ts";
+import type { PreviewMode } from "../warren-config/index.ts";
 import type { PreviewAuth } from "./cookie.ts";
 
 export type { PreviewProxyHandler };
@@ -70,17 +83,34 @@ export const DEFAULT_DEBOUNCE_MS = 30_000;
  *  back gracefully when it didn't get redirected through the login route. */
 export const LOGIN_PATH_PREFIX = "/runs/";
 
-export interface PreviewProxyConfig {
-	/** Operator-facing host suffix the proxy matches against `Host:`
-	 *  headers (`run-<runId>.<host>`). Resolved at boot from
-	 *  `WARREN_PREVIEW_HOST`. */
-	readonly host: string;
+/** URL path prefix the path-mode matcher anchors to (`/p/<runId>/...`). */
+export const PREVIEW_PATH_PREFIX = "/p";
+
+interface PreviewProxyConfigBase {
 	/** Local-worker name. Defaults to the pool's `LOCAL_WORKER_NAME`
 	 *  constant; only tests should override. */
 	readonly localWorkerName?: string;
 	/** Override the debounce window (tests). */
 	readonly lastHitDebounceMs?: number;
 }
+
+export interface PreviewProxyConfigSubdomain extends PreviewProxyConfigBase {
+	readonly mode: "subdomain";
+	/** Operator-facing host suffix the proxy matches against `Host:`
+	 *  headers (`run-<runId>.<host>`). Resolved at boot from
+	 *  `WARREN_PREVIEW_HOST`. */
+	readonly host: string;
+}
+
+export interface PreviewProxyConfigPath extends PreviewProxyConfigBase {
+	readonly mode: "path";
+	/** Operator's warren host (informational — used only in the 401
+	 *  hint URL). Path mode derives the preview origin from the
+	 *  request's own `Host` header, so this is allowed to be null. */
+	readonly host?: string | null;
+}
+
+export type PreviewProxyConfig = PreviewProxyConfigSubdomain | PreviewProxyConfigPath;
 
 export interface PreviewProxyDeps {
 	readonly repos: Repos;
@@ -121,9 +151,34 @@ export function parseRunIdFromHost(hostHeader: string | null, suffix: string): s
 }
 
 /**
- * Build the proxy handler. Returns null when no preview host is
- * configured (operator hasn't opted in); the caller treats null as
- * "no preview surface, skip the preamble."
+ * Match `/p/<runId>` (with optional `/<rest>`) on a URL pathname.
+ * Returns `{runId, rest}` where `rest` is the remainder of the path
+ * (always starts with `/`; defaults to `/` when the request was for
+ * `/p/<runId>` with no trailing slash). Returns null when the path
+ * doesn't match the preview prefix — the caller falls through to the
+ * regular pipeline.
+ *
+ * The runId charset is intentionally permissive (`[A-Za-z0-9_-]+`) so
+ * any future change to `generateId`'s alphabet keeps matching; the
+ * DB lookup (`repos.runs.get`) is the actual source of truth and
+ * issues a 404 for unknown IDs. The single-segment shape (no `/`,
+ * no `.`) is what protects against path-traversal escapes from the
+ * prefix.
+ */
+export function parsePreviewPathPrefix(pathname: string): { runId: string; rest: string } | null {
+	const match = /^\/p\/([A-Za-z0-9_-]+)(\/.*)?$/.exec(pathname);
+	if (match === null) return null;
+	const runId = match[1];
+	if (runId === undefined || runId.length === 0) return null;
+	const rest = match[2] ?? "/";
+	return { runId, rest };
+}
+
+/**
+ * Build the proxy handler. The returned function is wired into the
+ * server preamble; it returns a `Response` to short-circuit the
+ * request, or `null` to fall through to the regular auth + route
+ * pipeline.
  */
 export function createPreviewProxyHandler(deps: PreviewProxyDeps): PreviewProxyHandler {
 	const fetchImpl = deps.fetch ?? globalThis.fetch;
@@ -131,11 +186,24 @@ export function createPreviewProxyHandler(deps: PreviewProxyDeps): PreviewProxyH
 	const localWorkerName = deps.config.localWorkerName ?? LOCAL_WORKER_NAME;
 	const debounceMs = deps.config.lastHitDebounceMs ?? DEFAULT_DEBOUNCE_MS;
 	const lastFlush = new Map<string, number>();
+	const mode = deps.config.mode;
 
 	return async (request: Request, url: URL): Promise<Response | null> => {
-		const hostHeader = request.headers.get("host");
-		const runId = parseRunIdFromHost(hostHeader, deps.config.host);
-		if (runId === null) return null;
+		let runId: string;
+		let upstreamPath: string;
+
+		if (mode === "subdomain") {
+			const hostHeader = request.headers.get("host");
+			const parsed = parseRunIdFromHost(hostHeader, deps.config.host);
+			if (parsed === null) return null;
+			runId = parsed;
+			upstreamPath = url.pathname;
+		} else {
+			const parsed = parsePreviewPathPrefix(url.pathname);
+			if (parsed === null) return null;
+			runId = parsed.runId;
+			upstreamPath = parsed.rest;
+		}
 
 		const run = await deps.repos.runs.get(runId);
 		if (run === null) {
@@ -184,13 +252,13 @@ export function createPreviewProxyHandler(deps: PreviewProxyDeps): PreviewProxyH
 		// scoped to .<host> can't be used to reach a sibling preview).
 		const cookieHeader = request.headers.get("cookie");
 		if (!deps.previewAuth.verifyCookie(cookieHeader, runId, now())) {
-			return previewUnauthorized(runId, deps.config.host);
+			return previewUnauthorized(runId, deps.config, url);
 		}
 
 		// SPEC §11.L: update last_hit_at BEFORE forwarding (debounced).
 		await maybeFlushLastHit(deps.repos, run, lastFlush, debounceMs, now());
 
-		return forwardToUpstream(fetchImpl, request, url, port);
+		return forwardToUpstream(fetchImpl, request, upstreamPath, url.search, port);
 	};
 }
 
@@ -218,10 +286,11 @@ async function maybeFlushLastHit(
 async function forwardToUpstream(
 	fetchImpl: typeof fetch,
 	request: Request,
-	url: URL,
+	upstreamPath: string,
+	search: string,
 	port: number,
 ): Promise<Response> {
-	const upstreamUrl = `http://127.0.0.1:${port}${url.pathname}${url.search}`;
+	const upstreamUrl = `http://127.0.0.1:${port}${upstreamPath}${search}`;
 	const headers = new Headers(request.headers);
 	// Strip warren-internal auth state. The preview app must never see
 	// the operator's bearer token or signed-cookie — even though `fetch`
@@ -269,12 +338,24 @@ function previewError(status: number, code: string, message: string): Response {
 	});
 }
 
-function previewUnauthorized(runId: string, host: string): Response {
+/**
+ * 401 envelope with a mode-aware hint pointing at the login handshake.
+ * Subdomain mode emits an absolute URL keyed off the configured host;
+ * path mode keeps the hint relative (the warren origin matches the
+ * inbound request, but the proxy preamble is below the auth layer that
+ * would otherwise validate that origin).
+ */
+function previewUnauthorized(runId: string, config: PreviewProxyConfig, url: URL): Response {
+	const loginPath = `${LOGIN_PATH_PREFIX}${runId}/preview/login`;
+	const hint =
+		config.mode === "subdomain"
+			? `GET https://${config.host}${loginPath}?token=<WARREN_API_TOKEN>&redirect=https://run-${runId}.${config.host}/`
+			: `GET ${url.origin}${loginPath}?token=<WARREN_API_TOKEN>&redirect=${url.origin}/p/${runId}/`;
 	const body = {
 		error: {
 			code: "preview_unauthorized",
 			message: "preview requires a signed-cookie session",
-			hint: `GET https://${host}${LOGIN_PATH_PREFIX}${runId}/preview/login?token=<WARREN_API_TOKEN>&redirect=https://run-${runId}.${host}/`,
+			hint,
 		},
 	};
 	return new Response(JSON.stringify(body), {
@@ -287,3 +368,7 @@ function previewUnauthorized(runId: string, host: string): Response {
 		},
 	});
 }
+
+// Re-export PreviewMode so call sites that wire the proxy don't have
+// to dual-import from warren-config.
+export type { PreviewMode };
