@@ -239,6 +239,65 @@ describe("spawnRun", () => {
 		).rejects.toBeInstanceOf(NotFoundError);
 	});
 
+	test("prefers the project-tier agent when one exists for the spawn's project (R-03 / warren-0a7e)", async () => {
+		await repos.agents.upsert({
+			name: "refactor-bot",
+			projectId: "prj_xxxxxxxxxxxx",
+			renderedJson: makeAgentJson({
+				sections: { system: "project tier system" },
+				frontmatter: { source: "project:prj_xxxxxxxxxxxx" },
+			}),
+		});
+		const { client } = makeBurrowClient();
+		const result = await spawnRun({
+			repos,
+			burrowClientPool: await makePool(repos, client),
+			agentName: "refactor-bot",
+			projectId: "prj_xxxxxxxxxxxx",
+			prompt: "p",
+		});
+		const stored = (await repos.runs.require(result.run.id)).renderedAgentJson as {
+			sections: Record<string, string>;
+			frontmatter: Record<string, unknown>;
+		};
+		expect(stored.sections.system).toBe("project tier system");
+		expect(stored.frontmatter.source).toBe("project:prj_xxxxxxxxxxxx");
+	});
+
+	test("falls back to the global-tier agent when no project-tier row matches (R-03 / warren-0a7e)", async () => {
+		// Only the global `refactor-bot` exists (seeded in beforeEach); no
+		// project-tier row for `prj_xxxxxxxxxxxx`. The unrelated project-tier
+		// row on a DIFFERENT project must not leak across.
+		await repos.projects.create({
+			id: "prj_otherrrrrrr",
+			gitUrl: "https://github.com/x/z.git",
+			localPath: "/data/projects/x/z",
+			defaultBranch: "main",
+		});
+		await repos.agents.upsert({
+			name: "refactor-bot",
+			projectId: "prj_otherrrrrrr",
+			renderedJson: makeAgentJson({
+				sections: { system: "other project system" },
+				frontmatter: { source: "project:prj_otherrrrrrr" },
+			}),
+		});
+		const { client } = makeBurrowClient();
+		const result = await spawnRun({
+			repos,
+			burrowClientPool: await makePool(repos, client),
+			agentName: "refactor-bot",
+			projectId: "prj_xxxxxxxxxxxx",
+			prompt: "p",
+		});
+		const stored = (await repos.runs.require(result.run.id)).renderedAgentJson as {
+			sections: Record<string, string>;
+			frontmatter: Record<string, unknown>;
+		};
+		expect(stored.sections.system).toBe("be a refactor agent");
+		expect(stored.frontmatter.source).toBeUndefined();
+	});
+
 	test("end-to-end: creates the warren run, provisions+seeds the burrow atomically, dispatches", async () => {
 		const { client, calls } = makeBurrowClient();
 		const result = await spawnRun({

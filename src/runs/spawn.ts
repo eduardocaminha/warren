@@ -57,7 +57,7 @@ import type {
 import type { BurrowClient } from "../burrow-client/client.ts";
 import { withTransportMapping } from "../burrow-client/client.ts";
 import type { BurrowClientPool } from "../burrow-client/pool.ts";
-import { ValidationError } from "../core/errors.ts";
+import { NotFoundError, ValidationError } from "../core/errors.ts";
 import type { Repos } from "../db/repos/index.ts";
 import type { RunRow } from "../db/schema.ts";
 import type { SpawnFn as ProjectSpawnFn } from "../projects/clone.ts";
@@ -174,7 +174,19 @@ export async function spawnRun(input: SpawnRunInput): Promise<SpawnRunResult> {
 		throw new ValidationError("prompt cannot be empty");
 	}
 
-	const agentRow = await input.repos.agents.require(input.agentName);
+	// R-03 (pl-fef5 step 7): prefer the project tier when a project-scoped
+	// row exists, fall back to the global (built-in + library) tier otherwise.
+	// `resolve` returns null on both misses; re-raise as the same NotFoundError
+	// shape `require` used to so HTTP/CLI error envelopes (incl. the
+	// `POST /agents/refresh` recovery hint) stay intact.
+	const agentRow = await input.repos.agents.resolve(input.agentName, {
+		projectId: input.projectId,
+	});
+	if (!agentRow) {
+		throw new NotFoundError(`agent not found: ${input.agentName}`, {
+			recoveryHint: "POST /agents/refresh to re-discover from canopy",
+		});
+	}
 	const project = await input.repos.projects.require(input.projectId);
 	const baseAgent = readCachedAgent(agentRow.renderedJson, agentRow.name);
 	const burrowConfig = parseBurrowConfig(baseAgent.sections.burrow_config);
