@@ -213,6 +213,25 @@ export interface ApiErrorEnvelope {
 	error: { code: string; message: string; hint?: string };
 }
 
+/**
+ * Wire envelope of `GET /preview/config` (R-19 / SPEC §11.L path addendum,
+ * warren-016d). Deployment-wide preview routing mode + optional host. The
+ * UI uses this to render the canonical preview URL in `PreviewCard` so
+ * path-mode and subdomain-mode deploys both show a copyable string that
+ * matches where the login handshake will redirect.
+ *
+ * `host === null` in path mode without `WARREN_PREVIEW_HOST` set; the UI
+ * falls back to `window.location.origin` (previews ride on the same
+ * hostname that serves the API/UI). Subdomain mode always carries `host`
+ * because boot rejects that combo when the env var is unset.
+ */
+export type PreviewMode = "path" | "subdomain";
+
+export interface PreviewConfigResponse {
+	mode: PreviewMode;
+	host: string | null;
+}
+
 /* ----------------------------------------------------------------------- */
 /* Per-project `.warren/` config envelope (warren-435b, warren-756a).      */
 /*                                                                         */

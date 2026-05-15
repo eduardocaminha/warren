@@ -392,6 +392,74 @@ describe("GET /runs/:id/preview/login", () => {
 	});
 });
 
+describe("GET /preview/config (warren-016d)", () => {
+	let db: WarrenDb;
+	let repos: Repos;
+	let handle: ServeHandle | null = null;
+
+	beforeEach(async () => {
+		db = await openDatabase({ path: ":memory:" });
+		repos = createRepos(db);
+	});
+
+	afterEach(async () => {
+		if (handle) {
+			await handle.stop();
+			handle = null;
+		}
+		await db.close();
+	});
+
+	test("returns mode + host in subdomain mode", async () => {
+		const previewAuth = createPreviewAuth(TOKEN, {
+			scope: { mode: "subdomain", cookieDomain: `.${HOST}` },
+			secure: false,
+		});
+		const { deps } = await depsFor(repos, previewAuth);
+		handle = startServer(deps, {
+			transport: { kind: "tcp", hostname: "127.0.0.1", port: 0 },
+			auth: bearerAuth(TOKEN),
+			logger: silentLogger,
+		});
+		const res = await fetch(`${tcpUrl(handle)}/preview/config`, {
+			headers: { authorization: `Bearer ${TOKEN}` },
+		});
+		expect(res.status).toBe(200);
+		const body = (await res.json()) as { mode: string; host: string | null };
+		expect(body.mode).toBe("subdomain");
+		expect(body.host).toBe(HOST);
+	});
+
+	test("returns mode + null host in path mode without WARREN_PREVIEW_HOST", async () => {
+		const previewAuth = createPreviewAuth(TOKEN, { scope: { mode: "path" }, secure: false });
+		const { deps } = await depsFor(repos, previewAuth, undefined, "path");
+		handle = startServer(deps, {
+			transport: { kind: "tcp", hostname: "127.0.0.1", port: 0 },
+			auth: bearerAuth(TOKEN),
+			logger: silentLogger,
+		});
+		const res = await fetch(`${tcpUrl(handle)}/preview/config`, {
+			headers: { authorization: `Bearer ${TOKEN}` },
+		});
+		expect(res.status).toBe(200);
+		const body = (await res.json()) as { mode: string; host: string | null };
+		expect(body.mode).toBe("path");
+		expect(body.host).toBeNull();
+	});
+
+	test("401 without a bearer token (gated like every non-login preview surface)", async () => {
+		const previewAuth = createPreviewAuth(TOKEN, { scope: { mode: "path" }, secure: false });
+		const { deps } = await depsFor(repos, previewAuth, undefined, "path");
+		handle = startServer(deps, {
+			transport: { kind: "tcp", hostname: "127.0.0.1", port: 0 },
+			auth: bearerAuth(TOKEN),
+			logger: silentLogger,
+		});
+		const res = await fetch(`${tcpUrl(handle)}/preview/config`);
+		expect(res.status).toBe(401);
+	});
+});
+
 describe("POST /runs/:id/preview/teardown", () => {
 	let db: WarrenDb;
 	let repos: Repos;

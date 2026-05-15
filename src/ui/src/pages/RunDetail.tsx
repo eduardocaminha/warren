@@ -2,7 +2,12 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CircleStop, ExternalLink, Send, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
-import { buildPreviewLoginUrl, runsApi } from "@/api/client.ts";
+import {
+	buildPreviewLoginUrl,
+	formatPreviewUrl,
+	previewApi,
+	runsApi,
+} from "@/api/client.ts";
 import type {
 	CancelRunResponse,
 	PreviewState,
@@ -296,20 +301,38 @@ function CostCard({ run }: { run: RunRow }) {
  *   - `live`      — proxy can route; surface an "Open Preview ↗" link
  *                    that goes through the auth-exempt login handshake
  *                    (signs a `warren_preview` cookie, 302s to the
- *                    `run-<id>.<host>` subdomain) and a teardown button.
+ *                    mode-correct target) and a teardown button. The
+ *                    canonical URL is rendered as a copyable string so
+ *                    operators can share it without the `?token=` query.
  *   - `failed`    — `previewFailureMessage` holds the stderr tail; no
  *                    URL, no teardown (already released).
  *   - `torn-down` — informational only; the port was released and the
  *                    sidecar killed. Workspace stays for repush.
+ *
+ * URL shape honors `WARREN_PREVIEW_MODE` (warren-016d) — path mode shows
+ * `<origin>/p/<id>/`, subdomain mode shows `https://run-<id>.<host>/`.
+ * Both reflect where the login handshake actually redirects.
  *
  * Visible only when the run row has a non-null `previewState` — the
  * caller guards on that.
  */
 function PreviewCard({ run }: { run: RunRow }) {
 	const state = run.previewState;
+	const previewConfig = useQuery({
+		queryKey: ["preview", "config"],
+		queryFn: ({ signal }) => previewApi.config(signal),
+		// Deployment-wide config; only a warren restart changes it.
+		staleTime: Number.POSITIVE_INFINITY,
+		gcTime: Number.POSITIVE_INFINITY,
+	});
 	if (state === null) return null;
 	const isActive = PREVIEW_ACTIVE_STATES.includes(state);
 	const loginUrl = state === "live" ? buildPreviewLoginUrl(run.id) : null;
+	const canonicalUrl =
+		state === "live" && previewConfig.data !== undefined
+			? formatPreviewUrl(run.id, previewConfig.data, window.location.origin)
+			: null;
+	const mode = previewConfig.data?.mode;
 
 	return (
 		<Card>
@@ -317,6 +340,19 @@ function PreviewCard({ run }: { run: RunRow }) {
 				<CardTitle className="flex items-center gap-2">
 					Preview
 					<PreviewStateBadge state={state} />
+					{mode !== undefined ? (
+						<Badge
+							variant="secondary"
+							className="font-mono text-xs"
+							title={
+								mode === "path"
+									? "Path-mode previews ride on the warren host under /p/<run-id>/ (SPEC §11.L)"
+									: "Subdomain-mode previews ride on run-<id>.<host> (SPEC §11.L)"
+							}
+						>
+							{mode}
+						</Badge>
+					) : null}
 				</CardTitle>
 				{loginUrl !== null ? (
 					<a
@@ -331,6 +367,9 @@ function PreviewCard({ run }: { run: RunRow }) {
 				) : null}
 			</CardHeader>
 			<CardContent className="space-y-3">
+				{canonicalUrl !== null ? (
+					<PreviewMetaLine label="URL" value={canonicalUrl} mono />
+				) : null}
 				<div className="grid gap-x-6 gap-y-1 text-xs sm:grid-cols-2">
 					{run.previewPort !== null ? (
 						<PreviewMetaLine label="Port" value={String(run.previewPort)} />
@@ -350,17 +389,25 @@ function PreviewCard({ run }: { run: RunRow }) {
 						{run.previewFailureMessage}
 					</pre>
 				) : null}
-				{isActive ? <PreviewTeardownButton runId={run.id} /> : null}
+				{isActive ? <PreviewTeardownButton runId={run.id} mode={mode} /> : null}
 			</CardContent>
 		</Card>
 	);
 }
 
-function PreviewMetaLine({ label, value }: { label: string; value: string }) {
+function PreviewMetaLine({
+	label,
+	value,
+	mono,
+}: {
+	label: string;
+	value: string;
+	mono?: boolean;
+}) {
 	return (
 		<div className="flex items-baseline gap-2">
 			<span className="uppercase tracking-wide text-(--color-muted-foreground)">{label}</span>
-			<span className="font-mono">{value}</span>
+			<span className={mono === true ? "font-mono break-all" : "font-mono"}>{value}</span>
 		</div>
 	);
 }
@@ -381,12 +428,29 @@ function PreviewStateBadge({ state }: { state: PreviewState }) {
 	);
 }
 
-function PreviewTeardownButton({ runId }: { runId: string }) {
+function PreviewTeardownButton({
+	runId,
+	mode,
+}: {
+	runId: string;
+	mode: "path" | "subdomain" | undefined;
+}) {
 	const qc = useQueryClient();
 	const teardown = useMutation({
 		mutationFn: () => runsApi.previewTeardown(runId, { actor: "ui" }),
 		onSettled: () => qc.invalidateQueries({ queryKey: ["runs", runId] }),
 	});
+	// Mode-aware tooltip (warren-016d): path-mode previews share the warren
+	// host so the `warren_preview` cookie is scoped to `/p/<id>/` and stays
+	// in the browser after teardown until the path is reused; subdomain-mode
+	// previews retire the dedicated `run-<id>.<host>` origin entirely. Both
+	// land on the same idempotent endpoint — the copy just sets expectations.
+	const title =
+		mode === "path"
+			? "Stop the preview sidecar and release the port. The /p/<run-id>/ prefix returns 404 after teardown; the path-scoped warren_preview cookie remains in the browser."
+			: mode === "subdomain"
+				? "Stop the preview sidecar and release the port. The run-<id>.<host> subdomain returns 404 after teardown."
+				: "Stop the preview sidecar and release the port.";
 	return (
 		<div className="flex flex-col items-start gap-1">
 			<Button
@@ -394,6 +458,7 @@ function PreviewTeardownButton({ runId }: { runId: string }) {
 				size="sm"
 				onClick={() => teardown.mutate()}
 				disabled={teardown.isPending}
+				title={title}
 			>
 				<Trash2 className="h-4 w-4" />
 				{teardown.isPending ? "Tearing down…" : "Tear down"}

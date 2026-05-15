@@ -63,6 +63,7 @@ import { cancelRun, spawnRun, steerRun, tailRunEvents } from "../runs/index.ts";
 import { buildTriggerSummaries, parseCron, resolveCronPrompt } from "../triggers/index.ts";
 import {
 	type CronTrigger,
+	DEFAULT_PREVIEW_MODE,
 	type LoadedWarrenConfig,
 	loadWarrenConfig,
 } from "../warren-config/index.ts";
@@ -1104,6 +1105,28 @@ async function previewMaxLiveReadyzCheck(deps: ServerDeps): Promise<DiagnosticCh
 	});
 }
 
+/**
+ * `GET /preview/config` (R-19 / SPEC §11.L path addendum, warren-016d).
+ *
+ * Surfaces the deployment-wide preview routing mode + optional host so the
+ * UI's `PreviewCard` can render the canonical preview URL without having
+ * to encode mode-specific shapes itself. The login handshake at
+ * `/runs/:id/preview/login` does its own server-side redirect resolution,
+ * so this endpoint is purely informational — the UI calls it once and
+ * caches indefinitely (mode/host change requires a warren restart).
+ *
+ * `host` is null when path mode is configured without `WARREN_PREVIEW_HOST`;
+ * in that case the UI derives the URL from `window.location.origin`. In
+ * subdomain mode `host` is always set (boot rejects subdomain-without-host).
+ */
+function previewConfigHandler(deps: ServerDeps): RouteHandler {
+	return () =>
+		jsonResponse(200, {
+			mode: deps.previewMode ?? DEFAULT_PREVIEW_MODE,
+			host: deps.previewHost ?? null,
+		});
+}
+
 async function checkAgentsRegistered(deps: ServerDeps): Promise<DiagnosticCheck> {
 	const count = (await deps.repos.agents.listAll()).length;
 	if (count === 0) {
@@ -1167,6 +1190,8 @@ const ROUTE_TABLE: readonly RouteEntry[] = [
 	{ method: "POST", pattern: "/runs/:id/cancel", build: cancelRunHandler },
 	{ method: "GET", pattern: "/runs/:id/preview/login", build: previewLoginHandler },
 	{ method: "POST", pattern: "/runs/:id/preview/teardown", build: previewTeardownHandler },
+
+	{ method: "GET", pattern: "/preview/config", build: previewConfigHandler },
 ];
 
 /**
@@ -1201,6 +1226,7 @@ export const API_PREFIXES: readonly string[] = [
 	"/workers",
 	"/healthz",
 	"/readyz",
+	"/preview",
 ];
 
 /**

@@ -8,6 +8,7 @@ import type {
 	ApiErrorEnvelope,
 	CancelRunResponse,
 	CreateRunInput,
+	PreviewConfigResponse,
 	PreviewTeardownResponse,
 	ProjectRow,
 	ReadyzResponse,
@@ -189,15 +190,52 @@ export const runsApi = {
 /**
  * Build the URL of the auth-exempt preview login handshake
  * (`GET /runs/:id/preview/login?token=...`) so the UI can render a
- * clickable link. The server redirects to `https://run-<id>.<host>/`
- * after validating the token and setting the `warren_preview` cookie
- * (R-19 / SPEC §11.L, warren-8a10). Returns null when no bearer is
- * cached — the link would 401 without it.
+ * clickable link. The server redirects to the right target based on the
+ * deployment's `WARREN_PREVIEW_MODE` — `https://run-<id>.<host>/` in
+ * subdomain mode, `<inbound-origin>/p/<id>/` in path mode — so this URL
+ * is mode-agnostic from the client's POV (R-19 / SPEC §11.L, warren-8a10
+ * / warren-edff). Returns null when no bearer is cached — the link would
+ * 401 without it.
  */
 export function buildPreviewLoginUrl(runId: string): string | null {
 	const token = getApiToken();
 	if (token === null || token.length === 0) return null;
 	return `/runs/${encodeURIComponent(runId)}/preview/login?token=${encodeURIComponent(token)}`;
+}
+
+/**
+ * Deployment-wide preview config (R-19 / SPEC §11.L path addendum,
+ * warren-016d). Fetched once per session — mode/host can only change via
+ * a warren restart — and consumed by `PreviewCard` to render the
+ * canonical preview URL string.
+ */
+export const previewApi = {
+	config: (signal?: AbortSignal) =>
+		request<PreviewConfigResponse>("/preview/config", { ...(signal ? { signal } : {}) }),
+};
+
+/**
+ * Format the canonical preview URL for a run. Mirrors server-side
+ * `formatPreviewUrl` (`src/preview/launch.ts`) so the displayed URL
+ * matches where the login handshake actually redirects:
+ *
+ *   - path mode      → `<origin>/p/<runId>/` (origin from `config.host`
+ *                       when set, otherwise the current `window.location.origin`
+ *                       — previews ride on the warren host itself).
+ *   - subdomain mode → `https://run-<runId>.<host>/` (host always set in
+ *                       this mode; boot rejects subdomain without host).
+ */
+export function formatPreviewUrl(
+	runId: string,
+	config: PreviewConfigResponse,
+	origin: string,
+): string {
+	if (config.mode === "path") {
+		const base = config.host !== null ? `https://${config.host}` : origin;
+		return `${base}/p/${encodeURIComponent(runId)}/`;
+	}
+	const host = config.host ?? "";
+	return `https://run-${encodeURIComponent(runId)}.${host}/`;
 }
 
 /* ----------------------------------------------------------------------- */
