@@ -50,6 +50,11 @@ RUN apt-get update \
 # each tool's current release; bumping them is a deliberate image-rebuild
 # decision.
 #
+# pnpm + npm are baked in so per-run preview sidecars (R-19 / SPEC §11.L)
+# can boot the common JS dev-server commands (`pnpm dev`, `npm run dev`)
+# in projects that don't use bun. They use the same /usr/local/bin/node
+# bun-shim symlink installed below for pi compat (warren-810f).
+#
 # BUN_INSTALL=/usr/local relocates the global package store from the default
 # /root/.bun/install/global into /usr/local/install/global. Burrow's bwrap
 # profile only ro-binds /usr, /etc, /lib, /lib64, /bin, /sbin, /opt (see
@@ -65,7 +70,9 @@ RUN bun install -g \
     @os-eco/mulch-cli@0.9.0 \
     @os-eco/sapling-cli@0.3.2 \
     @anthropic-ai/claude-code@2.1.138 \
-    @earendil-works/pi-coding-agent@0.74.0
+    @earendil-works/pi-coding-agent@0.74.0 \
+    pnpm@11.1.2 \
+    npm@11.14.1
 
 # bun install -g skips lifecycle scripts by default, so claude-code's
 # postinstall (which downloads the platform-native `claude` binary) doesn't
