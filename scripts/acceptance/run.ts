@@ -53,6 +53,7 @@ import { scenario as scenario17 } from "./scenarios/17-init-scaffold.ts";
 import { scenario as scenario18 } from "./scenarios/18-multi-worker.ts";
 import { scenario as scenario19 } from "./scenarios/19-warren-on-postgres.ts";
 import { scenario as scenario20 } from "./scenarios/20-preview.ts";
+import { scenario as scenario20Path } from "./scenarios/20-preview-path.ts";
 
 const SCENARIOS: readonly Scenario[] = [
 	scenario01,
@@ -75,6 +76,7 @@ const SCENARIOS: readonly Scenario[] = [
 	scenario18,
 	scenario19,
 	scenario20,
+	scenario20Path,
 ];
 
 interface ParsedArgs {
