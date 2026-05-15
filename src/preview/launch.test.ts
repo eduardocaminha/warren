@@ -8,6 +8,7 @@ import {
 	formatPreviewUrl,
 	launchPreview,
 	loadPreviewLaunchConfigFromEnv,
+	PROBE_PER_CALL_TIMEOUT_MS,
 	type PreviewSidecarsClient,
 } from "./launch.ts";
 import { PreviewPortAllocator } from "./port-allocator.ts";
@@ -322,6 +323,68 @@ describe("launchPreview", () => {
 		expect(result.ok).toBe(false);
 		expect((result as { reason: string }).reason).toBe("readiness_timeout");
 		expect(calls.length).toBeLessThan(5);
+	});
+
+	// warren-33eb: a fetch that never resolves on its own must not block the
+	// readiness deadline. The per-call AbortController fires before each probe
+	// returns, the loop ticks past the wall-clock deadline, and we end in
+	// `readiness_timeout` rather than hanging until the upstream fetch unblocks.
+	test("aborts hung fetches via per-call timeout and still hits the wall-clock deadline", async () => {
+		const sidecars = fakeSidecars({ stdout: "", stderr: "compiling…\n" });
+		const t0 = new Date("2026-05-14T18:00:00.000Z").getTime();
+		let ticks = 0;
+		const now = (): Date => new Date(t0 + ticks);
+
+		// Fetch that ignores the response and only resolves (as a rejection) when
+		// the AbortController fires. Without the per-call timeout this would hang
+		// forever and the deadline check would never run.
+		let probeCalls = 0;
+		const hangingFetch = (async (
+			_input: URL | RequestInfo,
+			init?: RequestInit,
+		): Promise<Response> => {
+			probeCalls++;
+			const signal = init?.signal;
+			if (signal === undefined || signal === null) {
+				throw new Error("expected per-call AbortSignal");
+			}
+			return new Promise<Response>((_resolve, reject) => {
+				signal.addEventListener("abort", () => {
+					reject(new DOMException("aborted", "AbortError"));
+				});
+			});
+		}) as unknown as typeof fetch;
+
+		const result = await launchPreview({
+			runId,
+			burrowId,
+			previewConfig: PREVIEW_CONFIG,
+			repos,
+			allocator,
+			sidecars: sidecars.client,
+			fetch: hangingFetch,
+			sleep: async () => {
+				// Advance the wall clock past the deadline once a probe has aborted.
+				ticks += 1_000;
+			},
+			now,
+			readinessTimeoutMs: 200,
+			readinessPollMs: 50,
+			probePerCallTimeoutMs: 10,
+		});
+
+		expect(result.ok).toBe(false);
+		expect((result as { reason: string }).reason).toBe("readiness_timeout");
+		// Loop must have iterated at least once and bounded — not a single 10s hang.
+		expect(probeCalls).toBeGreaterThanOrEqual(1);
+		expect(probeCalls).toBeLessThan(20);
+		const row = await repos.runs.require(runId);
+		expect(row.previewState).toBe("failed");
+		expect(row.previewPort).toBeNull();
+	});
+
+	test("PROBE_PER_CALL_TIMEOUT_MS is 2 seconds (warren-33eb)", () => {
+		expect(PROBE_PER_CALL_TIMEOUT_MS).toBe(2_000);
 	});
 
 	test("falls back to stdout tail when stderr is empty", async () => {

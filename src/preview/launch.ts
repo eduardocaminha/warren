@@ -87,6 +87,8 @@ export interface LaunchPreviewInput {
 	readonly readinessTimeoutMs?: number;
 	/** Pause between probe attempts. Defaults to `DEFAULT_READINESS_POLL_MS`. */
 	readinessPollMs?: number;
+	/** Per-call AbortController timeout. Defaults to `PROBE_PER_CALL_TIMEOUT_MS`. */
+	readonly probePerCallTimeoutMs?: number;
 }
 
 export type LaunchPreviewResult =
@@ -121,6 +123,16 @@ export type LaunchFailureReason =
 export const DEFAULT_READINESS_TIMEOUT_MS = 300_000;
 /** Default pause between probe attempts. */
 export const DEFAULT_READINESS_POLL_MS = 500;
+/**
+ * Per-call probe timeout (warren-33eb). The outer `readinessTimeoutMs` is a
+ * wall-clock bound on the loop *between* attempts; without a per-call
+ * timeout a single hung `fetch()` (e.g. burrow forwarder accepted the TCP
+ * connection but the dev server is mid-compile and never flushes bytes)
+ * blocks the deadline check indefinitely. 2s is a conservative upper bound —
+ * a dev server that can't return any byte for `GET /` within 2s is not
+ * "ready" in the §11.L sense even if it's alive.
+ */
+export const PROBE_PER_CALL_TIMEOUT_MS = 2_000;
 /** Stderr tail size copied into `preview_failure_message`. */
 export const PREVIEW_FAILURE_TAIL_BYTES = 4096;
 
@@ -134,6 +146,7 @@ export async function launchPreview(input: LaunchPreviewInput): Promise<LaunchPr
 	const sleep = input.sleep ?? defaultSleep;
 	const timeoutMs = input.readinessTimeoutMs ?? DEFAULT_READINESS_TIMEOUT_MS;
 	const pollMs = input.readinessPollMs ?? DEFAULT_READINESS_POLL_MS;
+	const perCallTimeoutMs = input.probePerCallTimeoutMs ?? PROBE_PER_CALL_TIMEOUT_MS;
 
 	const allocation = await input.allocator.allocate(input.runId, now());
 	if (allocation.status === "exhausted") {
@@ -178,7 +191,7 @@ export async function launchPreview(input: LaunchPreviewInput): Promise<LaunchPr
 	const deadline = now().getTime() + timeoutMs;
 
 	while (true) {
-		const ready = await probeOnce(fetchImpl, probeUrl);
+		const ready = await probeOnce(fetchImpl, probeUrl, perCallTimeoutMs);
 		if (ready) {
 			await input.repos.runs.attachPreview(input.runId, {
 				previewState: "live",
@@ -208,9 +221,19 @@ export async function launchPreview(input: LaunchPreviewInput): Promise<LaunchPr
 	}
 }
 
-async function probeOnce(fetchImpl: typeof fetch, url: string): Promise<boolean> {
+async function probeOnce(
+	fetchImpl: typeof fetch,
+	url: string,
+	perCallTimeoutMs: number,
+): Promise<boolean> {
+	const ac = new AbortController();
+	const tid = setTimeout(() => ac.abort(), perCallTimeoutMs);
 	try {
-		const res = await fetchImpl(url, { method: "GET", redirect: "manual" });
+		const res = await fetchImpl(url, {
+			method: "GET",
+			redirect: "manual",
+			signal: ac.signal,
+		});
 		// 2xx ⇒ ready. 3xx is treated as ready too: a dev server that redirects
 		// "/" → "/index" is ready; the proxy will follow on real traffic.
 		if (res.ok || (res.status >= 300 && res.status < 400)) {
@@ -221,6 +244,8 @@ async function probeOnce(fetchImpl: typeof fetch, url: string): Promise<boolean>
 		return false;
 	} catch {
 		return false;
+	} finally {
+		clearTimeout(tid);
 	}
 }
 
