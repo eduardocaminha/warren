@@ -136,6 +136,29 @@ export const PROBE_PER_CALL_TIMEOUT_MS = 2_000;
 /** Stderr tail size copied into `preview_failure_message`. */
 export const PREVIEW_FAILURE_TAIL_BYTES = 4096;
 
+/**
+ * Default env block injected into every preview sidecar (warren-79b2).
+ * Burrow's inbound forwarder connects via `nc 127.0.0.1 <sandboxPort>` from
+ * inside the sandbox netns, so a dev server bound to `localhost`/`::1` only
+ * (Next.js 13.5+ default) is unreachable. CRA reads `HOST`; several
+ * Express-style servers read `HOST`/`HOSTNAME`; forcing both to `0.0.0.0`
+ * is a no-op for projects already binding to all interfaces. `PORT` lets
+ * Vite/Next.js/Express/CRA avoid hard-coding the sandbox port twice.
+ *
+ * Next.js's CLI silently IGNORES `HOSTNAME`/`HOST` env vars (its commander
+ * `-H, --hostname` is NOT chained with `.env(...)`); Next.js projects must
+ * still pass `-H 0.0.0.0` in their `command:`. The framework matrix in
+ * `.warren/preview.yaml` documents this. Project commands override these
+ * defaults by inlining `HOST=...` / `PORT=...` ahead of the command (sh -c).
+ */
+function defaultSidecarEnv(sandboxPort: number): Record<string, string> {
+	return {
+		HOST: "0.0.0.0",
+		HOSTNAME: "0.0.0.0",
+		PORT: String(sandboxPort),
+	};
+}
+
 /* ----------------------------------------------------------------------- */
 /* Implementation                                                           */
 /* ----------------------------------------------------------------------- */
@@ -164,6 +187,7 @@ export async function launchPreview(input: LaunchPreviewInput): Promise<LaunchPr
 		const created = await input.sidecars.create({
 			burrowId: input.burrowId,
 			command: ["sh", "-c", input.previewConfig.command],
+			env: defaultSidecarEnv(input.previewConfig.port),
 			inboundPortForward: { hostPort: port, sandboxPort: input.previewConfig.port },
 			...(input.previewConfig.readiness_path !== undefined
 				? { readinessPath: input.previewConfig.readiness_path }

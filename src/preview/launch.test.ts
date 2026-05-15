@@ -24,6 +24,7 @@ interface FakeSidecar {
 	readonly creates: Array<{
 		burrowId: string;
 		command: readonly string[];
+		env?: Record<string, string>;
 		inboundPortForward?: { hostPort: number; sandboxPort: number };
 		readinessPath?: string;
 	}>;
@@ -50,6 +51,7 @@ function fakeSidecars(
 			creates.push({
 				burrowId: input.burrowId,
 				command: [...input.command],
+				...(input.env !== undefined ? { env: { ...input.env } } : {}),
 				...(input.inboundPortForward !== undefined
 					? { inboundPortForward: input.inboundPortForward }
 					: {}),
@@ -136,12 +138,40 @@ describe("launchPreview", () => {
 		expect(sidecars.creates).toHaveLength(1);
 		const created = sidecars.creates[0];
 		expect(created?.command).toEqual(["sh", "-c", "bun run dev"]);
+		expect(created?.env).toEqual({ HOST: "0.0.0.0", HOSTNAME: "0.0.0.0", PORT: "3000" });
 		expect(created?.inboundPortForward).toEqual({ hostPort: 40000, sandboxPort: 3000 });
 		expect(calls[0]).toBe("http://127.0.0.1:40000/");
 		const row = await repos.runs.require(runId);
 		expect(row.previewState).toBe("live");
 		expect(row.previewPort).toBe(40000);
 		expect(row.previewFailureMessage).toBeNull();
+	});
+
+	// warren-79b2: dev servers (Next.js 13.5+, http.createServer() defaults)
+	// that bind to 127.0.0.1 only are unreachable from burrow's inbound
+	// forwarder. Inject HOST/HOSTNAME=0.0.0.0 + PORT=<sandbox port> on every
+	// preview sidecar so CRA / Express-style servers default to "reachable",
+	// and so frameworks that read process.env.PORT don't need the operator to
+	// duplicate the port number in their command.
+	test("injects HOST/HOSTNAME/PORT into the sidecar env, PORT matches previewConfig.port", async () => {
+		const sidecars = fakeSidecars();
+		const { fetch } = fakeFetch([new Response("ok", { status: 200 })]);
+		const config: ServerPreviewConfig = { ...PREVIEW_CONFIG, port: 5173 };
+		await launchPreview({
+			runId,
+			burrowId,
+			previewConfig: config,
+			repos,
+			allocator,
+			sidecars: sidecars.client,
+			fetch,
+			sleep: async () => {},
+		});
+		expect(sidecars.creates[0]?.env).toEqual({
+			HOST: "0.0.0.0",
+			HOSTNAME: "0.0.0.0",
+			PORT: "5173",
+		});
 	});
 
 	test("honors readiness_path when supplied", async () => {
