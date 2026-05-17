@@ -8,7 +8,25 @@ import { createRepos, type Repos } from "../db/repos/index.ts";
 import type { SpawnFn as ProjectSpawnFn, SpawnResult } from "../projects/clone.ts";
 import type { AgentDefinition } from "../registry/schema.ts";
 import { RunSpawnError } from "./errors.ts";
-import { composeDispatchPrompt, spawnRun } from "./spawn.ts";
+import {
+	type AppendPlotRunDispatchedInput,
+	composeDispatchPrompt,
+	DEFAULT_DISPATCHER_HANDLE,
+	type SpawnPlotAppender,
+	spawnRun,
+} from "./spawn.ts";
+
+function makeAppender(
+	opts: { calls?: AppendPlotRunDispatchedInput[]; throws?: Error } = {},
+): SpawnPlotAppender {
+	const calls = opts.calls ?? [];
+	return {
+		async appendRunDispatched(input) {
+			calls.push(input);
+			if (opts.throws) throw opts.throws;
+		},
+	};
+}
 
 /**
  * Wrap a stubbed `BurrowClient` in a single-worker `BurrowClientPool`
@@ -311,6 +329,125 @@ describe("spawnRun", () => {
 		const up = calls.find((c) => c.method === "POST" && c.path === "/burrows");
 		expect(up).toBeDefined();
 		expect((up?.body as { env?: unknown }).env).toBeUndefined();
+	});
+
+	test("appends run_dispatched to the originating Plot after spawn (warren-e848)", async () => {
+		db.raw.exec("UPDATE projects SET has_plot = 1 WHERE id = 'prj_xxxxxxxxxxxx'");
+		await repos.agents.upsert({
+			name: "refactor-bot",
+			renderedJson: makeAgentJson({ frontmatter: { model: "claude-opus-4-7" } }),
+		});
+		const appendCalls: AppendPlotRunDispatchedInput[] = [];
+		const { client } = makeBurrowClient();
+		const result = await spawnRun({
+			repos,
+			burrowClientPool: await makePool(repos, client),
+			agentName: "refactor-bot",
+			projectId: "prj_xxxxxxxxxxxx",
+			prompt: "fix it",
+			plotId: "pl-2047",
+			dispatcherHandle: "alice",
+			plotAppender: makeAppender({ calls: appendCalls }),
+		});
+
+		expect(appendCalls).toHaveLength(1);
+		const call = appendCalls[0];
+		if (!call) throw new Error("appender not called");
+		expect(call.plotDir).toBe("/data/projects/x/y/.plot");
+		expect(call.plotId).toBe("pl-2047");
+		expect(call.handle).toBe("alice");
+		expect(call.runId).toBe(result.run.id);
+		expect(call.agentName).toBe("refactor-bot");
+		expect(call.model).toBe("claude-opus-4-7");
+		expect(call.projectId).toBe("prj_xxxxxxxxxxxx");
+		expect(await repos.events.maxSeqForRun(result.run.id)).toBeNull();
+	});
+
+	test("skips run_dispatched append when no plotId is set (warren-e848)", async () => {
+		const appendCalls: AppendPlotRunDispatchedInput[] = [];
+		const { client } = makeBurrowClient();
+		await spawnRun({
+			repos,
+			burrowClientPool: await makePool(repos, client),
+			agentName: "refactor-bot",
+			projectId: "prj_xxxxxxxxxxxx",
+			prompt: "fix it",
+			plotAppender: makeAppender({ calls: appendCalls }),
+		});
+		expect(appendCalls).toHaveLength(0);
+	});
+
+	test("falls back to DEFAULT_DISPATCHER_HANDLE when handle is malformed (warren-e848)", async () => {
+		db.raw.exec("UPDATE projects SET has_plot = 1 WHERE id = 'prj_xxxxxxxxxxxx'");
+		const appendCalls: AppendPlotRunDispatchedInput[] = [];
+		const { client } = makeBurrowClient();
+		await spawnRun({
+			repos,
+			burrowClientPool: await makePool(repos, client),
+			agentName: "refactor-bot",
+			projectId: "prj_xxxxxxxxxxxx",
+			prompt: "fix it",
+			plotId: "pl-2047",
+			dispatcherHandle: "@bad/handle",
+			plotAppender: makeAppender({ calls: appendCalls }),
+		});
+		expect(appendCalls[0]?.handle).toBe(DEFAULT_DISPATCHER_HANDLE);
+	});
+
+	test("uses DEFAULT_DISPATCHER_HANDLE when dispatcherHandle is omitted (warren-e848)", async () => {
+		db.raw.exec("UPDATE projects SET has_plot = 1 WHERE id = 'prj_xxxxxxxxxxxx'");
+		const appendCalls: AppendPlotRunDispatchedInput[] = [];
+		const { client } = makeBurrowClient();
+		await spawnRun({
+			repos,
+			burrowClientPool: await makePool(repos, client),
+			agentName: "refactor-bot",
+			projectId: "prj_xxxxxxxxxxxx",
+			prompt: "fix it",
+			plotId: "pl-2047",
+			plotAppender: makeAppender({ calls: appendCalls }),
+		});
+		expect(appendCalls[0]?.handle).toBe(DEFAULT_DISPATCHER_HANDLE);
+	});
+
+	test("records plot_run_dispatched_failed and does NOT roll back when the appender throws (warren-e848)", async () => {
+		db.raw.exec("UPDATE projects SET has_plot = 1 WHERE id = 'prj_xxxxxxxxxxxx'");
+		const { client } = makeBurrowClient();
+		const result = await spawnRun({
+			repos,
+			burrowClientPool: await makePool(repos, client),
+			agentName: "refactor-bot",
+			projectId: "prj_xxxxxxxxxxxx",
+			prompt: "fix it",
+			plotId: "pl-2047",
+			plotAppender: makeAppender({ throws: new Error("rebuild failed too") }),
+		});
+		// Spawn returned a non-cancelled run row, proving the failure didn't
+		// roll the dispatch back.
+		expect(result.run.state === "queued" || result.run.state === "running").toBe(true);
+		const events = await repos.events.listByRun(result.run.id);
+		const failure = events.find((e) => e.kind === "plot_run_dispatched_failed");
+		expect(failure).toBeDefined();
+		expect(failure?.stream).toBe("system");
+		const payload = failure?.payloadJson as { plotId?: string; reason?: string };
+		expect(payload?.plotId).toBe("pl-2047");
+		expect(payload?.reason).toContain("rebuild failed too");
+	});
+
+	test("passes model=null when the agent has no frontmatter.model (warren-e848)", async () => {
+		db.raw.exec("UPDATE projects SET has_plot = 1 WHERE id = 'prj_xxxxxxxxxxxx'");
+		const appendCalls: AppendPlotRunDispatchedInput[] = [];
+		const { client } = makeBurrowClient();
+		await spawnRun({
+			repos,
+			burrowClientPool: await makePool(repos, client),
+			agentName: "refactor-bot",
+			projectId: "prj_xxxxxxxxxxxx",
+			prompt: "fix it",
+			plotId: "pl-2047",
+			plotAppender: makeAppender({ calls: appendCalls }),
+		});
+		expect(appendCalls[0]?.model).toBeNull();
 	});
 
 	test("prefers the project-tier agent when one exists for the spawn's project (R-03 / warren-0a7e)", async () => {
