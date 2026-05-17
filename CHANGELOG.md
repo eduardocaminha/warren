@@ -7,6 +7,75 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.15] — 2026-05-17
+
+Preview hardening pass — five coupled fixes that turn path-mode preview
+into a working zero-DNS default for modern SPA frameworks and shore up
+the readiness/teardown lifecycle. No schema changes; all server-side.
+
+### Added
+
+- **`feat(preview/launch)`** — optional `preview.setup` runs as its own
+  sidecar before the dev-server sidecar, so dependency install no longer
+  shares `readiness_timeout` with dev-server bind. Non-zero setup exit
+  surfaces as `reason=setup_failed` with a stderr tail in
+  `preview_failure_message`; hangs past `setup_timeout` (default 5m,
+  bounds 1s..1h) surface as `reason=setup_timeout` and the lingering
+  sidecar is best-effort deleted. `PreviewSidecarsClient` gains a
+  `get()` method over the burrow-client facade so the launcher can
+  observe sidecar lifecycle without bypassing the boundary.
+  (`warren-d9e7`)
+- **`feat(preview/launch)`** — default `HOST`, `HOSTNAME`, and `PORT`
+  into the sidecar env so CRA/Express-style dev servers bind reachably.
+  Burrow's inbound forwarder enters the sandbox netns and connects via
+  `nc 127.0.0.1 <port>`, so a server bound to localhost/::1 only
+  (Next.js 13.5+ default) is unreachable even though the process is
+  alive. Operators override by inlining `HOST=... PORT=...` ahead of
+  the command. Next.js's CLI silently ignores `HOSTNAME`/`HOST` env
+  vars, so Next.js projects still need `-H 0.0.0.0` in their command —
+  documented in the `.warren/preview.yaml` stub framework matrix.
+  (`warren-79b2`)
+
+### Changed
+
+- **`feat(preview/proxy)`** — path mode now works out-of-the-box for
+  SPAs whose compiled output emits root-relative asset URLs that
+  `<base>` can't redirect (Next.js, Vite, SvelteKit, Astro). Three
+  coupled changes: (1) per-run cookie at `warren_preview_<runId>`,
+  `Path=/`, so the browser carries it on `/_next/static/...` asset
+  loads while preserving sibling-session isolation (SPEC §11.L risk 4);
+  (2) `Referer`-based routing in `src/preview/proxy.ts` when
+  `url.pathname` misses `/p/<id>/...` and isn't a warren API surface —
+  extracts the runId from the referer's pathname and forwards
+  `url.pathname` verbatim to that preview's upstream port, fixing the
+  "blank preview" pathology (run_pexj1wxq90v0 / jayminwest.com PR #19)
+  where every Next.js asset returned warren's SPA `index.html`; (3)
+  `rewriteRootRelativeAttrs` prefixes `href`/`src`/`srcset` values
+  within the same 64 KiB head lookahead as `<base>` injection, as
+  defense-in-depth for server-rendered HTML with abs paths computed
+  before `<base>` was visible. (`warren-63e1`)
+
+### Fixed
+
+- **`fix(preview/launch)`** — `probeOnce` wraps each fetch in a 2s
+  `AbortController` so a hung response (burrow forwarder accepted TCP
+  but the dev server hasn't flushed bytes) can no longer block the
+  outer wall-clock deadline indefinitely. Observed on
+  run_7jjpt2jn9ej5 (jayminwest.com): `preview_state` stayed `starting`
+  for 6m47s against a 5m `readiness_timeout` — one fetch waited
+  through Next.js compile, then succeeded. New
+  `PROBE_PER_CALL_TIMEOUT_MS` constant + `probePerCallTimeoutMs`
+  override on `LaunchPreviewInput` keep the per-call cap injectable
+  for tests. (`warren-33eb`)
+- **`fix(server)`** — `previewTeardownHandler` no longer hard-gates on
+  `dialect === "sqlite"`. `createRunPreviewsRepo` became
+  dialect-polymorphic under `warren-adfb`, but the manual-teardown
+  affordance was still 503'ing on the postgres deploy until idle-TTL
+  reclaimed the port. Narrowed the precondition to
+  `deps.db === undefined` (the only thing the repo construction
+  actually requires) and added a pg-conditional regression test
+  exercising the route end-to-end on postgres. (`warren-a743`)
+
 ## [0.3.14] — 2026-05-15
 
 Fix the preview proxy's blank-page failure mode (`run_7jjpt2jn9ej5`
