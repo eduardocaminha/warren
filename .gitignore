@@ -12,3 +12,6 @@ data/
 bun.lockb.bak
 .run-plan-logs/
 supabase/
+.plot/.index.db
+.plot/.index.db-shm
+.plot/.index.db-wal
