@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.5] — 2026-05-18
+
+Patch release surfacing dogfood signal #3 from `plot-3e72876d` (the
+housekeeping pass): `NewPlanRun.tsx` had a `plot_id` input for
+plan-runs, but the single-run `NewRun.tsx` form had no Plot binding
+affordance — single runs dispatched from the UI could not bind to a
+Plot, only plan-runs could. The housekeeping arc is "one warren run
+per child seed" (single-run shape), so without this input the
+activity feed couldn't accumulate the per-seed coordination it was
+designed to surface.
+
+### Added
+
+- **`feat(ui)`** — `NewRun.tsx` gains an optional `Plot ID` input,
+  gated on the selected project's `hasPlot=true`. Mirrors
+  `NewPlanRun.tsx`'s pattern: a `plotId` state initialized blank, the
+  trimmed value passed into `runsApi.create` only when both `hasPlot`
+  and a non-empty value are present. Server-side accepts `plotId?` on
+  `CreateRunInput` already (shipped in pl-2047 / v0.3.18 era) — only
+  the UI surface was missing. Prereq for `warren-e40a` (Plot UX
+  vision: surface Plot→plan→seed→run end-to-end), whose three child
+  seeds (`warren-ff2a`, `warren-ea66`, `warren-5561`) all depend on
+  single-run dispatch being Plot-bindable.
+
 ## [0.4.4] — 2026-05-18
 
 Patch release closing `warren-ede7`: the Plot aggregator's
