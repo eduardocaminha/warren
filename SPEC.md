@@ -1853,6 +1853,184 @@ covers the round-trip end-to-end against a real warren+burrow stack:
   (e.g. internal maintenance jobs) is not added in Phase 1 — current
   cron and scheduled-seed paths attribute to the trigger owner's handle.
 
+### 11.P PlanRun: serial plan execution (pl-a258, 2026-05-18)
+
+PlanRun is a dispatch mode, not a fifth bundled feature. The substrate
+is the existing single-run primitive — `spawnRun`, the events bus, the
+runs/projects/agents repos — composed by a second tick loop that takes
+a [seeds](https://github.com/jayminwest/seeds) plan and walks its
+children sequentially, one warren run per child, gated on each child's
+PR merging before the next dispatches. No new sandbox shape, no new
+agent contract, no new burrow surface: PlanRun is warren orchestrating
+itself.
+
+A project lights it up by shipping a `.seeds/` directory. Projects
+without one return a typed 400 from `POST /plan-runs` (the same
+no-half-spawned-state policy as Plot's `hasPlot` gate, §11.O) and never
+see the dispatch path.
+
+**Data model.** Two tables, both dialect-polymorphic across SQLite and
+Postgres (`src/db/schema/sqlite.ts`, `src/db/schema/postgres.ts`):
+
+- `plan_runs` — one row per dispatch. Columns: `id` (PK), `plan_id`,
+  `project_id` (FK), `agent_name`, `prompt_template` (defaults to
+  `'work on sd {seed_id}'`), `ref`, `provider_override`,
+  `model_override`, `dispatcher_handle`, `trigger`, `state`
+  (`queued`|`running`|`succeeded`|`failed`|`cancelled`),
+  `failure_reason`, `created_at`, `started_at`, `ended_at`. Indexes on
+  `(project_id, state)` and `state` cover the coordinator's
+  `listActive()` and the UI's per-project list.
+- `plan_run_children` — one row per child step. Composite PK
+  `(plan_run_id, seq)`; `seed_id`, `run_id` (FK SET NULL to `runs`),
+  `state` (`pending`|`dispatched`|`running`|`pr_open`|`merged`|`failed`|`skipped`),
+  timestamps, `pr_merged_at`, `failure_reason`. The parent row + N
+  child rows land in a single transaction via the adapter's `tx`
+  helper, so a constraint violation mid-tx leaves no orphan children.
+
+The **sequencing contract** is strict: `seq` is monotonically increasing
+from `1`; the coordinator advances by selecting the lowest-seq child
+whose state ∈ {`dispatched`,`running`,`pr_open`} as the in-flight slot,
+and only spawns the next child when that slot transitions to `merged`
+or `skipped`. There is never more than one in-flight child per
+PlanRun.
+
+**Coordinator state machine.** `advancePlanRun` in
+`src/plan-runs/coordinator.ts` is a pure function over a stub-injected
+deps bag (repos, `showPlan`, `showSeed`, `checkPrMerged`, `spawn`,
+`now`, `emit`). It returns a discriminated union of 7 shapes — the
+load-bearing contract the tick wrapper, the unit tests, and the
+event-emit seam all narrow against:
+
+```ts
+type AdvanceResult =
+  | { kind: 'dispatched'; childRunId: string }
+  | { kind: 'waiting_for_run' }
+  | { kind: 'waiting_for_merge' }
+  | { kind: 'advanced'; mergedChildSeq: number; dispatchedChildSeq?: number }
+  | { kind: 'plan_failed'; failedSeq: number; reason: string }
+  | { kind: 'plan_succeeded' }
+  | { kind: 'noop'; reason: string }
+```
+
+Transitions, per advance call:
+
+1. If `planRun.state === 'queued'` → transition to `running`, stamp
+   `startedAt`, fall through.
+2. If there is an in-flight child:
+   - linked run non-terminal → `waiting_for_run`;
+   - linked run terminal-succeeded and child.state ≠ `pr_open` →
+     decide pr_open vs trivial-merge (see below);
+   - child.state === `pr_open` → call `checkPrMerged(run.prUrl)`:
+     `merged` flips child to `merged` and falls through to dispatch
+     the next; `open` → `waiting_for_merge`; `closed_unmerged` or
+     `http_error` 4xx → `plan_failed` with reason
+     `pr_closed_without_merge`;
+   - linked run terminal-failed/cancelled → `plan_failed` with
+     reason `` `child_${reason ?? 'failed'}` ``.
+3. If no in-flight child, call `pickNextPending`:
+   - null → `plan_succeeded` (transition the parent row, stamp
+     `endedAt`);
+   - non-null → call `showSeed(child.seedId)`; `status === 'closed'`
+     → flip child to `skipped` (resume semantics, below) and loop;
+     `status === 'open'` → spawn via `dispatch.ts`, persist
+     `child.runId` + `child.state='dispatched'` + `child.startedAt`,
+     return `dispatched`. A `RunSpawnError` becomes `plan_failed`
+     with reason `` `dispatch_failed:${err.message}` ``.
+
+Every transition is mirrored as a system event on the most-recently-
+dispatched child run via the existing emit seam — kinds: `plan_run.advanced`,
+`plan_run.dispatched`, `plan_run.waiting_for_merge`, `plan_run.merged`,
+`plan_run.failed`, `plan_run.succeeded`.
+
+**Trivial-merge advance rule.** A child run that succeeded but produced
+no commits is treated as merged without ever opening a PR. The signal
+is the `reap.empty_push` system event (`commitsAhead === 0`) that
+reap emits when the workspace branch is identical to its base. When
+the coordinator sees `run.prUrl === null` AND the
+`reap.empty_push` event is present on the child run, it advances the
+child straight to `merged` (no GitHub poll, no `pr_open` intermediate
+state). This is the docs-only / no-op-step case — without this rule a
+plan whose middle step had nothing to push would deadlock waiting for
+a PR that never opens.
+
+**PR-merge polling contract.** `src/runs/pr.ts` `checkPullRequestMerged`
+hits the GitHub REST API directly (`GET /repos/:owner/:repo/pulls/:number`,
+`Accept: application/vnd.github+json`, `Authorization: Bearer
+<GITHUB_TOKEN>`) and returns a discriminated union: `{kind:'merged',
+mergedAt}` | `{kind:'open'}` | `{kind:'closed_unmerged'}` |
+`{kind:'missing_token'}` | `{kind:'http_error', status, message}`.
+`mergedAt` is GitHub's `merged_at` field — non-null `merged_at` is the
+truth source; `state:'closed'` with `merged_at:null` is
+`closed_unmerged`. The coordinator (via the `pr-merge.ts` retry
+wrapper) treats `missing_token` as a no-op (logged, plan stalls until
+the operator sets `GITHUB_TOKEN`) rather than failing the plan, since
+the operator can recover by adding the token without losing progress.
+GHE-hosted PRs whose URL does not match the regex in
+`parsePullRequestUrl` return null — the coordinator treats them as
+"cannot verify merge" and waits indefinitely on the operator to merge
+manually rather than auto-failing.
+
+**Resume semantics on re-dispatch.** A second `POST /plan-runs`
+against the same `planId` after some children have been closed
+out-of-band (`sd close` from a human, from another agent, from a
+parallel plan-run) is a first-class flow. The new PlanRun row is
+independent — it has its own `id`, its own children enumerated fresh
+from `plan.children`. As the coordinator walks the new children, any
+child whose `showSeed` returns `status:'closed'` flips to `skipped`
+without dispatching a run; the coordinator loops to the next pending
+child. This makes PlanRun safe to re-invoke as a "resume from the
+next open child" operation without bookkeeping about which previous
+plan-run owned which child.
+
+**Server API.**
+
+```
+POST   /plan-runs                 dispatch (rejects without project.hasSeeds)
+GET    /plan-runs                 list (filter by project / state)
+GET    /plan-runs/:id             detail + fanned-out child runs[]
+POST   /plan-runs/:id/cancel      sets state='cancelled', cancels in-flight run
+GET    /plan-runs/:id/events      tails the union of every child run's events
+```
+
+The dispatch handler rejects in this order: (1) project not found →
+404; (2) `!project.hasSeeds` → `ProjectLacksSeedsError` (typed 400,
+recoveryHint references adding `.seeds/`); (3) plan status ∉
+{`approved`,`active`,`done`} or empty children → `ValidationError` /
+`PlanHasNoOpenChildrenError`; (4) every child already closed → also
+`PlanHasNoOpenChildrenError` (the resume case where there's nothing
+left to do). Side-effect-free until all gates pass.
+
+**Env vars.**
+
+| Variable | Default | Effect |
+|---|---|---|
+| `WARREN_PLAN_RUN_TICK_MS` | `10000` (10s) | Coordinator tick interval. Faster than the scheduler's 60s because in-flight plans are typically short-lived dispatch chains. |
+| `WARREN_PLAN_RUN_DISABLED` | unset | When set (`1`/`true`), `bootPlanRunCoordinator` skips boot — same shape as `WARREN_SCHEDULER_DISABLED`. Useful for diagnostic warren instances that should serve the API but not advance plans. |
+
+The coordinator uses the same single-flight wrapper shape as
+`bootScheduler` (`src/server/scheduler.ts`) — overlapping ticks are
+dropped, not stacked, and a per-PlanRun catch ensures one bad row
+cannot tear down the loop.
+
+**Acceptance.** Scenario 26
+(`scripts/acceptance/scenarios/26-plan-run-roundtrip.ts`) covers the
+round-trip end-to-end against a live warren+burrow stack: three-child
+plan including one docs-only child that exercises the trivial-merge
+branch; assertions on terminal state (`succeeded`, all children
+`merged`); a second dispatch against the same plan id after closing
+one child out-of-band, asserting the close advances to `skipped`
+without a new run; stubbed `WARREN_GH_FETCH_OVERRIDE` for the PR-merge
+poll so the harness stays deterministic.
+
+**Disjoint from Plot.** PlanRun and Plot (§11.O) are orthogonal in V1.
+A PlanRun child run does not carry a `plot_id` and the PlanRun row has
+no `plot_id` column. The composition — a PlanRun whose children all
+target the same Plot, with `plan_run.merged` / `plan_run.advanced`
+mirrored into the Plot event log — is Phase 2 of `warren-fcc9` and
+tracked separately on `warren-06dc`. Phase 1 ships PlanRun standalone
+so the dispatch contract can stabilize before Plot composition layers
+on.
+
 ---
 
 ## 12. Relationship to other os-eco tools

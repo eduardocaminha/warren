@@ -28,6 +28,12 @@ infrastructure:
   injects `PLOT_ID` + `PLOT_ACTOR` into the sandbox, appends
   `run_dispatched`, and mirrors agent-emitted events at reap. See
   SPEC §11.O.
+- **plan-run** — serial sd plan execution; activated by the project
+  having a `.seeds/` directory. A dispatch mode on top of the existing
+  single-run primitive (not a sixth bundled feature): `POST /plan-runs`
+  walks a seeds plan's children one at a time, gating each on the
+  previous PR merging before the next dispatches. Re-dispatching the
+  same plan resumes from the next open child. See SPEC §11.P.
 
 Same code, same depth — only the user-facing framing surfaces them as
 opt-in. When you change cross-cutting docs (README, SPEC §1/§2, package

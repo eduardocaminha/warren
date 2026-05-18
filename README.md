@@ -21,7 +21,7 @@ Engineering teams self-hosting their own agent infrastructure. The deployment un
 
 ## Status
 
-Stable (`0.3.12`), running on Fly.io in continuous use against real GitHub repos. The end-to-end path is covered by 25 scenario-based acceptance tests in [`scripts/acceptance/`](scripts/acceptance/): manual runs, cron triggers, multi-worker placement, Postgres backend, per-run preview environments, restart recovery, cost tracking, seeds-extensions roundtrip. The active frontier is the org-readiness cluster: SSO, remote workers, MCP, audit, budgets, GitHub App auth. See [ROADMAP.md](ROADMAP.md).
+Stable (`0.3.12`), running on Fly.io in continuous use against real GitHub repos. The end-to-end path is covered by 26 scenario-based acceptance tests in [`scripts/acceptance/`](scripts/acceptance/): manual runs, cron triggers, multi-worker placement, Postgres backend, per-run preview environments, restart recovery, cost tracking, seeds-extensions roundtrip, serial plan-run dispatch. The active frontier is the org-readiness cluster: SSO, remote workers, MCP, audit, budgets, GitHub App auth. See [ROADMAP.md](ROADMAP.md).
 
 ## What you get
 
@@ -31,6 +31,7 @@ Stable (`0.3.12`), running on Fly.io in continuous use against real GitHub repos
 - **Live event stream.** NDJSON events are persisted to warren's SQLite log and tailed over `GET /runs/:id/events?follow=1`. The UI, CLI (`warren run`), and HTTP clients all consume the same stream.
 - **Steerable mid-run.** `POST /runs/:id/steer` lands a message in the agent's inbox; the next turn picks it up. `POST /runs/:id/cancel` aborts cleanly.
 - **Scheduled runs.** `.warren/triggers.yaml` defines cron triggers per project; the in-process scheduler dispatches them on the same composition path as manual runs.
+- **Serial plan-run dispatch.** Projects shipping `.seeds/` can `POST /plan-runs` against a seeds plan; warren walks the plan's children one at a time, spawning one run per child and gating each on the previous PR merging before the next dispatches. Re-dispatching the same plan after some children have closed resumes from the next open child.
 - **Three thin clients of one pipeline.** Web UI, `warren` admin CLI, and HTTP API all flow through the same composition path ([SPEC §4.3](SPEC.md#43-the-composition-flow)).
 
 ## Quickstart (home server)
@@ -124,6 +125,8 @@ If a project has a `.mulch/` directory, every run gets that expertise primed int
 ### Issue queue: agents work from and write to seeds
 
 If a project has a `.seeds/` directory, agents can `sd ready` for unblocked work, claim it with `sd update`, file follow-ups with `sd create`, and close completed seeds with `sd close`. Reap closes any seeds the agent marked done. The trigger scheduler can also fire on past-due `extensions.scheduledFor` seed timestamps ([SPEC §11.I](SPEC.md)). See [seeds](https://github.com/jayminwest/seeds).
+
+`.seeds/` also enables **plan-run dispatch**: `POST /plan-runs { project, planId, agent }` against a seeds plan walks its children sequentially, one warren run per child, gating each step on the previous PR merging before the next dispatches. Children whose seeds are already closed are skipped, so re-dispatching the same plan after partial completion resumes from the next open child. PlanRun is a dispatch mode on top of the existing single-run primitive — same spawn path, same sandbox, same event stream. Tune the coordinator with `WARREN_PLAN_RUN_TICK_MS` (default 10s) or disable it with `WARREN_PLAN_RUN_DISABLED=1`. See [SPEC §11.P](SPEC.md#11p-planrun-serial-plan-execution-pl-a258-2026-05-18).
 
 ### Steerable harness: sapling as an alternative to claude-code
 
@@ -260,6 +263,12 @@ POST   /runs/:id/cancel              proxy to runtime cancel
 GET    /runs/:id/preview/login       issue signed-cookie + 302 (auth-exempt, ?token=)
 POST   /runs/:id/preview/teardown    manual preview teardown (idempotent)
 
+POST   /plan-runs                    { project, planId, agent } → serial dispatch (.seeds/ only)
+GET    /plan-runs                    list (filter by project / state)
+GET    /plan-runs/:id                detail + fanned-out child runs[]
+POST   /plan-runs/:id/cancel         cancel; aborts the in-flight child run
+GET    /plan-runs/:id/events         NDJSON tail union over every child run
+
 GET    /healthz                      liveness (no auth)
 GET    /readyz                       runtime + first-render check
 ```
@@ -285,7 +294,7 @@ bun run ui:install
 bun run ui:dev
 ```
 
-The acceptance harness in [`scripts/acceptance/`](scripts/acceptance/) drives 25 scenarios against a live container. See [ACCEPTANCE.md](ACCEPTANCE.md) for the runbook.
+The acceptance harness in [`scripts/acceptance/`](scripts/acceptance/) drives 26 scenarios against a live container. See [ACCEPTANCE.md](ACCEPTANCE.md) for the runbook.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for branch naming, testing conventions, and PR expectations.
 

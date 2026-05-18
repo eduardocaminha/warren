@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.17] — 2026-05-18
+
+PlanRun ships as a serial dispatch mode on top of the existing single-run
+primitive — projects shipping `.seeds/` can `POST /plan-runs` against a
+seeds plan, and warren walks the plan's children one at a time, gating
+each step on the previous PR merging before the next dispatches.
+
+### Added
+
+- **`feat(plan-runs)`** — serial plan-run dispatch (`warren-fcc9`,
+  plan `pl-a258`). A new dispatch mode on top of the single-run
+  primitive, not a sixth bundled feature: `POST /plan-runs { project,
+  planId, agent, promptTemplate? }` enumerates a seeds plan's children
+  into a `plan_runs` + `plan_run_children` pair and walks them
+  sequentially, spawning one warren run per child with the prompt
+  template substituted (`{seed_id}`) per step. Each child gates on
+  the previous PR merging (or trivially merging when the child run
+  produced no commits — the `reap.empty_push` signal advances past
+  docs-only steps without GitHub polling) before the next dispatches.
+  Children whose seeds are already closed flip to `skipped` without
+  spawning a run, so re-dispatching the same plan id resumes from the
+  next open child. Gated on `project.hasSeeds`; rejected with
+  `ProjectLacksSeedsError` (typed 400) before any side effect when the
+  project has no `.seeds/` directory. Coordinator
+  (`src/plan-runs/coordinator.ts`) returns a 7-shape `AdvanceResult`
+  discriminated union the tick wrapper, the unit tests, and the
+  event-emit seam all narrow against — every transition emits a
+  `plan_run.*` system event on the most-recently-dispatched child run.
+  Boot wiring mirrors `bootScheduler` single-flight: tunable via
+  `WARREN_PLAN_RUN_TICK_MS` (default `10000`), disable with
+  `WARREN_PLAN_RUN_DISABLED=1`. New REST surface: `POST /plan-runs`,
+  `GET /plan-runs`, `GET /plan-runs/:id`, `POST /plan-runs/:id/cancel`,
+  `GET /plan-runs/:id/events`. UI gets three new pages — list, detail
+  (with live polling + cancel), new — plus a top-level Plans nav entry.
+  Acceptance scenario 26
+  (`scripts/acceptance/scenarios/26-plan-run-roundtrip.ts`) covers the
+  round-trip end-to-end against a live warren+burrow stack, including
+  the trivial-merge branch and the resume-on-re-dispatch contract.
+  See SPEC §11.P. (`warren-fcc9`, `pl-a258`)
+
 ## [0.3.16] — 2026-05-17
 
 Plot integration ships as the fifth opt-in bundled feature, plus a preview
