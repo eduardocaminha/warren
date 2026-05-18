@@ -15,6 +15,18 @@
 
 import type { PlotEventType } from "@os-eco/plot-cli";
 
+/**
+ * Compile-time probe (pl-7937 step 1 / risk #1): the PlanRun Phase 2 wiring
+ * (warren-06dc) emits `plan_run_dispatched` on PlanRun creation, which only
+ * exists in `@os-eco/plot-cli` ≥ 0.3.0. Pinning a stale plot-cli would let
+ * the downstream appender compile against a narrower `PlotEventType` union
+ * and silently fail at runtime; this declaration forces a typecheck failure
+ * if the dep regresses.
+ */
+const _plotPlanRunDispatchedProbe: "plan_run_dispatched" extends PlotEventType ? true : never =
+	true;
+void _plotPlanRunDispatchedProbe;
+
 export const HUMANS_ONLY_EVENT_TYPES = [
 	"intent_edited",
 	"status_changed",

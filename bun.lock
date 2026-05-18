@@ -6,7 +6,7 @@
       "name": "@os-eco/warren-cli",
       "dependencies": {
         "@os-eco/burrow-cli": "^0.3.1",
-        "@os-eco/plot-cli": "^0.2.0",
+        "@os-eco/plot-cli": "^0.3.0",
         "chalk": "^5.6.2",
         "commander": "^14.0.3",
         "croner": "^10.0.1",
@@ -106,7 +106,7 @@
 
     "@os-eco/burrow-cli": ["@os-eco/burrow-cli@0.3.1", "", { "dependencies": { "chalk": "^5.6.2", "commander": "^14.0.3", "drizzle-orm": "^0.45.2", "p-queue": "^9.2.0", "pino": "^10.3.1", "pino-pretty": "^13.1.3", "smol-toml": "^1.6.1", "zod": "^4.4.3" }, "bin": { "burrow": "src/cli/main.ts", "bw": "src/cli/main.ts" } }, "sha512-hu4tr3f75IJrn6FiZzyvz47o/i/3Y5EbvYznc63HgrtGdacgB1Q/FQ57u2+XLdftPNBAwJy3uj2z3bG0CSYUow=="],
 
-    "@os-eco/plot-cli": ["@os-eco/plot-cli@0.2.0", "", { "bin": { "plot": "src/index.ts" } }, "sha512-x0DdTszBjAHYPDLxdSVWP8Vs3V7AZ2esnmORIKa82FCNYAYtGqD2CcWknYHCq9jvouD9Gh8LG+1St8xFRJUqEQ=="],
+    "@os-eco/plot-cli": ["@os-eco/plot-cli@0.3.0", "", { "bin": { "plot": "src/index.ts" } }, "sha512-u5HteFqAm8DQrp8kZ0tuVyIRuJQ5F0WZ0zNSIImZnSfWZOHxSFv4UBYnKKDzCFLRhOnvLjxkLSOyN2Ghd2Oo6w=="],
 
     "@pinojs/redact": ["@pinojs/redact@0.4.0", "", {}, "sha512-k2ENnmBugE/rzQfEcdWHcCY+/FM3VLzH9cYEsbdsoqrvzAKRhUZeRNhAZvB8OitQJ1TBed3yqWtdjzS6wJKBwg=="],
 
