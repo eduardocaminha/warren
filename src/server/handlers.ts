@@ -1236,6 +1236,13 @@ function parsePlanRunStateFilter(raw: string | null): PlanRunStateFilter | undef
  *       (ProjectLacksPlotError, warren-c900 / pl-7937 Phase 2). Same 400
  *       envelope; raised before the seeds-CLI fan-out so a non-Plot project
  *       never grows a half-validated plan-run.
+ *
+ *   Gates (2) and (2b) are **stacked, not independent** (warren-909c /
+ *   pl-7937 step 6): seeds is the base, plot is the optional layer on top.
+ *   A project missing .seeds/ is rejected as `project_lacks_seeds` even
+ *   when plot_id is supplied — plot_id never short-circuits the .seeds/
+ *   requirement, and PlanRun-with-plot only lights up when BOTH .seeds/
+ *   AND .plot/ are present.
  *   (3) call showPlan; assert plan.status is in (approved, active, done) and
  *       at least one open child exists (PlanHasNoOpenChildrenError).
  *   (4) resolve agent via repos.agents.resolve with the project-tier fallback

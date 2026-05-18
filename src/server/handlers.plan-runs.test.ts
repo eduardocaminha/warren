@@ -171,6 +171,7 @@ describe("POST /plan-runs", () => {
 	let projectId = "";
 	let seedyProjectId = "";
 	let plottedProjectId = "";
+	let barePlottedProjectId = "";
 
 	beforeEach(async () => {
 		db = await openDatabase({ path: ":memory:" });
@@ -211,6 +212,20 @@ describe("POST /plan-runs", () => {
 			hasPlot: true,
 		});
 		plottedProjectId = plotted.id;
+
+		// Pathological shape used solely to lock in gate-stack ordering
+		// (warren-909c / pl-7937 step 6): hasPlot=true but hasSeeds=false
+		// means the plot-gate WOULD pass while the seeds-gate rejects.
+		// The handler must fire the seeds-gate first so plot_id never
+		// short-circuits the .seeds/ requirement.
+		const barePlotted = await repos.projects.create({
+			gitUrl: "https://github.com/x/bare-plotted.git",
+			localPath: "/tmp/bare-plotted",
+			defaultBranch: "main",
+			hasSeeds: false,
+			hasPlot: true,
+		});
+		barePlottedProjectId = barePlotted.id;
 	});
 
 	afterEach(async () => {
@@ -408,6 +423,41 @@ describe("POST /plan-runs", () => {
 
 		// No row inserted — listActive should be empty for the seedy project.
 		const rows = await repos.planRuns.listByProjectAndState(seedyProjectId);
+		expect(rows).toHaveLength(0);
+	});
+
+	test("stacks seeds-gate ahead of plot-gate: hasSeeds=false + plot_id rejects with project_lacks_seeds", async () => {
+		// warren-909c / pl-7937 step 6: the handler must enforce gates in
+		// order — seeds first, then plot. A project with hasPlot=true but
+		// hasSeeds=false MUST still be rejected as `project_lacks_seeds`
+		// when plot_id is supplied; if the gates were independent (or
+		// reversed) this case would slip through to plot_lacks_seeds /
+		// half-validated state. No sd or appender stubs are needed since
+		// the seeds-gate short-circuits before either is invoked.
+		const sdSpawn = makeSdSpawn([], []);
+		const deps = await depsFor({ repos, sdSpawn });
+		handle = startServer(deps, {
+			transport: { kind: "tcp", hostname: "127.0.0.1", port: 0 },
+			auth: NO_AUTH,
+			logger: silentLogger,
+		});
+
+		const res = await fetch(`${tcpUrl(handle)}/plan-runs`, {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({
+				project: barePlottedProjectId,
+				planId: "pl-x",
+				agent: "claude-code",
+				plotId: "plot_abc",
+			}),
+		});
+		expect(res.status).toBe(400);
+		const body = (await res.json()) as { error: { code: string } };
+		expect(body.error.code).toBe("project_lacks_seeds");
+
+		// No row inserted on either project.
+		const rows = await repos.planRuns.listByProjectAndState(barePlottedProjectId);
 		expect(rows).toHaveLength(0);
 	});
 
