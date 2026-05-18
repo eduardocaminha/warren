@@ -1921,6 +1921,48 @@ need a separate carrier) and was deliberately deferred. Scenario 27
 assert the preservation contract; it previously tailed the file every
 100ms to capture transient writes (removed in `warren-aa63`).
 
+**Commit through reap (warren-343a, 2026-05-18).** Plot state now
+round-trips to origin alongside the agent's workspace edits. After
+`mergePlot` writes the workspace's `.plot/` deltas into the project
+clone, a new `plot_commit` sub-step in `src/runs/reap.ts`
+(`stagePlotForCommit`) replicates `plot-*.events.jsonl` and
+`plot-*.json` files back into the burrow workspace, runs
+`git add -- .plot/`, and — when `git diff --cached --quiet -- .plot/`
+exits non-zero — authors a `chore(warren): plot state` commit under a
+fixed warren bot identity (`-c user.name=warren -c user.email=warren@os-eco.dev`).
+The follow-on `branch_push` carries that commit upstream. Filtering on
+copy: `.index.db*` files are skipped (derived state per the
+snapshot/restore contract above), and only `plot-*.{json,events.jsonl}`
+files are eligible — the SPEC §11.O `.plot/` layout is flat and the
+filter keeps stray dotfiles out of the warren-authored commit. The
+host-side `.plot/` snapshot+restore in `refreshProjectClone`
+(`warren-fdd2`, shape (b)) stays as belt-and-suspenders preservation
+for in-flight host-side writes between dispatch and the next reap.
+Gating: the step is skipped when `project.hasPlot === false`, so
+projects without `.plot/` are byte-identical to the pre-`warren-343a`
+reap. Best-effort like the surrounding sub-steps: a failure emits a
+`reap_failed` event with `step: "plot_commit"` and never fails the
+run. The trivial-merge case (`reap.empty_push` per `warren-f3bb`) no
+longer fires when the agent skipped `git commit` but warren wrote
+`.plot/` entries — the warren-authored commit lifts `commitsAhead`
+above zero. The reap result surface adds a `plotCommitted: boolean`
+and a `reap.plot_committed` event.
+
+*Concurrent children writing to the same Plot.* When two plan-run
+children commit `.plot/` deltas for the same plot id, the
+plan-run-gates-next-child-on-prev-PR-merged rule (§11.P) serialises
+them — child A's PR must merge into the default branch before B's
+spawn refresh sees A's `.plot/` lines, so A's and B's warren-commits
+land in order. For ad-hoc parallel runs against the same project the
+conflict shape is: B's branch was forked from origin before A's PR
+merged, A's PR merges to origin, B's reap eventually pushes a branch
+whose `.plot/<id>.events.jsonl` overlaps A's at the line level. GitHub
+will refuse the merge on conflicting lines. The append-only union
+primitive in `mergePlotEventsFile` is idempotent, so re-running reap
+against B's workspace after refreshing from A's merged origin
+produces a clean superset commit; operators retry the merge by
+re-dispatching B (or re-pushing after a manual refresh).
+
 #### 11.O.Plot.UI Plot-centric UI surface (pl-9d6a, 2026-05-18)
 
 Phase 3 of `warren-d362` shifts warren's web UI from run-centric to

@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`feat(reap)`** — Commit `.plot/` through reap so Plot state
+  round-trips to origin (warren-343a, shape (a), follow-up to
+  warren-fdd2 / pl-d4d6 shape (b)). After `mergePlot` lands the
+  workspace's `.plot/` deltas into the project clone, a new
+  `plot_commit` sub-step replicates `plot-*.{json,events.jsonl}` files
+  back into the burrow workspace, runs `git add -- .plot/`, and —
+  when `git diff --cached --quiet -- .plot/` exits non-zero —
+  authors a `chore(warren): plot state` commit under a fixed warren
+  bot identity (`warren <warren@os-eco.dev>`). The follow-on
+  `branch_push` carries that commit upstream, so on PR merge `.plot/`
+  becomes durable on origin and the next `refreshProjectClone` fetches
+  it back. `.plot/.index.db*` and any non-`plot-*` entries are skipped
+  on copy. The trivial-merge case (`reap.empty_push` per warren-f3bb)
+  no longer fires when the agent skipped `git commit` but warren wrote
+  `.plot/` entries — the warren-authored commit lifts `commitsAhead`
+  above zero. Gating: skipped when `project.hasPlot === false`, so
+  projects without `.plot/` are byte-identical to the pre-change reap.
+  Best-effort like the surrounding sub-steps: a failure emits a
+  `reap_failed` event with `step: "plot_commit"` and never fails the
+  run. The reap result surface adds `plotCommitted: boolean` and a
+  `reap.plot_committed` event. The host-side snapshot/restore in
+  `refreshProjectClone` (warren-fdd2) stays as belt-and-suspenders
+  preservation for in-flight writes between dispatch and the next
+  reap.
+
 - **`feat(registry)`** — Cross-tier inheritance for per-project canopy
   roles (warren-44a3, follow-up to R-03 / pl-fef5). A project-tier role
   can now declare `extends:` (or `mixins:`) pointing at a library or

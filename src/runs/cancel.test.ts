@@ -35,6 +35,7 @@ function reapStub(outcome: RunTerminalState): ReapRunResult {
 		plotEventsAppended: 0,
 		plotsUpdated: 0,
 		plotEventsMirrored: 0,
+		plotCommitted: false,
 		branchPushed: false,
 		commitsAhead: null,
 		prUrl: null,

@@ -234,6 +234,7 @@ export type ReapStep =
 	| "mulch_merge"
 	| "seeds_close"
 	| "plot_merge"
+	| "plot_commit"
 	| "branch_push"
 	| "pr_open"
 	| "preview_launch"
@@ -278,6 +279,19 @@ export interface ReapRunResult {
 	 * is content-dedup'd.
 	 */
 	readonly plotEventsMirrored: number;
+	/**
+	 * True when reap authored a `chore(warren): plot state` commit in the
+	 * workspace before `branch_push` so origin's workspace branch carries
+	 * the `.plot/` deltas (warren-343a, shape (a) commit-through-reap).
+	 * Set when host-side appender writes in `<project>/.plot/` (or merge
+	 * deltas from the burrow workspace) had not yet been committed by the
+	 * agent — reap stages them and authors a warren-identity commit so
+	 * the push isn't empty. False when nothing needed staging (agent had
+	 * already committed everything, project has no `.plot/`, or the merge
+	 * produced no on-disk delta) and false when the commit attempt failed
+	 * (the failure surfaces as a `reap_failed` step=`plot_commit` event).
+	 */
+	readonly plotCommitted: boolean;
 	readonly branchPushed: boolean;
 	/**
 	 * Commits the pushed branch is ahead of its base (warren-f3bb). `null`
@@ -352,6 +366,7 @@ export async function reapRun(input: ReapRunInput): Promise<ReapRunResult> {
 			plotEventsAppended: 0,
 			plotsUpdated: 0,
 			plotEventsMirrored: 0,
+			plotCommitted: false,
 			branchPushed: false,
 			commitsAhead: null,
 			prUrl: run.prUrl,
@@ -406,6 +421,7 @@ export async function reapRun(input: ReapRunInput): Promise<ReapRunResult> {
 	let plotEventsAppended = 0;
 	let plotsUpdated = 0;
 	let plotEventsMirrored = 0;
+	let plotCommitted = false;
 	let branchPushed = false;
 	let commitsAhead: number | null = null;
 	let prUrl: string | null = null;
@@ -470,6 +486,29 @@ export async function reapRun(input: ReapRunInput): Promise<ReapRunResult> {
 			plotEventsMirrored = result.mirrored;
 		} catch (err) {
 			await fail("plot_merge", err);
+		}
+
+		// warren-343a / shape (a) commit-through-reap: replicate the merged
+		// `.plot/` from the project clone into the workspace and author a
+		// `chore(warren): plot state` commit when there's a staged delta the
+		// agent never committed. This is the carrier for host-side appender
+		// writes (defaultPlotAppender, defaultPlanRunPlotAppender,
+		// autoTransitionPlotToDone — see SPEC §11.O) and for any
+		// agent-emitted `.plot/` lines that the agent left uncommitted.
+		// Skipped when the project has no `.plot/`. Best-effort: failures
+		// emit `reap_failed` step=`plot_commit` and do not fail the run.
+		if (project.hasPlot) {
+			try {
+				plotCommitted = await stagePlotForCommit({
+					workspacePath,
+					projectPath: project.localPath,
+					fs,
+					exec,
+					emit,
+				});
+			} catch (err) {
+				await fail("plot_commit", err, join(workspacePath, ".plot"));
+			}
 		}
 
 		try {
@@ -731,6 +770,7 @@ export async function reapRun(input: ReapRunInput): Promise<ReapRunResult> {
 			eventsAppended: plotEventsAppended,
 			plotsUpdated,
 			mirrored: plotEventsMirrored,
+			committed: plotCommitted,
 		},
 		branchPushed,
 		commitsAhead,
@@ -755,6 +795,7 @@ export async function reapRun(input: ReapRunInput): Promise<ReapRunResult> {
 			plotEventsAppended,
 			plotsUpdated,
 			plotEventsMirrored,
+			plotCommitted,
 			branchPushed,
 			commitsAhead,
 			prUrl,
@@ -776,6 +817,7 @@ export async function reapRun(input: ReapRunInput): Promise<ReapRunResult> {
 		plotEventsAppended,
 		plotsUpdated,
 		plotEventsMirrored,
+		plotCommitted,
 		branchPushed,
 		commitsAhead,
 		prUrl,
@@ -1436,6 +1478,111 @@ export function mergePlotJsonFile(existing: string | null, incoming: string): Pl
 		changed: false,
 		conflict: "updated_at matches but contents differ",
 	};
+}
+
+/* ----------------------------------------------------------------------- */
+/* Plot commit-through-reap (warren-343a, shape (a))                         */
+/* ----------------------------------------------------------------------- */
+
+/**
+ * Filenames matching this prefix are gitignored derived state per
+ * ../plot/README.md — the SQLite index Plot rebuilds on demand. Skipping
+ * these on copy mirrors the snapshot/restore wrapper in
+ * src/projects/refresh.ts (mx-239786) and keeps the warren-authored
+ * commit free of churn.
+ */
+const PLOT_INDEX_SKIP_PREFIX = ".index.db";
+
+interface StagePlotForCommitInput {
+	readonly workspacePath: string;
+	readonly projectPath: string;
+	readonly fs: ReapFs;
+	readonly exec: ReapExec;
+	readonly emit: (kind: string, payload: unknown) => Promise<EventRow>;
+}
+
+/**
+ * Replicate every committable `.plot/` file from the project clone into
+ * the burrow workspace, then stage `.plot/` and author a
+ * `chore(warren): plot state` commit when there's a real delta the agent
+ * never committed. Returns true when a warren-identity commit landed.
+ *
+ * The project clone is the union point: by this step `mergePlot` has
+ * already merged the workspace's agent-side `.plot/` writes into the
+ * project clone, and the project clone also carries any host-side
+ * appender writes (`defaultPlotAppender`, `defaultPlanRunPlotAppender`,
+ * `autoTransitionPlotToDone`) that warren wrote at dispatch / plan-run
+ * coordination time. Copying that union back into the workspace gives
+ * `git push` a single canonical view to ship to origin.
+ *
+ * `.plot/.index.db*` files are skipped — derived SQLite state Plot
+ * rebuilds via `plot rebuild-index` (mx-239786). Anything that isn't
+ * `plot-*.json` or `plot-*.events.jsonl` is also skipped: the SPEC §11.O
+ * file layout for `.plot/` is flat and these two extensions cover the
+ * full carrier surface; filtering keeps stray dotfiles out of the warren
+ * commit.
+ *
+ * `git add .plot/` honors a project-level `.gitignore` of `.plot/` — a
+ * project that gitignored the directory has opted out of committing
+ * Plot state, and the staged-changes check below sees no entries.
+ */
+async function stagePlotForCommit(input: StagePlotForCommitInput): Promise<boolean> {
+	const { workspacePath, projectPath, fs, exec, emit } = input;
+	const projectPlotDir = join(projectPath, ".plot");
+	const workspacePlotDir = join(workspacePath, ".plot");
+
+	const entries = await fs.readdir(projectPlotDir);
+	let copied = 0;
+	for (const name of entries) {
+		if (name.startsWith(PLOT_INDEX_SKIP_PREFIX)) continue;
+		if (!name.startsWith("plot-")) continue;
+		if (!name.endsWith(".json") && !name.endsWith(".events.jsonl")) continue;
+		const contents = await fs.readFile(join(projectPlotDir, name));
+		if (contents === null) continue;
+		if (copied === 0) await fs.mkdirp(workspacePlotDir);
+		await fs.writeFile(join(workspacePlotDir, name), contents);
+		copied += 1;
+	}
+	if (copied === 0) return false;
+
+	await exec.run("git", ["add", "--", ".plot/"], {
+		cwd: workspacePath,
+		timeoutMs: 10_000,
+	});
+
+	// `git diff --cached --quiet -- .plot/` exits non-zero when there are
+	// staged changes under .plot/ — the natural primitive for "did the
+	// add actually pick up a delta the agent hadn't already committed".
+	let hasStagedDelta: boolean;
+	try {
+		await exec.run("git", ["diff", "--cached", "--quiet", "--", ".plot/"], {
+			cwd: workspacePath,
+			timeoutMs: 10_000,
+		});
+		hasStagedDelta = false;
+	} catch {
+		hasStagedDelta = true;
+	}
+	if (!hasStagedDelta) return false;
+
+	await exec.run(
+		"git",
+		[
+			"-c",
+			"user.name=warren",
+			"-c",
+			"user.email=warren@os-eco.dev",
+			"commit",
+			"-m",
+			"chore(warren): plot state",
+		],
+		{ cwd: workspacePath, timeoutMs: 10_000 },
+	);
+	await emit("reap.plot_committed", {
+		message: "chore(warren): plot state",
+		filesStaged: copied,
+	});
+	return true;
 }
 
 function readUpdatedAt(body: string): string {
