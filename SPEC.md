@@ -2604,8 +2604,10 @@ escape hatch; the plan-run button is the recommended path once this
 section ships (CHANGELOG to call this out, and the batch button's
 inline help text updated to point at the plan-run alternative).
 
-**Acceptance.** Scenario 30
-(`scripts/acceptance/scenarios/30-plot-plan-run-synthesis.ts`)
+**Acceptance.** Scenario 31
+(`scripts/acceptance/scenarios/31-plot-plan-run-synthesis.ts` —
+slot 30 was claimed by `30-pi-multi-provider-env.ts` / warren-fe96
+before this section landed)
 composes scenarios 25 + 27 + 29 against a real warren+burrow stack:
 
 1. Init a project with both `.plot/` (one Plot, ≥3 `seeds_issue`

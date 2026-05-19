@@ -58,9 +58,19 @@ export type SeedsListEnvelope = z.infer<typeof SeedsListEnvelopeSchema>;
  * time to enumerate child seeds in order) and pass `.passthrough()`
  * everywhere else so seeds can grow new fields without breaking the facade.
  */
+// `title` is optional because `sd plan submit` (seeds-cli 0.4.7+)
+// accepts adoption-only steps that carry `existing_seed` and omit
+// `title` (warren-d519). `sd plan show --json` persists these steps
+// as `{existing_seed: "<id>"}` with no title field — the adopted
+// seed's title is surfaced separately via the envelope's `children[]`
+// detail rows. The plot-plan-run synthesis path (SPEC §11.Q) reads
+// `plan.children` for dispatch and ignores `steps[]`, so accepting
+// the optional shape lets `showPlan` parse synthesized plans without
+// the facade getting in the way.
 const PlanShowStepSchema = z
 	.object({
-		title: z.string(),
+		title: z.string().optional(),
+		existing_seed: z.string().optional(),
 		blocks: z.array(z.number().int().nonnegative()).optional(),
 	})
 	.passthrough();

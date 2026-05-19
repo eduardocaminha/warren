@@ -146,26 +146,35 @@ export async function refreshProjectClone(
 		timeoutMs,
 	});
 
-	// `git checkout <ref>` moves HEAD onto the named ref (creating a
-	// tracking branch when ref is a remote branch name). Without this,
-	// `reset --hard origin/<ref>` would only move whatever branch we
-	// happened to already be on — which on a fresh clone is the default
-	// branch, but on a prior run might be something else entirely.
-	await runGit(spawn, [config.gitBinary, "checkout", "--force", ref], {
-		cwd: localPath,
-		timeoutMs,
-	});
-
-	// Probe `.plot/` BEFORE the reset so the preserve wrapper knows
-	// whether to snapshot — the post-reset features probe runs again
-	// below and is what we return. Decoupling these two probes means
-	// `.plot/` appears+disappears across the reset still get reflected
-	// correctly in the result (e.g. a remote that just added `.plot/`
-	// produces hasPlot=true even though we had nothing to snapshot).
+	// Probe `.plot/` BEFORE the working-tree-touching commands so the
+	// preserve wrapper knows whether to snapshot. Must run before
+	// `git checkout --force` (the next step) because checkout discards
+	// uncommitted modifications to tracked files (warren-af97 / scenario
+	// 31): the host-side Plot appender writes — `plan_run_dispatched` at
+	// POST time, per-child `run_dispatched` from spawnRun, the
+	// auto-`done` status_changed from autoTransitionPlotToDone — all
+	// land in `.plot/<id>.events.jsonl` / `<id>.json` WITHOUT being
+	// committed. If the snapshot/restore wrapper only spans `git reset
+	// --hard` (the warren-fdd2 shape), the preceding `git checkout
+	// --force` has already wiped those appends and the snapshot picks
+	// up the committed state — every host-appender write before the
+	// final spawn vanishes. Moving the probe + the wrapper above
+	// `checkout` is the surgical fix.
 	const hadPlotPreReset = exists(join(localPath, PROJECT_FEATURE_DIRS.plot));
 	const preservePlot = input.preservePlot ?? defaultPreservePlot;
 
 	await preservePlot(localPath, hadPlotPreReset, async () => {
+		// `git checkout <ref>` moves HEAD onto the named ref (creating a
+		// tracking branch when ref is a remote branch name). Without
+		// this, `reset --hard origin/<ref>` would only move whatever
+		// branch we happened to already be on — which on a fresh clone
+		// is the default branch, but on a prior run might be something
+		// else entirely.
+		await runGit(spawn, [config.gitBinary, "checkout", "--force", ref], {
+			cwd: localPath,
+			timeoutMs,
+		});
+
 		// Hard-reset to origin/<ref> so any uncommitted detritus from a
 		// prior run is wiped and the working tree matches what's on the
 		// remote. If `ref` is a SHA or tag, `origin/<ref>` won't resolve;
