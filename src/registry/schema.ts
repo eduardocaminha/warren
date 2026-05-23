@@ -92,12 +92,18 @@ export function readProviderFrontmatter(frontmatter: Readonly<Record<string, unk
 
 /**
  * Resolve the burrow runtime id this canopy agent should dispatch onto.
- * Prefers an explicit `frontmatter.runtime` (set by interactive built-ins
- * like brainstorm/planner that layer a system prompt on top of an
- * existing runtime) and falls back to `agent.name` for the historical
- * name=runtime convention (claude-code / sapling / pi). See warren-ebca.
+ *
+ * Precedence (warren-b802):
+ *   1. `configOverride` — per-project `.warren/config.yaml`
+ *      `interactiveAgents.brainstormRuntime` / `plannerRuntime`
+ *   2. `frontmatter.runtime` — set by interactive built-ins like
+ *      brainstorm/planner that layer a system prompt on top of an
+ *      existing runtime (warren-ebca)
+ *   3. `agent.name` — historical name=runtime convention
+ *      (claude-code / sapling / pi)
  */
-export function readRuntimeId(agent: AgentDefinition): string {
+export function readRuntimeId(agent: AgentDefinition, configOverride?: string): string {
+	if (typeof configOverride === "string" && configOverride.length > 0) return configOverride;
 	const r = agent.frontmatter.runtime;
 	if (typeof r === "string" && r.length > 0) return r;
 	return agent.name;

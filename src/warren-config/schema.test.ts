@@ -3,6 +3,8 @@ import {
 	DEFAULT_AGENT_PAUSE_TIMEOUT_MS,
 	DEFAULT_PREVIEW_MODE,
 	DefaultsConfigSchema,
+	interactiveRuntimeOverride,
+	KNOWN_RUNTIME_IDS,
 	PreviewConfigSchema,
 	PreviewModeSchema,
 	parseDefaultsConfig,
@@ -192,6 +194,109 @@ describe("DefaultsConfigSchema agent block (warren-cd37)", () => {
 				agent: { pauseTimeoutMs: 60_000, unknownField: true },
 			}).success,
 		).toBe(false);
+	});
+});
+
+describe("DefaultsConfigSchema interactiveAgents block (warren-b802)", () => {
+	test("accepts all known runtime ids for brainstormRuntime", () => {
+		for (const id of KNOWN_RUNTIME_IDS) {
+			const parsed = DefaultsConfigSchema.safeParse({
+				interactiveAgents: { brainstormRuntime: id },
+			});
+			expect(parsed.success).toBe(true);
+		}
+	});
+
+	test("accepts all known runtime ids for plannerRuntime", () => {
+		for (const id of KNOWN_RUNTIME_IDS) {
+			const parsed = DefaultsConfigSchema.safeParse({
+				interactiveAgents: { plannerRuntime: id },
+			});
+			expect(parsed.success).toBe(true);
+		}
+	});
+
+	test("accepts both fields together", () => {
+		const parsed = DefaultsConfigSchema.safeParse({
+			interactiveAgents: { brainstormRuntime: "claude-code", plannerRuntime: "sapling" },
+		});
+		expect(parsed.success).toBe(true);
+		if (parsed.success) {
+			expect(parsed.data.interactiveAgents?.brainstormRuntime).toBe("claude-code");
+			expect(parsed.data.interactiveAgents?.plannerRuntime).toBe("sapling");
+		}
+	});
+
+	test("accepts empty block (both fields optional)", () => {
+		const parsed = DefaultsConfigSchema.safeParse({ interactiveAgents: {} });
+		expect(parsed.success).toBe(true);
+	});
+
+	test("leaves interactiveAgents undefined when the block is omitted", () => {
+		const parsed = DefaultsConfigSchema.safeParse({});
+		expect(parsed.success).toBe(true);
+		if (parsed.success) {
+			expect(parsed.data.interactiveAgents).toBeUndefined();
+		}
+	});
+
+	test("rejects unknown runtime ids (typo protection)", () => {
+		expect(
+			DefaultsConfigSchema.safeParse({
+				interactiveAgents: { brainstormRuntime: "openai" },
+			}).success,
+		).toBe(false);
+		expect(
+			DefaultsConfigSchema.safeParse({
+				interactiveAgents: { plannerRuntime: "gpt-4o" },
+			}).success,
+		).toBe(false);
+	});
+
+	test("rejects unknown fields inside interactiveAgents (strict)", () => {
+		expect(
+			DefaultsConfigSchema.safeParse({
+				interactiveAgents: { brainstormRuntime: "pi", extra: true },
+			}).success,
+		).toBe(false);
+	});
+});
+
+describe("interactiveRuntimeOverride (warren-b802)", () => {
+	test("returns undefined when defaults is null/undefined", () => {
+		expect(interactiveRuntimeOverride("brainstorm", null)).toBeUndefined();
+		expect(interactiveRuntimeOverride("planner", undefined)).toBeUndefined();
+	});
+
+	test("returns undefined when interactiveAgents block is absent", () => {
+		expect(interactiveRuntimeOverride("brainstorm", {})).toBeUndefined();
+		expect(interactiveRuntimeOverride("planner", {})).toBeUndefined();
+	});
+
+	test("returns the configured runtime for brainstorm", () => {
+		const defaults = { interactiveAgents: { brainstormRuntime: "claude-code" as const } };
+		expect(interactiveRuntimeOverride("brainstorm", defaults)).toBe("claude-code");
+	});
+
+	test("returns the configured runtime for planner", () => {
+		const defaults = { interactiveAgents: { plannerRuntime: "sapling" as const } };
+		expect(interactiveRuntimeOverride("planner", defaults)).toBe("sapling");
+	});
+
+	test("returns undefined for non-interactive agents", () => {
+		const defaults = {
+			interactiveAgents: {
+				brainstormRuntime: "claude-code" as const,
+				plannerRuntime: "sapling" as const,
+			},
+		};
+		expect(interactiveRuntimeOverride("claude-code", defaults)).toBeUndefined();
+		expect(interactiveRuntimeOverride("pi", defaults)).toBeUndefined();
+	});
+
+	test("returns undefined when the specific field is not set", () => {
+		const defaults = { interactiveAgents: { brainstormRuntime: "pi" as const } };
+		expect(interactiveRuntimeOverride("planner", defaults)).toBeUndefined();
 	});
 });
 

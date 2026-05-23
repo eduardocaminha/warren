@@ -5,6 +5,7 @@ import {
 	parseRenderedAgent,
 	RenderResponseSchema,
 	readProviderFrontmatter,
+	readRuntimeId,
 	withProviderOverrides,
 } from "./schema.ts";
 
@@ -96,6 +97,45 @@ describe("parseRenderedAgent", () => {
 		expect(() => parseRenderedAgent({ success: false })).toThrow(AgentSchemaError);
 		expect(() => parseRenderedAgent(null)).toThrow(AgentSchemaError);
 		expect(() => parseRenderedAgent("not an object")).toThrow(AgentSchemaError);
+	});
+});
+
+describe("readRuntimeId", () => {
+	const INTERACTIVE: AgentDefinition = {
+		name: "brainstorm",
+		version: 1,
+		sections: { system: "hi" },
+		resolvedFrom: ["builtin:brainstorm"],
+		frontmatter: { source: "builtin", runtime: "pi" },
+	};
+
+	const NAME_MATCH: AgentDefinition = {
+		name: "claude-code",
+		version: 1,
+		sections: { system: "hi" },
+		resolvedFrom: ["builtin:claude-code"],
+		frontmatter: { source: "builtin" },
+	};
+
+	test("falls back to agent.name when frontmatter.runtime is absent", () => {
+		expect(readRuntimeId(NAME_MATCH)).toBe("claude-code");
+	});
+
+	test("prefers frontmatter.runtime over agent.name", () => {
+		expect(readRuntimeId(INTERACTIVE)).toBe("pi");
+	});
+
+	test("config override wins over frontmatter.runtime (warren-b802)", () => {
+		expect(readRuntimeId(INTERACTIVE, "claude-code")).toBe("claude-code");
+	});
+
+	test("config override wins over agent.name fallback", () => {
+		expect(readRuntimeId(NAME_MATCH, "sapling")).toBe("sapling");
+	});
+
+	test("ignores empty / undefined config override", () => {
+		expect(readRuntimeId(INTERACTIVE, undefined)).toBe("pi");
+		expect(readRuntimeId(INTERACTIVE, "")).toBe("pi");
 	});
 });
 

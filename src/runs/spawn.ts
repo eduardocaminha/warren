@@ -79,6 +79,7 @@ import {
 	WarrenTriggerKind,
 } from "../seeds-cli/index.ts";
 import type { DefaultsConfig, WarrenConfigCache } from "../warren-config/index.ts";
+import { interactiveRuntimeOverride } from "../warren-config/schema.ts";
 import { composeRunBranch, resolveRunBranchPrefix } from "./branch.ts";
 import { parseBurrowConfig } from "./burrow_config.ts";
 import { RunSpawnError } from "./errors.ts";
@@ -366,6 +367,11 @@ export async function spawnRun(input: SpawnRunInput): Promise<SpawnRunResult> {
 	// already in hand.
 	const plotEnv = composePlotEnv(run.plotId, agent.name, run.id);
 
+	// warren-b802: resolve per-project runtime override for interactive
+	// agents (brainstorm / planner) at dispatch time so the agent row
+	// stays honest as 'builtin'.
+	const runtimeOverride = interactiveRuntimeOverride(agent.name, projectDefaults);
+
 	let burrow: Burrow | null = null;
 	try {
 		burrow = await provisionBurrow(
@@ -373,7 +379,7 @@ export async function spawnRun(input: SpawnRunInput): Promise<SpawnRunResult> {
 			projectAfterRefresh.localPath,
 			projectAfterRefresh.gitUrl,
 			burrowConfig.network,
-			readRuntimeId(agent),
+			readRuntimeId(agent, runtimeOverride),
 			seedResult.files,
 			branch,
 			plotEnv,
@@ -399,7 +405,7 @@ export async function spawnRun(input: SpawnRunInput): Promise<SpawnRunResult> {
 		const burrowRun = await dispatchRun(
 			placement.client,
 			burrow.id,
-			readRuntimeId(agent),
+			readRuntimeId(agent, runtimeOverride),
 			composeDispatchPrompt(agent.sections.system, input.prompt),
 			composeBurrowMetadata(input.metadata, agent.frontmatter),
 		);

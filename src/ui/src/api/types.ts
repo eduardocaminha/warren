@@ -415,6 +415,11 @@ export interface CronTrigger {
 
 export type Trigger = CronTrigger;
 
+export interface InteractiveAgentsConfig {
+	brainstormRuntime?: "claude-code" | "sapling" | "pi";
+	plannerRuntime?: "claude-code" | "sapling" | "pi";
+}
+
 export interface DefaultsConfig {
 	defaultRole?: string;
 	defaultBranch?: string;
@@ -434,6 +439,11 @@ export interface DefaultsConfig {
 	 * verify which prefix is in effect.
 	 */
 	runBranchPrefix?: string;
+	/**
+	 * warren-b802: per-project override of the burrow runtime backing
+	 * the interactive built-in agents (brainstorm / planner).
+	 */
+	interactiveAgents?: InteractiveAgentsConfig;
 }
 
 export interface WarrenConfigResponse {

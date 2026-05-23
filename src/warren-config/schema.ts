@@ -204,6 +204,25 @@ const AgentConfigSchema = z
 
 export type AgentConfig = z.infer<typeof AgentConfigSchema>;
 
+// warren-b802: per-project override of the burrow runtime backing the
+// interactive built-in agents (brainstorm / planner). Without this, an
+// operator must stand up a canopy library just to change the runtime
+// field. Validated against the known burrow runtime ids so a typo
+// surfaces at config-load time, not at burrow boot.
+export const KNOWN_RUNTIME_IDS = ["claude-code", "sapling", "pi"] as const;
+export type RuntimeId = (typeof KNOWN_RUNTIME_IDS)[number];
+
+const RuntimeIdSchema = z.enum(KNOWN_RUNTIME_IDS);
+
+const InteractiveAgentsConfigSchema = z
+	.object({
+		brainstormRuntime: RuntimeIdSchema.optional(),
+		plannerRuntime: RuntimeIdSchema.optional(),
+	})
+	.strict();
+
+export type InteractiveAgentsConfig = z.infer<typeof InteractiveAgentsConfigSchema>;
+
 // warren-fcb7 / SPEC §11.L (path-mode addendum, pl-f4ea): per-project pin of
 // the preview routing mode. Operator-facing surface is `WARREN_PREVIEW_MODE`
 // in env; this top-level field on `.warren/preview.yaml` lets a project
@@ -326,6 +345,11 @@ export const DefaultsConfigSchema = z
 		// inflating the top level. Missing block → use
 		// DEFAULT_AGENT_PAUSE_TIMEOUT_MS at the consumption site.
 		agent: AgentConfigSchema.optional(),
+		// warren-b802: per-project override of the burrow runtime backing
+		// the interactive built-in agents. Resolved at dispatch time so the
+		// agent row stays honest as 'builtin'. Precedence: config override >
+		// agent frontmatter.runtime > agent.name.
+		interactiveAgents: InteractiveAgentsConfigSchema.optional(),
 	})
 	.strict();
 
@@ -388,6 +412,21 @@ export function parsePreviewFile(raw: unknown): ParseResult<PreviewConfig | null
 		return { ok: true, value: parsed.data };
 	}
 	return { ok: false, message: parsed.error.issues.map(formatZodIssue).join("; ") };
+}
+
+/**
+ * Look up the per-agent runtime override from a project's
+ * `interactiveAgents` config block. Returns `undefined` when no
+ * override is configured for the given agent name.
+ */
+export function interactiveRuntimeOverride(
+	agentName: string,
+	defaults: DefaultsConfig | null | undefined,
+): string | undefined {
+	if (defaults?.interactiveAgents === undefined) return undefined;
+	if (agentName === "brainstorm") return defaults.interactiveAgents.brainstormRuntime;
+	if (agentName === "planner") return defaults.interactiveAgents.plannerRuntime;
+	return undefined;
 }
 
 function formatZodIssue(issue: z.core.$ZodIssue): string {
