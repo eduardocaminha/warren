@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.6] — 2026-05-25
+
+Patch release fixing Plot aggregator staleness when new Plots arrive
+via git fetch after the index was built, and guarding the Docker build
+against a missing `.git` directory in the prepare script.
+
+### Fixed
+
+- **`fix(plots)`** — Plot aggregator `queryWithRebuildRetry` now
+  compares index row count against on-disk `*.json` file count via a
+  new `countPlotFilesOnDisk()` method on `AggregatorPlotClient`
+  (warren-d590). When disk has more files than the index knows about
+  (e.g. new Plots fetched via `git fetch` after the index was built),
+  the aggregator triggers `rebuildIndex()` and retries — catching
+  incremental staleness that the existing empty-rows path (warren-ede7)
+  didn't cover. New tests pin the rebuild-on-count-mismatch path and
+  the no-rebuild-on-match path.
+- **`fix(docker)`** — Guard the `prepare` script against a missing
+  `.git` directory (a480429). The `prepare` hook unconditionally copied
+  the pre-commit hook into `.git/hooks/`, which fails in Docker where
+  `.git` is excluded via `.dockerignore`. Now exits 0 when either path
+  is absent.
+
+### Added
+
+- **`feat(plots)`** — Plot for warren client SDK (plot-1ce5ca91).
+  Typed remote client for external agents to interact with warren's
+  HTTP API.
+
 ## [0.5.5] — 2026-05-23
 
 Patch release shipping the Plot sync feature end-to-end: warren can now
