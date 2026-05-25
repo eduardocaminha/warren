@@ -14,3 +14,4 @@
 {"type":"attachment_added","actor":"agent:planner:run_0wz54sybfdr4","at":"2026-05-25T19:50:23.825Z","data":{"id":"att-006","type":"seeds_issue","ref":"warren-a4b9","role":"step"}}
 {"type":"attachment_added","actor":"agent:planner:run_0wz54sybfdr4","at":"2026-05-25T19:50:23.889Z","data":{"id":"att-007","type":"seeds_issue","ref":"warren-8ffc","role":"step"}}
 {"type":"attachment_added","actor":"agent:planner:run_0wz54sybfdr4","at":"2026-05-25T19:50:27.599Z","data":{"id":"att-008","type":"seeds_issue","ref":"pl-e4d7","role":"plan"}}
+{"type":"attachment_added","actor":"user:jayminwest","at":"2026-05-25T20:15:00.000Z","data":{"id":"att-009","type":"seeds_issue","ref":"warren-bdfd","role":"step"}}

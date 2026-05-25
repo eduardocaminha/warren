@@ -63,6 +63,14 @@
       "ref": "pl-e4d7",
       "role": "plan",
       "type": "seeds_issue"
+    },
+    {
+      "added_at": "2026-05-25T20:15:00.000Z",
+      "added_by": "user:jayminwest",
+      "id": "att-009",
+      "ref": "warren-bdfd",
+      "role": "step",
+      "type": "seeds_issue"
     }
   ],
   "created_at": "2026-05-24T21:14:33.764Z",
@@ -80,5 +88,5 @@
   "name": "Warren Client SDK — typed remote client for external agents",
   "schema_version": 1,
   "status": "ready",
-  "updated_at": "2026-05-25T19:50:27.599Z"
+  "updated_at": "2026-05-25T20:15:00.000Z"
 }
