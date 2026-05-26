@@ -93,6 +93,7 @@ import {
 } from "../preview/launch.ts";
 import type { PreviewPortAllocator } from "../preview/port-allocator.ts";
 import { parseGitHubUrl } from "../projects/url.ts";
+import { readAutoPlanRunAgent } from "../registry/schema.ts";
 import { DEFAULT_PREVIEW_MODE, type ServerPreviewConfig } from "../warren-config/index.ts";
 import type { RunEventBroker } from "./events.ts";
 import {
@@ -613,7 +614,7 @@ export async function reapRun(input: ReapRunInput): Promise<ReapRunResult> {
 					const result = await input.repos.planRuns.create({
 						planId,
 						projectId: project.id,
-						agentName: run.agentName,
+						agentName: resolveAutoPlanRunAgent(run),
 						children: children.map((seedId, i) => ({ seq: i + 1, seedId })),
 						trigger: "auto_plan_run",
 						ref: project.defaultBranch,
@@ -1837,6 +1838,18 @@ function hasAutoPlanRunFrontmatter(run: { renderedAgentJson: unknown }): boolean
 	const fm = (json as Record<string, unknown>).frontmatter;
 	if (fm === null || typeof fm !== "object" || Array.isArray(fm)) return false;
 	return (fm as Record<string, unknown>).auto_plan_run === true;
+}
+
+function resolveAutoPlanRunAgent(run: { renderedAgentJson: unknown; agentName: string }): string {
+	const json = run.renderedAgentJson;
+	if (json !== null && typeof json === "object" && !Array.isArray(json)) {
+		const fm = (json as Record<string, unknown>).frontmatter;
+		if (fm !== null && typeof fm === "object" && !Array.isArray(fm)) {
+			const override = readAutoPlanRunAgent(fm as Record<string, unknown>);
+			if (override !== undefined) return override;
+		}
+	}
+	return run.agentName;
 }
 
 function parsePlanIds(body: string): Set<string> {

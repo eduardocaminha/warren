@@ -78,6 +78,13 @@ export interface AgentDefinition {
  *              plan-run for each. Enables the patrol agent pattern:
  *              cron fires a scan agent, the agent files a plan, warren
  *              auto-executes it.
+ *   auto_plan_run_agent — string (warren-65b2). When set, the auto-
+ *              dispatched plan-run uses this agent name instead of
+ *              inheriting the parent run's agent name. Prevents
+ *              triage-only agents (bugwatch, nightwatch) from
+ *              propagating their system prompt to child runs that
+ *              need to write code. Falls back to the parent run's
+ *              agentName when unset.
  *
  * Both stay in the open `frontmatter` bag (no schema rev) so a canopy
  * author can set them inline. `POST /runs` accepts the same two fields
@@ -183,6 +190,18 @@ export function validateAgentDefinition(def: AgentDefinition): void {
 			});
 		}
 	}
+}
+
+/**
+ * Read `auto_plan_run_agent` from agent frontmatter (warren-65b2).
+ * Returns the override agent name, or `undefined` when unset.
+ */
+export function readAutoPlanRunAgent(
+	frontmatter: Readonly<Record<string, unknown>>,
+): string | undefined {
+	const v = frontmatter.auto_plan_run_agent;
+	if (typeof v === "string" && v.length > 0) return v;
+	return undefined;
 }
 
 function formatZodIssue(issue: z.core.$ZodIssue): string {

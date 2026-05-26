@@ -100,5 +100,6 @@ export const BUGWATCH_BUILTIN: AgentDefinition = {
 		tags: ["agent"],
 		runtime: "pi",
 		auto_plan_run: true,
+		auto_plan_run_agent: "pi",
 	},
 };

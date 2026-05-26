@@ -2366,6 +2366,36 @@ describe("auto_plan_run (warren-a32a)", () => {
 		}
 	});
 
+	test("uses auto_plan_run_agent override instead of parent agent name (warren-65b2)", async () => {
+		const ctx = await setupAutoPlanRun({
+			frontmatter: { auto_plan_run: true, auto_plan_run_agent: "pi" },
+		});
+		try {
+			const f = fakeFs({
+				"/data/projects/x/y/.seeds/issues.jsonl": "",
+				"/data/projects/x/y/.seeds/plans.jsonl": "",
+				"/data/burrow/ws/.seeds/plans.jsonl":
+					'{"id":"pl-new1","status":"approved","children":["warren-c1","warren-c2"]}\n',
+			});
+			const e = fakeExec({ stagedDelta: true });
+
+			const result = await reapRun({
+				runId: ctx.runId,
+				outcome: "succeeded",
+				repos: ctx.repos,
+				burrowClientPool: await makePool(fakeBurrowClient(makeBurrow()), ctx.repos),
+				fs: f.fs,
+				exec: e.exec,
+			});
+
+			expect(result.autoPlanRunCreated).toBe(true);
+			const planRun = await ctx.repos.planRuns.require(result.autoPlanRunId as string);
+			expect(planRun.agentName).toBe("pi");
+		} finally {
+			await ctx.db.close();
+		}
+	});
+
 	test("does not dispatch when agent lacks auto_plan_run frontmatter", async () => {
 		const ctx = await setupAutoPlanRun({ frontmatter: {} });
 		try {
