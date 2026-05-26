@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.8] — 2026-05-26
+
+Patch release adding a bulk "Sync all" button to the /projects page and
+a README update with the demo video link.
+
+### Added
+
+- **`feat(ui)`** — "Sync all" button on `/projects` page reuses
+  `RefreshProjectsCTA` to fan out `projectsApi.refresh()` across all
+  registered repos in parallel (warren-f1f3).
+
+### Docs
+
+- **`docs(readme)`** — Added demo video link to README.
+
+### Chores
+
+- **`chore(triggers)`** — Shifted bugwatch cron to 5 AM PT to avoid
+  overlap with the seeds nightwatch window.
+
 ## [0.6.7] — 2026-05-26
 
 Patch release with two small follow-ups from the 2026-05-26 nightwatch
