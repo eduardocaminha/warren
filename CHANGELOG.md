@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.3] — 2026-05-25
+
+Patch release fixing auto_plan_run agent name inheritance — triage
+agents (bugwatch, nightwatch) no longer propagate their "do not write
+code" system prompt to the plan-run children that need to implement
+fixes.
+
+### Added
+
+- **`feat(registry)`** — `auto_plan_run_agent` frontmatter field
+  (warren-65b2). When set on an agent, the auto-dispatched plan-run
+  uses this agent name instead of inheriting the parent run's agent.
+  Falls back to the parent's `agentName` when unset (backward-
+  compatible). New `readAutoPlanRunAgent()` reader in
+  `src/registry/schema.ts`.
+
+### Fixed
+
+- **`fix(runs)`** — auto_plan_run children no longer inherit the
+  parent triage agent name (warren-65b2). `reapRun` now calls
+  `resolveAutoPlanRunAgent()` which reads `auto_plan_run_agent` from
+  the rendered agent's frontmatter before falling back to
+  `run.agentName`. Both `bugwatch` and `nightwatch` built-ins set
+  `auto_plan_run_agent: "pi"` so child runs boot with a coding agent
+  prompt instead of the triage prompt.
+
 ## [0.6.2] — 2026-05-25
 
 Patch release shipping the **bugwatch** built-in agent — a bug triage
