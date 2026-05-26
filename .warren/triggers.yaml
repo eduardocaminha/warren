@@ -28,4 +28,13 @@
 #   prompt: |
 #     Run the housekeeping checklist and file seeds for anything off.
 
-[]
+- id: nightwatch-patrol
+  kind: cron
+  cron: '0 2 * * *'
+  seed: warren-7602
+  role: nightwatch
+  timezone: America/Los_Angeles
+  prompt: |
+    Scan this repo for quality issues. Follow your procedure exactly.
+    Today's date is {{date}}. If you find issues, file a plan. If the
+    codebase is clean, report clean and exit.
