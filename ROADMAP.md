@@ -1642,3 +1642,83 @@ R-09 is repromoted and R-12 through R-18 are slotted in.
     YAML reorg, and a PR-close → teardown webhook stay as sibling
     follow-ups under `pl-2c59` (PR-close webhook design locked in
     SPEC §11.N; implementation waits on the webhook receiver).
+
+---
+
+## R-20 — Colonies (project groups)
+Status: [proposed]
+Depends on: —
+Unlocks: cross-project scheduling policy, aggregate run analytics, colony-level
+agents (meta-watch), coordinated dependency propagation
+
+**Problem.** Warren treats every project as an island. Scheduling, run history,
+and agent dispatch are all per-project. But real ecosystems (e.g. os-eco's eight
+repos) share conventions, have intertwined APIs, and coordinate releases. Today
+cross-project concerns require manual work — hand-staggering cron times across
+repos, eyeballing run failures across separate project views, filing cross-repo
+seeds by hand. There's no first-class concept for "these projects are related
+and should be managed as a unit."
+
+**Sketch.** A colony is a named group of warren projects with shared policy.
+
+Data model:
+
+    colonies (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      created_at TEXT NOT NULL
+    )
+
+    colony_members (
+      colony_id TEXT NOT NULL,    -- FK colonies(id) ON DELETE CASCADE
+      project_id TEXT NOT NULL,   -- FK projects(id) ON DELETE CASCADE
+      PRIMARY KEY (colony_id, project_id)
+    )
+
+    colony_config (
+      colony_id TEXT PRIMARY KEY, -- FK colonies(id) ON DELETE CASCADE
+      config JSON NOT NULL        -- scheduling policy, concurrency limits, shared paths
+    )
+
+Colony-level capabilities, roughly ordered by value:
+
+1. **Shared scheduling policy.** Instead of hand-writing per-repo cron times,
+   declare colony-level intent: "nightwatch nightly, 1hr stagger, starting
+   midnight." Warren computes per-project slots automatically. Adding a new
+   member auto-slots it into the next available window.
+
+2. **Concurrency limits.** "Max 2 concurrent runs across this colony." Warren
+   queues and drains instead of the operator hand-tuning stagger gaps. Replaces
+   the implicit resource management that staggered cron times provide today.
+
+3. **Aggregate run view.** Colony dashboard in the UI: rolled-up run history,
+   total cost, success/failure rates, per-member health. The cross-project
+   activity feed (R-14) becomes colony-scoped.
+
+4. **Colony-level agents.** An agent that runs against the colony, not a single
+   project. Sees aggregate run history across all members. Natural home for
+   cross-project analysis (e.g. "mulch is failing across 4/5 members").
+
+5. **Propagation rules.** Colony metadata captures dependency relationships
+   between members. "When burrow bumps a major version, auto-file upgrade seeds
+   in all colony members that import @os-eco/burrow." Dependency graph as colony
+   config, not tribal knowledge.
+
+6. **Shared mulch domain.** A colony can designate a shared expertise path.
+   Conventions learned in one member automatically prime agents working in
+   another. Formalizes what the root `.mulch/` does informally today.
+
+**Open questions.**
+- Colony creation UX — UI-only, or also a `warren colony create <name>` CLI
+  command? Lean both for parity with `warren add-project`.
+- Whether colony-level triggers live in a `colony_triggers` table or reuse the
+  existing per-project `triggers` table with a colony expansion step. Lean
+  expansion: colony config declares the template, warren materializes per-project
+  trigger rows so the existing scheduler tick works unchanged.
+- Naming — "colony" fits the warren/burrow metaphor. Alternatives considered:
+  "organization" (overloaded), "group" (generic), "grove" (tree metaphor).
+- Whether a project can belong to multiple colonies. Lean yes — a project could
+  be in both "os-eco" and "high-priority" colonies with different policies.
+- Colony-level seeds vs. the existing root `.seeds/` convention. Probably keep
+  root `.seeds/` as the git-tracked source and let the colony view surface them
+  in the UI.
