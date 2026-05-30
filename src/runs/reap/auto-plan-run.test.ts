@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import type { SeedsCliDeps } from "../../seeds-cli/index.ts";
 import { reapRun } from "./index.ts";
 import {
 	createRepos,
@@ -372,6 +373,119 @@ describe("auto_plan_run (warren-a32a)", () => {
 			expect(planRun.plotId).toBe("plot-abc123");
 		} finally {
 			await db.close();
+		}
+	});
+
+	// warren-41d5: child-seed validation on the auto path mirrors the
+	// manual POST /plan-runs handler. `seedsCli.spawn` answers `sd show
+	// <id> --json`; "missing" resolves to a `SeedNotFoundError` (exit 1,
+	// "Issue not found"), "closed"/"open" to a valid envelope.
+	function fakeSeedsCli(statuses: Record<string, "open" | "closed" | "missing">): SeedsCliDeps {
+		return {
+			sdBinary: "sd",
+			spawn: async (cmd) => {
+				const seedId = cmd[2];
+				const status = seedId !== undefined ? statuses[seedId] : undefined;
+				if (status === undefined || status === "missing") {
+					return { stdout: "", stderr: `Issue not found: ${seedId}`, exitCode: 1 };
+				}
+				return {
+					stdout: JSON.stringify({ success: true, issue: { id: seedId, status } }),
+					stderr: "",
+					exitCode: 0,
+				};
+			},
+		};
+	}
+
+	test("dispatches when seedsCli is wired and every child seed resolves", async () => {
+		const ctx = await setupAutoPlanRun();
+		try {
+			const f = fakeFs({
+				"/data/projects/x/y/.seeds/issues.jsonl": "",
+				"/data/projects/x/y/.seeds/plans.jsonl": "",
+				"/data/burrow/ws/.seeds/plans.jsonl":
+					'{"id":"pl-new1","status":"approved","children":["warren-c1","warren-c2"]}\n',
+			});
+			const e = fakeExec({ stagedDelta: true });
+
+			const result = await reapRun({
+				runId: ctx.runId,
+				outcome: "succeeded",
+				repos: ctx.repos,
+				burrowClientPool: await makePool(fakeBurrowClient(makeBurrow()), ctx.repos),
+				fs: f.fs,
+				exec: e.exec,
+				seedsCli: fakeSeedsCli({ "warren-c1": "open", "warren-c2": "closed" }),
+			});
+
+			expect(result.autoPlanRunCreated).toBe(true);
+			expect(result.autoPlanRunPlanId).toBe("pl-new1");
+		} finally {
+			await ctx.db.close();
+		}
+	});
+
+	test("skips dispatch and emits auto_plan_run_skipped when a child seed is missing", async () => {
+		const ctx = await setupAutoPlanRun();
+		try {
+			const f = fakeFs({
+				"/data/projects/x/y/.seeds/issues.jsonl": "",
+				"/data/projects/x/y/.seeds/plans.jsonl": "",
+				"/data/burrow/ws/.seeds/plans.jsonl":
+					'{"id":"pl-new1","status":"approved","children":["warren-c1","warren-gone"]}\n',
+			});
+			const e = fakeExec({ stagedDelta: true });
+
+			const result = await reapRun({
+				runId: ctx.runId,
+				outcome: "succeeded",
+				repos: ctx.repos,
+				burrowClientPool: await makePool(fakeBurrowClient(makeBurrow()), ctx.repos),
+				fs: f.fs,
+				exec: e.exec,
+				seedsCli: fakeSeedsCli({ "warren-c1": "open", "warren-gone": "missing" }),
+			});
+
+			expect(result.autoPlanRunCreated).toBe(false);
+			expect(result.autoPlanRunId).toBeNull();
+			const events = await ctx.repos.events.listByRun(ctx.runId);
+			const skipped = events.find((ev) => ev.kind === "auto_plan_run_skipped");
+			expect(skipped).toBeDefined();
+			expect((skipped?.payloadJson as { reason: string }).reason).toBe("missing_child_seeds");
+			expect((skipped?.payloadJson as { missing: string[] }).missing).toEqual(["warren-gone"]);
+		} finally {
+			await ctx.db.close();
+		}
+	});
+
+	test("skips dispatch with all_children_closed when every child seed is closed", async () => {
+		const ctx = await setupAutoPlanRun();
+		try {
+			const f = fakeFs({
+				"/data/projects/x/y/.seeds/issues.jsonl": "",
+				"/data/projects/x/y/.seeds/plans.jsonl": "",
+				"/data/burrow/ws/.seeds/plans.jsonl":
+					'{"id":"pl-new1","status":"approved","children":["warren-c1","warren-c2"]}\n',
+			});
+			const e = fakeExec({ stagedDelta: true });
+
+			const result = await reapRun({
+				runId: ctx.runId,
+				outcome: "succeeded",
+				repos: ctx.repos,
+				burrowClientPool: await makePool(fakeBurrowClient(makeBurrow()), ctx.repos),
+				fs: f.fs,
+				exec: e.exec,
+				seedsCli: fakeSeedsCli({ "warren-c1": "closed", "warren-c2": "closed" }),
+			});
+
+			expect(result.autoPlanRunCreated).toBe(false);
+			const events = await ctx.repos.events.listByRun(ctx.runId);
+			const skipped = events.find((ev) => ev.kind === "auto_plan_run_skipped");
+			expect((skipped?.payloadJson as { reason: string }).reason).toBe("all_children_closed");
+		} finally {
+			await ctx.db.close();
 		}
 	});
 });

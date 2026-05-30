@@ -202,6 +202,11 @@ export async function bootServer(opts: BootServerOptions = {}): Promise<WarrenSe
 	const previewEvictionConfig = loadPreviewEvictionConfigFromEnv(env);
 	const workspaceGcConfig = loadWorkspaceGcConfigFromEnv(env);
 
+	// Seeds-CLI seam shared by the bridge reap path (warren-41d5 auto_plan_run
+	// child-seed validation) and the plan-run coordinator below.
+	const schedulerConfig = loadTriggerSchedulerConfigFromEnv(env);
+	const seedsCli = { sdBinary: schedulerConfig.sdBinary, spawn: defaultSpawn };
+
 	const bridgesBoot = await bootBridges({
 		repos,
 		broker,
@@ -211,6 +216,7 @@ export async function bootServer(opts: BootServerOptions = {}): Promise<WarrenSe
 		warrenConfigs,
 		portAllocator,
 		previewLaunchConfig,
+		seedsCli,
 	});
 	if (bridgesBoot.resumed.length > 0) {
 		logger.info(
@@ -265,7 +271,6 @@ export async function bootServer(opts: BootServerOptions = {}): Promise<WarrenSe
 		);
 	}
 
-	const schedulerConfig = loadTriggerSchedulerConfigFromEnv(env);
 	const scheduler = bootScheduler({
 		repos,
 		burrowClientPool,
@@ -292,12 +297,11 @@ export async function bootServer(opts: BootServerOptions = {}): Promise<WarrenSe
 	// shape as bootScheduler so operators reading logs see identical
 	// lifecycle semantics.
 	const planRunCoordinatorConfig = loadPlanRunCoordinatorConfigFromEnv(env);
-	const planRunSeedsCli = { sdBinary: schedulerConfig.sdBinary, spawn: defaultSpawn };
 	const planRunCoordinator = bootPlanRunCoordinator({
 		repos,
 		showSeed: async (projectId, seedId) => {
 			const project = await repos.projects.require(projectId);
-			return showSeed(planRunSeedsCli, project.localPath, seedId);
+			return showSeed(seedsCli, project.localPath, seedId);
 		},
 		checkPrMerged: createPrMergeChecker({ token: autoOpenPr.token }),
 		spawn: createPlanRunSpawn({
@@ -307,7 +311,7 @@ export async function bootServer(opts: BootServerOptions = {}): Promise<WarrenSe
 			warrenConfigs,
 			projectsConfig,
 			projectSpawn: defaultSpawn,
-			seedsCli: planRunSeedsCli,
+			seedsCli,
 			...(runBranchPrefixDefault !== undefined ? { runBranchPrefixDefault } : {}),
 			...(opts.now !== undefined ? { now: opts.now } : {}),
 		}),

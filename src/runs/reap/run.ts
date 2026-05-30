@@ -235,7 +235,6 @@ export async function reapRun(input: ReapRunInput): Promise<ReapRunResult> {
 			}
 		}
 
-		// warren-a32a: auto-dispatch plan-runs for plans the agent created.
 		const autoDispatch = await dispatchAutoPlanRuns({
 			run,
 			project,
@@ -247,6 +246,7 @@ export async function reapRun(input: ReapRunInput): Promise<ReapRunResult> {
 			},
 			emit,
 			fail: (step, err) => fail(step, err),
+			...(input.seedsCli !== undefined ? { seedsCli: input.seedsCli } : {}),
 		});
 		autoPlanRunCreated = autoDispatch.created;
 		autoPlanRunId = autoDispatch.id;

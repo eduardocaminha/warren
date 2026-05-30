@@ -7,6 +7,7 @@ import type {
 	PreviewLaunchConfig,
 } from "../../preview/launch/index.ts";
 import type { PreviewPortAllocator } from "../../preview/port-allocator.ts";
+import type { SeedsCliDeps } from "../../seeds-cli/index.ts";
 import type { ServerPreviewConfig } from "../../warren-config/index.ts";
 import type { RunEventBroker } from "../events.ts";
 import type { AutoOpenPrConfig, OpenPullRequestInput, OpenPullRequestResult } from "../pr.ts";
@@ -120,6 +121,16 @@ export interface ReapRunInput {
 	 * `annotatePrPreview`.
 	 */
 	readonly annotatePrPreview?: (input: AnnotatePrPreviewInput) => Promise<AnnotatePrPreviewResult>;
+	/**
+	 * Optional seeds-CLI seam (warren-41d5). Forwarded to the auto_plan_run
+	 * sub-step so reap validates a new plan's child seeds (via `showSeed`)
+	 * before dispatching a plan-run — mirroring the manual `POST /plan-runs`
+	 * handler. A plan referencing seeds that don't exist on the default
+	 * branch is skipped with an `auto_plan_run_skipped` event instead of
+	 * wedging the coordinator on the first unresolvable child. Omit (unit
+	 * tests) ⇒ no validation, behavior unchanged.
+	 */
+	readonly seedsCli?: SeedsCliDeps;
 }
 
 export interface ReapStepError {

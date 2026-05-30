@@ -58,6 +58,7 @@ import {
 	type RunEventBroker,
 	reapRun,
 } from "../runs/index.ts";
+import type { SeedsCliDeps } from "../seeds-cli/index.ts";
 import type { WarrenConfigCache } from "../warren-config/index.ts";
 import { defaultSleep, reconcileLostBurrowRun, runWithReconnect } from "./bridge-reconnect.ts";
 import type { BridgeRegistry } from "./types.ts";
@@ -145,6 +146,13 @@ export interface CreateBridgeRegistryInput {
 	 * wired the proxy yet — the launch still runs but no URL is published.
 	 */
 	readonly previewLaunchConfig?: PreviewLaunchConfig;
+	/**
+	 * Seeds-CLI seam (warren-41d5). Threaded into every bridge's inline
+	 * reap call so the auto_plan_run sub-step validates a new plan's child
+	 * seeds (via `showSeed`) before dispatching a plan-run, mirroring the
+	 * manual `POST /plan-runs` handler. Omit to skip validation (tests).
+	 */
+	readonly seedsCli?: SeedsCliDeps;
 }
 
 export function createBridgeRegistry(input: CreateBridgeRegistryInput): BridgeRegistry {
@@ -178,6 +186,7 @@ export function createBridgeRegistry(input: CreateBridgeRegistryInput): BridgeRe
 			...(input.previewLaunchConfig !== undefined
 				? { previewLaunchConfig: input.previewLaunchConfig }
 				: {}),
+			...(input.seedsCli !== undefined ? { seedsCli: input.seedsCli } : {}),
 		});
 		const entry: BridgeEntry = { burrowRunId, abort, done };
 		live.set(runId, entry);

@@ -23,6 +23,7 @@ import type {
 	RunEventBroker,
 } from "../runs/index.ts";
 import type { PrTemplateOverrides } from "../runs/pr-template.ts";
+import type { SeedsCliDeps } from "../seeds-cli/index.ts";
 import type { ServerPreviewConfig, WarrenConfigCache } from "../warren-config/index.ts";
 
 export const TERMINAL_RUN_STATES: ReadonlySet<RunState> = new Set([
@@ -49,6 +50,12 @@ export interface RunWithReconnectInput {
 	readonly warrenConfigs?: WarrenConfigCache;
 	readonly portAllocator?: PreviewPortAllocator;
 	readonly previewLaunchConfig?: PreviewLaunchConfig;
+	/**
+	 * Optional seeds-CLI seam (warren-41d5). Forwarded to the inline reap
+	 * call so the auto_plan_run sub-step validates a new plan's child seeds
+	 * before dispatching a plan-run.
+	 */
+	readonly seedsCli?: SeedsCliDeps;
 }
 
 /**
@@ -149,6 +156,7 @@ export async function runWithReconnect(
 						? { previewLaunchConfig: input.previewLaunchConfig }
 						: {}),
 					...(prTemplate !== undefined ? { prTemplate } : {}),
+					...(input.seedsCli !== undefined ? { seedsCli: input.seedsCli } : {}),
 				});
 			} catch (err) {
 				input.logger?.error?.(

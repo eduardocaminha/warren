@@ -36,9 +36,11 @@ import {
 	spawnRun,
 	tailRunEvents,
 } from "../../runs/index.ts";
+import type { SeedsCliDeps } from "../../seeds-cli/index.ts";
+import { loadTriggerSchedulerConfigFromEnv } from "../../triggers/index.ts";
 import { createWarrenConfigCache, type WarrenConfigCache } from "../../warren-config/index.ts";
 import type { CliContext } from "../output.ts";
-import { formatError, writeJsonLine } from "../output.ts";
+import { defaultSpawn, formatError, writeJsonLine } from "../output.ts";
 
 export interface RunArgs {
 	readonly agent: string;
@@ -97,6 +99,15 @@ export interface RunDeps {
 	 * default).
 	 */
 	readonly runBranchPrefixDefault?: string | null;
+	/**
+	 * Seeds-CLI seam (warren-41d5). Forwarded to reap so the auto_plan_run
+	 * sub-step validates a new plan's child seeds before dispatching a
+	 * plan-run. Defaults to `{ sdBinary: WARREN_SD_BINARY, spawn:
+	 * defaultSpawn }` so the CLI matches the HTTP server; tests inject a
+	 * stub (or rely on the default, since the one-shot run rarely creates a
+	 * plan).
+	 */
+	readonly seedsCli?: SeedsCliDeps;
 }
 
 export interface RunResult {
@@ -127,6 +138,10 @@ export async function runRun(
 			: (deps.runBranchPrefixDefault ?? loadRunBranchPrefixFromEnv());
 	const fetchBurrowRunState =
 		deps.fetchBurrowRunState ?? defaultFetchBurrowRunState(deps.burrowClientPool);
+	const seedsCli: SeedsCliDeps = deps.seedsCli ?? {
+		sdBinary: loadTriggerSchedulerConfigFromEnv().sdBinary,
+		spawn: defaultSpawn,
+	};
 
 	let spawnResult: SpawnRunResult;
 	try {
@@ -222,6 +237,7 @@ export async function runRun(
 			burrowClientPool: deps.burrowClientPool,
 			broker,
 			autoOpenPr,
+			seedsCli,
 			...(context.now !== undefined ? { now: context.now } : {}),
 		});
 		finalState = reaped.state;
