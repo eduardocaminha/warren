@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.10] — 2026-06-03
+
+Dedupe duplicate `POST /runs` deliveries so a single logical dispatch
+spawns at most one run.
+
+### Fixed
+
+- **`POST /runs` idempotency** — duplicate deliveries of one logical
+  dispatch (proxy/LB replay, scheduler double-fire, client re-retry of a
+  timed-out POST) no longer spawn a second run, which would silently
+  ~2x agent spend with a fresh burrow + agent. When an `Idempotency-Key`
+  header is present and a store is wired, the spawn routes through an
+  in-memory idempotency window keyed on `(projectId, key)`: the first
+  request runs the real dispatch and caches its 201 body; duplicates
+  within the TTL replay that body. Concurrent duplicates await the same
+  in-flight dispatch promise rather than racing it, and a failed dispatch
+  evicts the entry so the next retry can re-spawn. Requests with no
+  `Idempotency-Key` preserve the prior always-spawn behavior
+  (warren-d525).
+
 ## [0.7.9] — 2026-06-03
 
 Nightwatch patrol (pl-d6cd): comment-only sweep repointing stale
