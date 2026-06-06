@@ -78,7 +78,7 @@
 	"dependencies": {
 		"@os-eco/burrow-cli": "^0.3.6",
 		"@os-eco/plot-cli": "^0.4.0",
-		"commander": "^14.0.3",
+		"commander": "^15.0.0",
 		"croner": "^10.0.1",
 		"drizzle-orm": "^0.45.2",
 		"js-yaml": "^4.1.1",
