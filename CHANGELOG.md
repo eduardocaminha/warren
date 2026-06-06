@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.1] — 2026-06-06
+
+Token analytics end-to-end (pl-d1a2), the Leveret conversation loop
+closed out in the UI (create → message → send-off → re-wake), and
+cost-appropriate model tiers for the built-in agents.
+
+### Added
+
+- **Token analytics** — `buildRunMetrics` gained a four-kind
+  `TokenBreakdown` (`input` / `output` / `cacheRead` / `cacheWrite` +
+  `total`) on totals and every group bucket, plus tokens-over-time
+  daily series: an overall per-kind series and per-model /
+  per-provider series with server-side top-5 folding into a new
+  `__other__` sentinel (kept distinct from `__none__`). Exposed as a
+  structured `tokens` section on `GET /analytics/runs` (additive;
+  respects the existing `from` / `to` / `projectId` filters) and
+  mirrored into the UI api layer. The Run Analytics page renders it as
+  token KPI cards (total, input/output split, cache-read share),
+  per-model / per-provider token tables with share-of-total and
+  cost-per-1M columns, and a stacked-area TokenConsumption chart
+  toggleable between by-kind / by-model / by-provider, with standard
+  empty/sparse-window states.
+- **Conversation re-wake surface** — `POST /conversations/:id/re-wake`
+  exposes the existing `rewakeConversation()` path over HTTP;
+  `conversationsApi.create` / `sendOff` / `rewake` land in the UI api
+  layer; ConversationDetail gains a top-bar "Re-wake" button gated on
+  active conversation + terminal anchoring run; and a
+  NewConversationDialog (project select, plot attach/auto-create,
+  title) hangs off the Leveret overseer page. The IntentPane "Send to
+  planner" stub is now the real send-off mutation. Acceptance
+  scenario 33 extends to the full create → message → send-off →
+  re-wake loop.
+- **Built-in agent model tiers** — each built-in agent pins to a
+  cost-appropriate tier instead of defaulting to Opus:
+  planner/nightwatch/leveret on the opus tier, claude-code/pi/sapling/
+  bugwatch/pr-fixer on the sonnet tier. Model identifiers live solely
+  in `src/registry/builtins/model-tiers.ts` and are deploy-time
+  overridable via `WARREN_MODEL_OPUS` / `WARREN_MODEL_SONNET` (+
+  `_PROVIDER` variants), so a model bump needs no code change or image
+  rebuild.
+
 ## [0.8.0] — 2026-06-06
 
 Leveret v1: an opt-in conversational front door for shaping a Plot
