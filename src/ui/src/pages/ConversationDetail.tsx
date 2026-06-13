@@ -6,6 +6,7 @@ import { RUN_TERMINAL_STATES } from "@/api/types.ts";
 import type { ConversationRow, EditPlotIntentInput, PlotEnvelope, PlotStatus } from "@/api/types.ts";
 import { Chat } from "@/components/Chat.tsx";
 import { PlotStatusBadge } from "@/components/PlotStatusBadge.tsx";
+import { StateBadge } from "@/components/StateBadge.tsx";
 import { Alert } from "@/components/ui/alert.tsx";
 import { Button } from "@/components/ui/button.tsx";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card.tsx";
@@ -109,11 +110,14 @@ export function ConversationDetailPage(): JSX.Element {
 				<div className="grid gap-4 lg:grid-cols-2">
 					<Card className="flex min-h-[60vh] flex-col">
 						<CardHeader className="shrink-0">
-							<CardTitle className="flex items-center gap-2">
+							<CardTitle className="flex flex-wrap items-center gap-2">
 								<span>Conversation</span>
 								<span className="rounded-full border px-2 py-0.5 text-xs">
 									{row.status}
 								</span>
+								{anchoringRun.data !== undefined ? (
+									<StateBadge state={anchoringRun.data.state} />
+								) : null}
 							</CardTitle>
 						</CardHeader>
 						<CardContent className="flex min-h-0 flex-1 flex-col p-3 pt-0">

@@ -122,4 +122,110 @@ describe("buildChatMessages", () => {
 	test("returns an empty list when there is no transcript and no message events", () => {
 		expect(buildChatMessages(undefined, [])).toEqual([]);
 	});
+
+	test("renders pi text events as agent bubbles", () => {
+		const events: RunEvent[] = [
+			event({ id: 1, seq: 1, kind: "text", payload: { text: "shaping the intent" } }),
+		];
+
+		const result = buildChatMessages(undefined, events);
+
+		expect(result).toHaveLength(1);
+		expect(result[0]).toMatchObject({ kind: "agent", content: "shaping the intent" });
+	});
+
+	test("renders pi thinking events as collapsible thinking rows", () => {
+		const events: RunEvent[] = [
+			event({ id: 1, seq: 1, kind: "thinking", payload: { text: "let me reason about this" } }),
+		];
+
+		const result = buildChatMessages(undefined, events);
+
+		expect(result).toHaveLength(1);
+		expect(result[0]).toMatchObject({ kind: "thinking", content: "let me reason about this" });
+	});
+
+	test("renders pi tool_use as a compact one-liner (name + short arg)", () => {
+		const events: RunEvent[] = [
+			event({
+				id: 1,
+				seq: 1,
+				kind: "tool_use",
+				payload: { type: "toolCall", name: "bash", arguments: { command: "cd /workspace && ls" } },
+			}),
+		];
+
+		const result = buildChatMessages(undefined, events);
+
+		expect(result[0]).toMatchObject({ kind: "tool", content: "bash: cd /workspace && ls" });
+	});
+
+	test("renders an argument-less tool_use as just the tool name", () => {
+		const events: RunEvent[] = [
+			event({ id: 1, seq: 1, kind: "tool_use", payload: { type: "toolCall", name: "propose_intent" } }),
+		];
+
+		const result = buildChatMessages(undefined, events);
+
+		expect(result[0]).toMatchObject({ kind: "tool", content: "propose_intent" });
+	});
+
+	test("renders pi tool_result with a snippet and flags errors", () => {
+		const events: RunEvent[] = [
+			event({
+				id: 1,
+				seq: 1,
+				kind: "tool_result",
+				payload: {
+					role: "toolResult",
+					toolName: "ls",
+					isError: false,
+					content: [{ type: "text", text: "a.txt\nb.txt" }],
+				},
+			}),
+			event({
+				id: 2,
+				seq: 2,
+				kind: "tool_result",
+				payload: {
+					role: "toolResult",
+					toolName: "bash",
+					isError: true,
+					content: [{ type: "text", text: "command not found" }],
+				},
+			}),
+		];
+
+		const result = buildChatMessages(undefined, events);
+
+		expect(result[0]).toMatchObject({ kind: "tool", content: "ls → a.txt b.txt", isError: false });
+		expect(result[1]).toMatchObject({
+			kind: "tool",
+			content: "bash failed → command not found",
+			isError: true,
+		});
+	});
+
+	test("does not collapse repeated identical tool rows from the stream", () => {
+		const events: RunEvent[] = [
+			event({ id: 1, seq: 1, kind: "tool_use", payload: { name: "bash", arguments: { command: "ls" } } }),
+			event({ id: 2, seq: 2, kind: "tool_use", payload: { name: "bash", arguments: { command: "ls" } } }),
+		];
+
+		const result = buildChatMessages(undefined, events);
+
+		expect(result).toHaveLength(2);
+	});
+
+	test("ignores pi noise events (telemetry, state_change, mulch.record.skipped, reap.*)", () => {
+		const events: RunEvent[] = [
+			event({ id: 1, seq: 1, kind: "telemetry", payload: { type: "message_update" } }),
+			event({ id: 2, seq: 2, kind: "state_change", payload: { type: "turn_end" } }),
+			event({ id: 3, seq: 3, kind: "mulch.record.skipped", payload: {} }),
+			event({ id: 4, seq: 4, kind: "reap.completed", payload: {} }),
+			event({ id: 5, seq: 5, kind: "text", payload: { text: "" } }),
+		];
+
+		expect(buildChatMessages(undefined, events)).toEqual([]);
+	});
 });

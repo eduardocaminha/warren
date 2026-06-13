@@ -212,6 +212,9 @@ interface BubbleProps {
 }
 
 function Bubble({ message }: BubbleProps): JSX.Element {
+	if (message.kind === "tool") return <ToolRow message={message} />;
+	if (message.kind === "thinking") return <ThinkingRow message={message} />;
+
 	const isUser = message.kind === "user";
 	return (
 		<div
@@ -236,5 +239,40 @@ function Bubble({ message }: BubbleProps): JSX.Element {
 				{message.content}
 			</div>
 		</div>
+	);
+}
+
+/**
+ * Compact one-line activity row for `tool_use` / `tool_result` events.
+ * Monospace + muted so the agent's tool traffic reads as a side channel
+ * rather than a chat turn; errors flip to the destructive color.
+ */
+function ToolRow({ message }: BubbleProps): JSX.Element {
+	return (
+		<div className="self-stretch flex items-start gap-2 px-1 text-xs text-(--color-muted-foreground)">
+			<span aria-hidden className="select-none pt-px font-mono">
+				›
+			</span>
+			<span
+				className={cn(
+					"font-mono break-all",
+					message.isError ? "text-(--color-destructive)" : undefined,
+				)}
+			>
+				{message.content}
+			</span>
+		</div>
+	);
+}
+
+/** Muted, collapsed-by-default reasoning block for `thinking` events. */
+function ThinkingRow({ message }: BubbleProps): JSX.Element {
+	return (
+		<details className="self-start max-w-[85%] text-xs text-(--color-muted-foreground)">
+			<summary className="cursor-pointer select-none italic">Thinking…</summary>
+			<div className="mt-1 whitespace-pre-wrap break-words rounded-md border border-dashed bg-(--color-card) px-3 py-2">
+				{message.content}
+			</div>
+		</details>
 	);
 }
