@@ -626,6 +626,26 @@ paths:
           required: true
           schema:
             type: string
+  /projects/{id}/seeds/plans:
+    get:
+      operationId: listProjectSeedPlansHandler
+      tags:
+        - projects
+      summary: GET /projects/:id/seeds/plans
+      responses:
+        '200':
+          description: Successful response.
+        default:
+          description: Error response (see `src/core/errors.ts`).
+      description: >-
+        Static path — must precede `/projects/:id/seeds/:seedId` so the param route doesn't swallow
+        `plans` as a seed id.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
   /projects/{id}/seeds/{seedId}:
     get:
       operationId: getProjectSeedHandler
