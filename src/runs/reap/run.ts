@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import type { BurrowClient } from "../../burrow-client/client.ts";
 import { withTransportMapping } from "../../burrow-client/client.ts";
-import type { EventRow, RunFailureReason, RunTerminalState } from "../../db/schema.ts";
+import type { EventRow, RunTerminalState } from "../../db/schema.ts";
 import { openPullRequest } from "../pr.ts";
 import { dispatchAutoPlanRuns, hasAutoPlanRunFrontmatter, parsePlanIds } from "./auto-plan-run.ts";
 import { runWorkspaceDestroy } from "./destroy.ts";
@@ -11,7 +11,7 @@ import { runPrOpen } from "./pr-open.ts";
 import { runPreviewAnnotate, runPreviewLaunch } from "./preview.ts";
 import { closeRunSeedId, mirrorPlans, mirrorSeeds } from "./seeds.ts";
 import { stagePlotForCommit, stageSeedsForCommit } from "./stage.ts";
-import { inferFailureReason, isTerminal, transitionToTerminal } from "./state.ts";
+import { isTerminal, resolveAndTransition } from "./state.ts";
 import type { ReapRunInput, ReapRunResult, ReapStep, ReapStepError } from "./types.ts";
 import {
 	buildAlreadyTerminalResult,
@@ -413,21 +413,17 @@ export async function reapRun(input: ReapRunInput): Promise<ReapRunResult> {
 	// `failed`/`dropped_commit` so it can't masquerade as success.
 	const effectiveOutcome: RunTerminalState = droppedCommit ? "failed" : input.outcome;
 
-	let failureReason: RunFailureReason | null = null;
-	if (droppedCommit) {
-		failureReason = "dropped_commit";
-	} else if (effectiveOutcome === "failed") {
-		failureReason =
-			input.failureReason ?? (await inferFailureReason(input.repos, run.id, stateOnEntry));
-	}
-
-	const finalState = await transitionToTerminal(
+	// warren-5249 refactor: resolveAndTransition handles failure-reason
+	// inference (including rate_limit_event detection) + terminal transition
+	// in one step. Override precedence: droppedCommit > input.failureReason
+	// > inferred from event log.
+	const { finalState, failureReason } = await resolveAndTransition(
 		input.repos,
 		run.id,
 		stateOnEntry,
 		effectiveOutcome,
 		now(),
-		failureReason,
+		droppedCommit ? "dropped_commit" : (input.failureReason ?? null),
 	);
 
 	await emit("reap.completed", {

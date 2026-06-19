@@ -123,6 +123,13 @@ export type CloneKind = (typeof CLONE_KINDS)[number];
  *     which stays `succeeded`. Marking the run `failed` keeps a dropped
  *     commit from masquerading as success and, on plan-runs, fails the
  *     plan instead of silently auto-merging/advancing past the child.
+ *   - `rate_limited` (warren-5249) means reap detected a
+ *     `rate_limit_event` telemetry event in the run's event stream —
+ *     burrow's jsonl-claude parser emits this when Claude Code outputs
+ *     `{"type":"rate_limit_event","rate_limit_info":{...}}`. The run's
+ *     `rate_limit_resets_at` column captures the reset timestamp from
+ *     the event so the UI and plan-run coordinator (warren-a5bd /
+ *     warren-3797) can surface when the limit lifts.
  *
  * Null on succeeded/cancelled rows.
  */
@@ -133,6 +140,7 @@ export const RUN_FAILURE_REASONS = [
 	"timed_out",
 	"burrow_run_lost",
 	"dropped_commit",
+	"rate_limited",
 ] as const;
 export type RunFailureReason = (typeof RUN_FAILURE_REASONS)[number];
 

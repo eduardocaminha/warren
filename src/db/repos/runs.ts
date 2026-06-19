@@ -156,6 +156,7 @@ export class RunsRepo {
 			mode: input.mode ?? "batch",
 			pausedAt: null,
 			pausedQuestionEventId: null,
+			rateLimitResetsAt: null,
 		};
 		await this.adapter.runWrite(this.db.insert(this.runs).values(row));
 		return row;
@@ -443,6 +444,7 @@ export class RunsRepo {
 		terminal: RunTerminalState,
 		now: Date = new Date(),
 		failureReason: RunFailureReason | null = null,
+		rateLimitResetsAt: string | null = null,
 	): Promise<RunRow> {
 		const current = await this.require(id);
 		assertRunTransition(current.state, terminal);
@@ -450,6 +452,7 @@ export class RunsRepo {
 			state: terminal,
 			endedAt: now.toISOString(),
 			failureReason: terminal === "failed" ? failureReason : null,
+			rateLimitResetsAt: terminal === "failed" ? rateLimitResetsAt : null,
 		};
 		await this.adapter.runWrite(this.db.update(this.runs).set(patch).where(eq(this.runs.id, id)));
 		return { ...current, ...patch };
@@ -519,9 +522,8 @@ export class RunsRepo {
 
 	/**
 	 * Persist the PR URL reap's `pr_open` sub-step opened (warren-f6af).
-	 * Last write wins; passing `null` clears the field. Separate from
-	 * `finalize` because reap fires this *before* the terminal transition
-	 * (so the URL lands on the `reap.completed` event payload too).
+	 * Last write wins; `null` clears the field. Separate from `finalize`
+	 * because reap fires this before the terminal transition.
 	 */
 	async setPrUrl(id: string, prUrl: string | null): Promise<RunRow> {
 		const current = await this.require(id);

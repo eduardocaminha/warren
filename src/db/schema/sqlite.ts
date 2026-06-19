@@ -220,12 +220,12 @@ export const runs = sqliteTable(
 		// Plain text (no FK) for symmetry with the other run back-links and to
 		// keep the column tolerant of a since-deleted parent row.
 		parentRunId: text("parent_run_id"),
-		// Chain-kind discriminator (warren-e96f). Tells a `parent_run_id`
-		// back-link apart: `continue` (warren-4b11) seeds the workspace from
-		// the parent's pushed branch; `replicate` (warren-e96f) re-dispatches
-		// the parent's exact config against the project default base. Null for
-		// root runs (no parent). See `CLONE_KINDS` in columns.ts.
+		// Chain-kind discriminator (warren-e96f) for `parent_run_id`: `continue`
+		// (warren-4b11) seeds from the parent's pushed branch; `replicate`
+		// (warren-e96f) re-dispatches against the project default. Null for root runs.
 		cloneKind: text("clone_kind", { enum: CLONE_KINDS }),
+		// ISO8601 reset timestamp from a rate_limit_event (warren-5249).
+		rateLimitResetsAt: text("rate_limit_resets_at"),
 	},
 	(t) => [
 		index(INDEX_NAMES.runsState).on(t.state),

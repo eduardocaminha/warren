@@ -142,6 +142,97 @@ describe("reapRun failure-reason inference (warren-3c40 / warren-5165)", () => {
 		expect(result.failureReason).toBe("crashed");
 	});
 
+	test("classifies run with rate_limit_event telemetry as rate_limited (warren-5249)", async () => {
+		// burrow's jsonl-claude parser maps {"type":"rate_limit_event","rate_limit_info":{...}}
+		// to a telemetry event on the system stream. Reap should classify as
+		// rate_limited and persist the resets_at timestamp.
+		await ctx.repos.events.append({
+			runId: ctx.runId,
+			burrowEventSeq: 1,
+			ts: new Date().toISOString(),
+			kind: "telemetry",
+			stream: "system",
+			payload: {
+				type: "rate_limit_event",
+				rate_limit_info: { type: "anthropic_session", resets_at: "2026-06-20T00:00:00Z" },
+			},
+		});
+
+		const result = await reapRun({
+			runId: ctx.runId,
+			outcome: "failed",
+			repos: ctx.repos,
+			burrowClientPool: await makePool(fakeBurrowClient(makeBurrow()), ctx.repos),
+			fs: fakeFs().fs,
+			exec: fakeExec().exec,
+		});
+
+		expect(result.failureReason).toBe("rate_limited");
+		const row = await ctx.repos.runs.require(ctx.runId);
+		expect(row.failureReason).toBe("rate_limited");
+		expect(row.rateLimitResetsAt).toBe("2026-06-20T00:00:00Z");
+	});
+
+	test("rate_limited when resets_at is absent — null rateLimitResetsAt (warren-5249)", async () => {
+		// When rate_limit_info is missing resets_at, rateLimitResetsAt should be null.
+		await ctx.repos.events.append({
+			runId: ctx.runId,
+			burrowEventSeq: 1,
+			ts: new Date().toISOString(),
+			kind: "telemetry",
+			stream: "system",
+			payload: { type: "rate_limit_event" },
+		});
+
+		const result = await reapRun({
+			runId: ctx.runId,
+			outcome: "failed",
+			repos: ctx.repos,
+			burrowClientPool: await makePool(fakeBurrowClient(makeBurrow()), ctx.repos),
+			fs: fakeFs().fs,
+			exec: fakeExec().exec,
+		});
+
+		expect(result.failureReason).toBe("rate_limited");
+		const row = await ctx.repos.runs.require(ctx.runId);
+		expect(row.rateLimitResetsAt).toBeNull();
+	});
+
+	test("rate_limited takes priority over model output (warren-5249)", async () => {
+		// Even if the model produced output before the limit hit, rate_limited
+		// is the correct classification when a rate_limit_event is present.
+		await ctx.repos.events.append({
+			runId: ctx.runId,
+			burrowEventSeq: 1,
+			ts: new Date().toISOString(),
+			kind: "text",
+			stream: "stdout",
+			payload: { text: "Let me read that file." },
+		});
+		await ctx.repos.events.append({
+			runId: ctx.runId,
+			burrowEventSeq: 2,
+			ts: new Date().toISOString(),
+			kind: "telemetry",
+			stream: "system",
+			payload: {
+				type: "rate_limit_event",
+				rate_limit_info: { resets_at: "2026-06-20T01:00:00Z" },
+			},
+		});
+
+		const result = await reapRun({
+			runId: ctx.runId,
+			outcome: "failed",
+			repos: ctx.repos,
+			burrowClientPool: await makePool(fakeBurrowClient(makeBurrow()), ctx.repos),
+			fs: fakeFs().fs,
+			exec: fakeExec().exec,
+		});
+
+		expect(result.failureReason).toBe("rate_limited");
+	});
+
 	test("succeeded runs carry no failureReason", async () => {
 		const result = await reapRun({
 			runId: ctx.runId,

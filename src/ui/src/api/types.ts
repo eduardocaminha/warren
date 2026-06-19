@@ -8,14 +8,15 @@ export type RunState = "queued" | "running" | "paused" | "succeeded" | "failed" 
 
 export const RUN_TERMINAL_STATES: readonly RunState[] = ["succeeded", "failed", "cancelled"];
 
-/** Failure-cause discriminator for `state:failed` rows (warren-3c40, warren-5165). */
+/** Failure-cause discriminator for `state:failed` rows (warren-3c40, warren-5165, warren-5249). */
 export type RunFailureReason =
 	| "never_started"
 	| "no_model_response"
 	| "crashed"
 	| "timed_out"
 	| "burrow_run_lost"
-	| "dropped_commit";
+	| "dropped_commit"
+	| "rate_limited";
 
 /**
  * Preview environment lifecycle (R-19 / SPEC §11.L). Null on rows whose
@@ -166,6 +167,12 @@ export interface RunRow {
 	previewStartedAt: string | null;
 	previewLastHitAt: string | null;
 	previewFailureMessage: string | null;
+	/**
+	 * ISO8601 reset timestamp from a Claude Code rate_limit_event
+	 * (warren-5249). Set when `failureReason === "rate_limited"` and
+	 * burrow's telemetry carried a `resets_at` value; null otherwise.
+	 */
+	rateLimitResetsAt: string | null;
 }
 
 /**
