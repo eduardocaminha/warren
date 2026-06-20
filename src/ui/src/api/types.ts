@@ -629,6 +629,8 @@ export interface PlanRunRow {
 	plotId: string | null;
 	/** ISO8601 resume time for `paused_rate_limited` plan-runs (warren-3797). */
 	resumeAt: string | null;
+	/** Count of rate-limit pauses for backoff + ceiling enforcement (warren-e521). */
+	rateLimitRetries: number;
 }
 
 export interface PlanRunChildRow {

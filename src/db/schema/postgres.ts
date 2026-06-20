@@ -230,6 +230,8 @@ export const planRuns = pgTable(
 		endedAt: text("ended_at"),
 		// Mirror of sqlite plan_runs.resume_at (warren-3797). See sqlite.ts for intent.
 		resumeAt: text("resume_at"),
+		// Mirror of sqlite plan_runs.rate_limit_retries (warren-e521). See sqlite.ts for intent.
+		rateLimitRetries: integer("rate_limit_retries").notNull().default(0),
 	},
 	(t) => [
 		index(INDEX_NAMES.planRunsProjectState).on(t.projectId, t.state),
