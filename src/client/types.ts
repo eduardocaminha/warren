@@ -9,7 +9,6 @@ export const RUN_TERMINAL_STATES: ReadonlySet<RunState> = new Set([
 	"cancelled",
 ]);
 
-/** Narrow a RunState to a terminal one. */
 export function isTerminalRunState(state: RunState): state is RunTerminalState {
 	return RUN_TERMINAL_STATES.has(state);
 }
@@ -21,7 +20,8 @@ export type RunFailureReason =
 	| "timed_out"
 	| "burrow_run_lost"
 	| "dropped_commit"
-	| "rate_limited";
+	| "rate_limited"
+	| "burrow_unreachable";
 
 export type PreviewState = "starting" | "live" | "failed" | "torn-down";
 

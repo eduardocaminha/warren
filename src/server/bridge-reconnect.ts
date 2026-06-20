@@ -3,14 +3,15 @@
  * (`./bridges.ts`). Extracted to keep both files under the file-size
  * ratchet (warren-4553). `runWithReconnect` runs `bridgeRunStream` in a
  * backoff loop, surfaces degraded state via `bridge_stalled` /
- * `bridge_recovered` system events (warren-6376), reaps inline on
- * terminal-detect, and reconciles ghost runs (warren-b1a9) via
- * `reconcileLostBurrowRun`, which `bootBridges` also calls at boot.
+ * `bridge_recovered` system events (warren-6376), gives up and finalizes
+ * `failed`/`burrow_unreachable` past a hard stall ceiling (warren-af76),
+ * reaps inline on terminal-detect, and reconciles ghost runs (warren-b1a9)
+ * via `reconcileLostBurrowRun`, which `bootBridges` also calls at boot.
  */
 
 import type { BurrowClientPool } from "../burrow-client/pool.ts";
 import type { Repos } from "../db/repos/index.ts";
-import type { EventRow, RunMode, RunState } from "../db/schema.ts";
+import type { EventRow, RunFailureReason, RunMode, RunState } from "../db/schema.ts";
 import type { PreviewLaunchConfig } from "../preview/launch/index.ts";
 import type { PreviewPortAllocator } from "../preview/port-allocator.ts";
 import type {
@@ -22,10 +23,13 @@ import type {
 	ReapRunResult,
 	RunEventBroker,
 } from "../runs/index.ts";
-import type { PrTemplateOverrides } from "../runs/pr-template.ts";
 import type { ConversationTurnHandler } from "../runs/stream/conversation-turn.ts";
 import type { SeedsCliDeps } from "../seeds-cli/index.ts";
-import type { ServerPreviewConfig, WarrenConfigCache } from "../warren-config/index.ts";
+import type { WarrenConfigCache } from "../warren-config/index.ts";
+import {
+	resolveProjectPreviewConfig,
+	resolveProjectPrTemplate,
+} from "./bridge-reconnect-project-config.ts";
 
 export const TERMINAL_RUN_STATES: ReadonlySet<RunState> = new Set([
 	"succeeded",
@@ -45,6 +49,13 @@ export interface RunWithReconnectInput {
 	readonly reap: (input: ReapRunInput) => Promise<ReapRunResult>;
 	readonly backoff: readonly number[];
 	readonly stallThreshold: number;
+	/**
+	 * warren-af76: hard ceiling on consecutive errored reconnects with no
+	 * forward progress. Past it the bridge stops looping against an
+	 * unresponsive-but-present burrow and finalizes the run `failed` with
+	 * `failure_reason='burrow_unreachable'`. Must be `>= stallThreshold`.
+	 */
+	readonly stallCeiling: number;
 	readonly sleep: (ms: number, signal: AbortSignal) => Promise<void>;
 	/**
 	 * Run mode (warren-df71). Threaded into every `bridgeRunStream` pass so a
@@ -243,6 +254,24 @@ export async function runWithReconnect(
 			);
 			stalled = true;
 		}
+		// warren-af76: hard stall ceiling. Without this, an up-but-unresponsive
+		// burrow (socket probe times out ⇒ `burrowRunMissing:false`) reconnects
+		// forever and the run wedges in `running`; finalize `burrow_unreachable`.
+		if (attempt >= input.stallCeiling) {
+			input.logger?.error?.(
+				{ runId: input.runId, burrowRunId: input.burrowRunId, attempts: attempt },
+				"bridge giving up: burrow unreachable past stall ceiling; finalizing run as failed",
+			);
+			await reconcileLostBurrowRun({
+				runId: input.runId,
+				burrowRunId: input.burrowRunId,
+				repos: input.repos,
+				broker: input.broker,
+				failureReason: "burrow_unreachable",
+				...(input.logger !== undefined ? { logger: input.logger } : {}),
+			});
+			return { written: totalWritten, skipped: totalSkipped, errored: true };
+		}
 		try {
 			await input.sleep(delayMs, input.signal);
 		} catch {
@@ -252,86 +281,6 @@ export async function runWithReconnect(
 		if (input.signal.aborted) {
 			return { written: totalWritten, skipped: totalSkipped, errored: true };
 		}
-	}
-}
-
-/**
- * Resolve the project's `.warren/defaults.json` preview block (R-19) for
- * the run the bridge just observed reach terminal. Returns `undefined`
- * when the project hasn't opted in or when the warren-config seam isn't
- * wired (tests that omit `warrenConfigs`/`portAllocator`). The launcher
- * gate inside reap is what skips the actual preview spawn when this
- * function returns `undefined`.
- *
- * Errors from the per-project loader (`malformed defaults.json`, etc.)
- * surface as a `null` defaults block, so this function returns
- * `undefined` and the preview just skips. Operators see the underlying
- * error via the `/projects/:id/warren-config` route.
- */
-async function resolveProjectPreviewConfig(
-	input: RunWithReconnectInput,
-): Promise<ServerPreviewConfig | undefined> {
-	if (input.warrenConfigs === undefined || input.portAllocator === undefined) return undefined;
-	const run = await input.repos.runs.get(input.runId);
-	if (run === null || run.projectId === null) return undefined;
-	const project = await input.repos.projects.get(run.projectId);
-	if (project === null) return undefined;
-	try {
-		const config = await input.warrenConfigs.get(project.id, project.localPath);
-		const preview = config.defaults?.preview;
-		if (preview === undefined) return undefined;
-		// `type: 'static'` is filed as a follow-up (per SPEC §11.L); reap
-		// would reject at launch time anyway. Skip cleanly here so the
-		// PR-body placeholder doesn't promise a preview that can't run.
-		if (preview.type !== "server") return undefined;
-		return preview;
-	} catch (err) {
-		input.logger?.warn?.(
-			{
-				runId: input.runId,
-				projectId: project.id,
-				err: err instanceof Error ? err.message : String(err),
-			},
-			"preview config load failed; skipping preview launch",
-		);
-		return undefined;
-	}
-}
-
-/**
- * Resolve the project's `.warren/pr-template.md` fragment overrides
- * (warren-bd49) for the run the bridge just observed reach terminal.
- * Returns `undefined` when the project ships no template, when the
- * warren-config seam isn't wired (tests), or when the parsed envelope
- * has no overrides. Errors from the per-project loader surface as
- * a `null` prTemplate in the envelope, so this just falls through to
- * `undefined` and reap uses the built-in defaults. Operators see the
- * underlying error via `/projects/:id/warren-config`.
- */
-async function resolveProjectPrTemplate(
-	input: RunWithReconnectInput,
-): Promise<PrTemplateOverrides | undefined> {
-	if (input.warrenConfigs === undefined) return undefined;
-	const run = await input.repos.runs.get(input.runId);
-	if (run === null || run.projectId === null) return undefined;
-	const project = await input.repos.projects.get(run.projectId);
-	if (project === null) return undefined;
-	try {
-		const config = await input.warrenConfigs.get(project.id, project.localPath);
-		const overrides = config.prTemplate;
-		if (overrides === null || overrides === undefined) return undefined;
-		if (Object.keys(overrides).length === 0) return undefined;
-		return overrides;
-	} catch (err) {
-		input.logger?.warn?.(
-			{
-				runId: input.runId,
-				projectId: project.id,
-				err: err instanceof Error ? err.message : String(err),
-			},
-			"pr-template load failed; falling back to built-in defaults",
-		);
-		return undefined;
 	}
 }
 
@@ -381,6 +330,12 @@ interface ReconcileLostBurrowRunInput {
 	readonly broker: RunEventBroker;
 	readonly logger?: BridgeLogger;
 	readonly now?: () => Date;
+	/**
+	 * warren-af76: failure reason for `runs.finalize` + `bridge_lost`.
+	 * Default `'burrow_run_lost'`; stall-ceiling caller passes
+	 * `'burrow_unreachable'`.
+	 */
+	readonly failureReason?: RunFailureReason;
 }
 
 /**
@@ -396,6 +351,7 @@ interface ReconcileLostBurrowRunInput {
  */
 export async function reconcileLostBurrowRun(input: ReconcileLostBurrowRunInput): Promise<void> {
 	const now = (input.now ?? (() => new Date()))();
+	const failureReason: RunFailureReason = input.failureReason ?? "burrow_run_lost";
 	let finalized = false;
 	try {
 		const run = await input.repos.runs.get(input.runId);
@@ -411,7 +367,7 @@ export async function reconcileLostBurrowRun(input: ReconcileLostBurrowRunInput)
 			if (run.state === "queued") {
 				await input.repos.runs.markRunning(input.runId, now);
 			}
-			await input.repos.runs.finalize(input.runId, "failed", now, "burrow_run_lost");
+			await input.repos.runs.finalize(input.runId, "failed", now, failureReason);
 			finalized = true;
 		}
 	} catch (err) {
@@ -434,7 +390,7 @@ export async function reconcileLostBurrowRun(input: ReconcileLostBurrowRunInput)
 			stream: "system",
 			payload: {
 				burrowRunId: input.burrowRunId,
-				reason: "burrow_run_lost",
+				reason: failureReason,
 				finalized,
 			},
 		});
