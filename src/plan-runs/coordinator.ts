@@ -258,17 +258,21 @@ export async function advancePlanRun(input: AdvancePlanRunInput): Promise<Advanc
 			return { kind: "plan_succeeded" };
 		}
 
-		// Resume semantics — closed seed → skip without dispatch.
-		let seedShow: SeedShowResult;
+		// warren-0fed: a definitive "seed not found" is terminal — the
+		// plan references an id that doesn't resolve (planned-but-never-
+		// created, or only on an unmerged branch), so retrying forever
+		// just spams plan_run.noop. Fail the child + plan-run. Any other
+		// (transient: timeout / lock / malformed) sd failure stays a
+		// retryable noop so a hung seed store can't kill healthy runs.
+		//
+		// warren-c117: do NOT skip on closed-seed status. A closed seed means
+		// the agent finished work, not that the PR merged. A child that actually
+		// merged is in `merged` state (terminal) and never reaches pickNextPending.
+		// Skipping on seed-closed lets a rate-limit-reset pending child (whose
+		// seed was closed before the run failed) bypass the serial merge gate.
 		try {
-			seedShow = await input.showSeed(planRun.projectId, next.seedId);
+			await input.showSeed(planRun.projectId, next.seedId);
 		} catch (err) {
-			// warren-0fed: a definitive "seed not found" is terminal — the
-			// plan references an id that doesn't resolve (planned-but-never-
-			// created, or only on an unmerged branch), so retrying forever
-			// just spams plan_run.noop. Fail the child + plan-run. Any other
-			// (transient: timeout / lock / malformed) sd failure stays a
-			// retryable noop so a hung seed store can't kill healthy runs.
 			if (err instanceof SeedNotFoundError) {
 				const reason = `child_seed_not_found:${next.seedId}`;
 				const endedAt = nowFn().toISOString();
@@ -296,15 +300,6 @@ export async function advancePlanRun(input: AdvancePlanRunInput): Promise<Advanc
 				kind: "noop",
 				reason: `show_seed_failed:${formatError(err)}`,
 			};
-		}
-		if (seedShow.status === "closed") {
-			await input.repos.planRuns.updateChild({
-				planRunId: planRun.id,
-				seq: next.seq,
-				patch: { state: "skipped", endedAt: nowFn().toISOString() },
-				now: nowFn(),
-			});
-			continue;
 		}
 
 		// Dispatch the next child.
