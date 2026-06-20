@@ -1,6 +1,5 @@
 import { join } from "node:path";
-import type { BurrowClient } from "../../burrow-client/client.ts";
-import { withTransportMapping } from "../../burrow-client/client.ts";
+import { type BurrowClient, withTransportMapping } from "../../burrow-client/client.ts";
 import type { EventRow, RunFailureReason, RunTerminalState } from "../../db/schema.ts";
 import { openPullRequest } from "../pr.ts";
 import { dispatchAutoPlanRuns, hasAutoPlanRunFrontmatter, parsePlanIds } from "./auto-plan-run.ts";
@@ -428,6 +427,7 @@ export async function reapRun(input: ReapRunInput): Promise<ReapRunResult> {
 		effectiveOutcome,
 		now(),
 		failureReason,
+		failureReason === "rate_limited" ? (input.resetsAt ?? null) : null,
 	);
 
 	await emit("reap.completed", {

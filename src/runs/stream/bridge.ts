@@ -109,6 +109,13 @@ export async function bridgeRunStream(input: BridgeRunStreamInput): Promise<Brid
 	let claimed = false;
 	let terminalDetected: { outcome: RunTerminalState } | undefined;
 	let burrowRunMissing = false;
+	// warren-5249: track the last rate_limit_event seen. Burrow's jsonl-claude
+	// parser maps claude-code's `{"type":"rate_limit_event","rate_limit_info":{...}}`
+	// to `kind="telemetry"`, `stream="system"`. We capture `resets_at` from the
+	// inner envelope and surface it in the bridge result so the registry can pass
+	// `failureReason:"rate_limited"` to reap when the run also ends failed.
+	let rateLimitResetsAt: string | null | undefined;
+
 	// pi cost tracking (warren-a7dc, warren-17a4). Two paths:
 	//   1. In-stream extraction (default): accumulate `turn_end` usage as
 	//      events flow through the bridge. Persisted on terminal.
@@ -166,6 +173,27 @@ export async function bridgeRunStream(input: BridgeRunStreamInput): Promise<Brid
 
 			accumulatePiUsage(piUsage, event);
 			extractClaudeUsage(claudeUsage, event);
+
+			// warren-5249: capture rate_limit_event telemetry. Burrow's
+			// jsonl-claude parser surfaces these as kind=telemetry/stream=system
+			// with `payload.type === "rate_limit_event"`. Track the last
+			// `rate_limit_info.resets_at` so the registry can pass
+			// failureReason:"rate_limited" to reap when the run ends failed.
+			if (event.kind === "telemetry" && event.stream === "system") {
+				const pl = event.payload;
+				if (pl !== null && typeof pl === "object" && !Array.isArray(pl)) {
+					const env = pl as Record<string, unknown>;
+					if (env.type === "rate_limit_event") {
+						const info = env.rate_limit_info;
+						if (info !== null && typeof info === "object" && !Array.isArray(info)) {
+							const resetsAt = (info as Record<string, unknown>).resets_at;
+							rateLimitResetsAt = typeof resetsAt === "string" ? resetsAt : null;
+						} else {
+							rateLimitResetsAt = null;
+						}
+					}
+				}
+			}
 
 			// warren-a63d: enforce the spend cap as cumulative cost crosses it.
 			// On exceed, the helper persists usage + emits `budget.exceeded` +
@@ -362,9 +390,10 @@ export async function bridgeRunStream(input: BridgeRunStreamInput): Promise<Brid
 	if (burrowRunMissing) {
 		return { written, skipped, errored, burrowRunMissing: true };
 	}
+	const rateLimitResult = rateLimitResetsAt !== undefined ? { rateLimitResetsAt } : {};
 	return terminalDetected !== undefined
-		? { written, skipped, errored, terminalDetected }
-		: { written, skipped, errored };
+		? { written, skipped, errored, terminalDetected, ...rateLimitResult }
+		: { written, skipped, errored, ...rateLimitResult };
 }
 
 /**

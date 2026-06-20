@@ -204,9 +204,8 @@ export const runs = sqliteTable(
 		// `question_posed` event on the linked Plot and transitions the run
 		// `running → paused`. `paused_at` is the ISO8601 transition timestamp;
 		// `paused_question_event_id` is the Plot event id awaiting an answer.
-		// Both nullable: only set while the run is in the `paused` state. On
-		// resume (`paused → running`), the row may keep or clear these — the
-		// supervisor clears them once the answering turn is dispatched.
+		// Both nullable: set while in the `paused` state. On resume (`paused → running`),
+		// the supervisor clears them once the answering turn is dispatched.
 		pausedAt: text("paused_at"),
 		pausedQuestionEventId: text("paused_question_event_id"),
 		// Continuation back-link (warren-4b11): when an operator re-runs a
@@ -226,6 +225,7 @@ export const runs = sqliteTable(
 		// the parent's exact config against the project default base. Null for
 		// root runs (no parent). See `CLONE_KINDS` in columns.ts.
 		cloneKind: text("clone_kind", { enum: CLONE_KINDS }),
+		resetsAt: text("resets_at"),
 	},
 	(t) => [
 		index(INDEX_NAMES.runsState).on(t.state),

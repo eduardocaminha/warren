@@ -19,7 +19,9 @@ export type RunFailureReason =
 	| "no_model_response"
 	| "crashed"
 	| "timed_out"
-	| "burrow_run_lost";
+	| "burrow_run_lost"
+	| "dropped_commit"
+	| "rate_limited";
 
 export type PreviewState = "starting" | "live" | "failed" | "torn-down";
 
@@ -116,6 +118,8 @@ export interface RunRow {
 	previewStartedAt: string | null;
 	previewLastHitAt: string | null;
 	previewFailureMessage: string | null;
+	/** ISO8601 reset time from a `rate_limit_event` (warren-5249). Non-null only when `failureReason === "rate_limited"`. */
+	resetsAt: string | null;
 }
 
 export interface RunEvent {

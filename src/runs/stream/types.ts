@@ -191,6 +191,15 @@ export interface BridgeRunStreamResult {
 	 * `terminalDetected`.
 	 */
 	readonly burrowRunMissing?: true;
+	/**
+	 * Last `resets_at` value seen in a `rate_limit_event` telemetry
+	 * envelope (warren-5249). Set when the run hit Claude's subscription
+	 * rate limit during streaming. The reconnect layer passes this to
+	 * `reapRun` as `failureReason: "rate_limited"` when the run also
+	 * reaches a failed terminal — so callers see a precise reset timestamp
+	 * without having to re-scan the event log.
+	 */
+	readonly rateLimitResetsAt?: string | null;
 }
 
 export interface BurrowTerminalSnapshot {

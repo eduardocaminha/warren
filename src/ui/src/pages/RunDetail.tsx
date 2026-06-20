@@ -232,6 +232,14 @@ export function RunDetailPage() {
 				</Alert>
 			) : null}
 
+			{r.failureReason === "rate_limited" ? (
+				<Alert variant="warning" title="Claude subscription rate limit hit">
+					{r.resetsAt !== null
+						? `Resets ${relativeTime(r.resetsAt)} (${formatTimestamp(r.resetsAt)}). Re-dispatch after the window expires.`
+						: "Re-dispatch once the subscription window resets."}
+				</Alert>
+			) : null}
+
 			<div className="grid gap-4 md:grid-cols-3">
 				<CostCard run={r} />
 				<MetaCard label="Started">{formatTimestamp(r.startedAt)}</MetaCard>

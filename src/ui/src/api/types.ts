@@ -15,7 +15,8 @@ export type RunFailureReason =
 	| "crashed"
 	| "timed_out"
 	| "burrow_run_lost"
-	| "dropped_commit";
+	| "dropped_commit"
+	| "rate_limited";
 
 /**
  * Preview environment lifecycle (R-19 / SPEC §11.L). Null on rows whose
@@ -166,6 +167,8 @@ export interface RunRow {
 	previewStartedAt: string | null;
 	previewLastHitAt: string | null;
 	previewFailureMessage: string | null;
+	/** ISO8601 reset time from a `rate_limit_event` (warren-5249). Non-null only when `failureReason === "rate_limited"`. */
+	resetsAt: string | null;
 }
 
 /**
