@@ -68,6 +68,14 @@ export interface ReapRunInput {
 	 */
 	readonly failureReason?: RunFailureReason;
 	/**
+	 * Claude rate-limit reset timestamp (warren-5249). ISO8601 string from
+	 * burrow's `rate_limit_event` telemetry. Only meaningful when
+	 * `failureReason === "rate_limited"`; passed through to `finalize` so
+	 * the plan-run coordinator and UI can schedule the retry window.
+	 * Nullable: absent when the rate_limit_event didn't carry a `resets_at`.
+	 */
+	readonly resetsAt?: string | null;
+	/**
 	 * Auto-open-PR config (warren-f6af). When omitted or `enabled: false`,
 	 * the `pr_open` sub-step is skipped entirely (no event emitted, no
 	 * runs.pr_url update). Higher-level callers (HTTP server boot, CLI

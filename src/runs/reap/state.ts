@@ -45,10 +45,11 @@ export async function transitionToTerminal(
 	outcome: RunTerminalState,
 	now: Date,
 	failureReason: RunFailureReason | null,
+	resetsAt?: string | null,
 ): Promise<RunTerminalState> {
 	if (currentState === "queued" && outcome !== "cancelled") {
 		await repos.runs.markRunning(runId, now);
 	}
-	const finalized = await repos.runs.finalize(runId, outcome, now, failureReason);
+	const finalized = await repos.runs.finalize(runId, outcome, now, failureReason, resetsAt ?? null);
 	return finalized.state as RunTerminalState;
 }

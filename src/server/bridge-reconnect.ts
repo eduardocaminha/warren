@@ -152,6 +152,13 @@ export async function runWithReconnect(
 				result.terminalDetected.outcome === "succeeded"
 					? await resolveProjectPrTemplate(input)
 					: undefined;
+			// warren-5249: if the bridge saw a rate_limit_event and the run
+			// ended failed, classify as rate_limited so the UI and plan-run
+			// coordinator can surface the exact reset time and retry cleanly.
+			const rateLimitedOverride =
+				result.terminalDetected.outcome === "failed" && result.rateLimitResetsAt !== undefined
+					? { failureReason: "rate_limited" as const, resetsAt: result.rateLimitResetsAt }
+					: {};
 			try {
 				await input.reap({
 					runId: input.runId,
@@ -159,6 +166,7 @@ export async function runWithReconnect(
 					repos: input.repos,
 					burrowClientPool: input.burrowClientPool,
 					broker: input.broker,
+					...rateLimitedOverride,
 					...(input.logger !== undefined ? { logger: input.logger } : {}),
 					...(input.autoOpenPr !== undefined ? { autoOpenPr: input.autoOpenPr } : {}),
 					...(previewConfig !== undefined ? { previewConfig } : {}),

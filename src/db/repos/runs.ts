@@ -4,7 +4,6 @@
  * Warren's run row mirrors the lifecycle of the underlying burrow run
  * (queued → running → succeeded|failed|cancelled). The state is updated as
  * we observe burrow's stream; warren itself does not pick runs off a queue.
- *
  * `attachBurrow` exists because the §4.3 composition flow creates the warren
  * row before burrow's `POST /burrows` and `POST /burrows/:id/runs` return —
  * the burrow IDs are written back once we have them.
@@ -156,6 +155,7 @@ export class RunsRepo {
 			mode: input.mode ?? "batch",
 			pausedAt: null,
 			pausedQuestionEventId: null,
+			resetsAt: null,
 		};
 		await this.adapter.runWrite(this.db.insert(this.runs).values(row));
 		return row;
@@ -443,6 +443,7 @@ export class RunsRepo {
 		terminal: RunTerminalState,
 		now: Date = new Date(),
 		failureReason: RunFailureReason | null = null,
+		resetsAt: string | null = null,
 	): Promise<RunRow> {
 		const current = await this.require(id);
 		assertRunTransition(current.state, terminal);
@@ -450,6 +451,7 @@ export class RunsRepo {
 			state: terminal,
 			endedAt: now.toISOString(),
 			failureReason: terminal === "failed" ? failureReason : null,
+			resetsAt: failureReason === "rate_limited" ? resetsAt : null,
 		};
 		await this.adapter.runWrite(this.db.update(this.runs).set(patch).where(eq(this.runs.id, id)));
 		return { ...current, ...patch };

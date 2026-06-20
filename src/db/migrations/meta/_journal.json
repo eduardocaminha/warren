@@ -176,6 +176,13 @@
 			"when": 1780745135500,
 			"tag": "0024_fixed_bloodaxe",
 			"breakpoints": true
+		},
+		{
+			"idx": 25,
+			"version": "6",
+			"when": 1750425600000,
+			"tag": "0025_add_run_resets_at",
+			"breakpoints": true
 		}
 	]
 }

@@ -133,6 +133,7 @@ export const RUN_FAILURE_REASONS = [
 	"timed_out",
 	"burrow_run_lost",
 	"dropped_commit",
+	"rate_limited",
 ] as const;
 export type RunFailureReason = (typeof RUN_FAILURE_REASONS)[number];
 
