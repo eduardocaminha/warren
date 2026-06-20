@@ -315,7 +315,7 @@ export async function spawnRun(input: SpawnRunInput): Promise<SpawnRunResult> {
 		return { pending: false, run: updated, burrow, burrowRun, agent };
 	} catch (err) {
 		logSpawnFailed(log, burrow?.id ?? null, err);
-		await rollback(input, run.id, burrow, placement.client, log);
+		await rollback(input, run.id, burrow, placement.client, log, err);
 		throw err;
 	}
 }
