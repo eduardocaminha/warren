@@ -380,17 +380,11 @@ export const planRuns = sqliteTable(
 		dispatcherHandle: text("dispatcher_handle").notNull().default("operator"),
 		trigger: text("trigger").notNull().default("manual"),
 		// Optional back-link to the Plot this plan-run was dispatched against
-		// (warren-06dc / pl-7937 Phase 2; mirrors `runs.plot_id` from
-		// warren-a8c3). Gated on the owning project's `hasPlot` flag at
-		// handler level — POST /plan-runs rejects a plot_id when the project
-		// has no `.plot/` directory. When set, the coordinator forwards it to
-		// every child run's spawn input so PLOT_ID/PLOT_ACTOR injection and
-		// per-child `run_dispatched` emission light up via the unchanged
-		// Phase 1 path, and the coordinator auto-transitions the bound Plot
-		// to `done` when every child reaches a terminal state. Nullable: legacy
-		// rows and plan-runs dispatched without a Plot leave it null. Plain
-		// text, no FK — Plots live in the project workspace, not in warren's
-		// database.
+		// (warren-06dc / pl-7937 Phase 2; mirrors `runs.plot_id` from warren-a8c3).
+		// Gated on `hasPlot` at handler level. When set, the coordinator forwards
+		// it to every child spawn so PLOT_ID/PLOT_ACTOR injection lights up via the
+		// Phase 1 path, and auto-transitions the Plot to `done` on plan_succeeded.
+		// Nullable. Plain text, no FK — Plots live in the project workspace.
 		plotId: text("plot_id"),
 		// Back-link to the parent run that created this plan-run via
 		// auto_plan_run (warren-d9a2). When set, the coordinator gates on
@@ -405,6 +399,8 @@ export const planRuns = sqliteTable(
 		createdAt: text("created_at").notNull(),
 		startedAt: text("started_at"),
 		endedAt: text("ended_at"),
+		// Resume timestamp for `paused_rate_limited` plan-runs (warren-3797).
+		resumeAt: text("resume_at"),
 	},
 	(t) => [
 		index(INDEX_NAMES.planRunsProjectState).on(t.projectId, t.state),

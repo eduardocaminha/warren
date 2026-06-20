@@ -33,7 +33,8 @@ import type { DrizzleAdapter } from "./drizzle-adapter.ts";
 
 const ALLOWED_TRANSITIONS: Record<PlanRunState, readonly PlanRunState[]> = {
 	queued: ["running", "cancelled"],
-	running: ["succeeded", "failed", "cancelled"],
+	running: ["succeeded", "failed", "cancelled", "paused_rate_limited"],
+	paused_rate_limited: ["running", "cancelled"],
 	succeeded: [],
 	failed: [],
 	cancelled: [],
@@ -90,6 +91,8 @@ export interface TransitionPlanRunOptions {
 	failureReason?: string | null;
 	startedAt?: string | null;
 	endedAt?: string | null;
+	/** ISO8601 resume timestamp (warren-3797). Set when pausing for rate-limit; cleared on resume. */
+	resumeAt?: string | null;
 }
 
 export interface UpdateChildInput {
@@ -163,6 +166,7 @@ export class PlanRunsRepo {
 			createdAt: nowIso,
 			startedAt: null,
 			endedAt: null,
+			resumeAt: null,
 		};
 		const childRows: PlanRunChildRow[] = input.children.map((c) => ({
 			planRunId: id,
@@ -293,6 +297,7 @@ export class PlanRunsRepo {
 		if (opts.startedAt !== undefined) patch.startedAt = opts.startedAt;
 		if (opts.endedAt !== undefined) patch.endedAt = opts.endedAt;
 		if (opts.failureReason !== undefined) patch.failureReason = opts.failureReason;
+		if (opts.resumeAt !== undefined) patch.resumeAt = opts.resumeAt;
 		await this.adapter.runWrite(
 			this.db.update(this.planRuns).set(patch).where(eq(this.planRuns.id, id)),
 		);

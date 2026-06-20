@@ -408,7 +408,13 @@ export type PlotSyncResponse =
 /* Wire envelope is camelCase, mirroring /runs.                            */
 /* ----------------------------------------------------------------------- */
 
-export type PlanRunState = "queued" | "running" | "succeeded" | "failed" | "cancelled";
+export type PlanRunState =
+	| "queued"
+	| "running"
+	| "paused_rate_limited"
+	| "succeeded"
+	| "failed"
+	| "cancelled";
 
 export const PLAN_RUN_TERMINAL_STATES: ReadonlySet<PlanRunState> = new Set([
 	"succeeded",
@@ -448,6 +454,7 @@ export interface PlanRunRow {
 	startedAt: string | null;
 	endedAt: string | null;
 	plotId: string | null;
+	resumeAt: string | null;
 }
 
 export interface PlanRunChildRow {
