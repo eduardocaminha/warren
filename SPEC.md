@@ -2244,9 +2244,11 @@ Postgres (`src/db/schema/sqlite.ts`, `src/db/schema/postgres.ts`):
   `project_id` (FK), `agent_name`, `prompt_template` (defaults to
   `'work on sd {seed_id}'`), `ref`, `provider_override`,
   `model_override`, `dispatcher_handle`, `trigger`, `state`
-  (`queued`|`running`|`succeeded`|`failed`|`cancelled`),
-  `failure_reason`, `created_at`, `started_at`, `ended_at`. Indexes on
-  `(project_id, state)` and `state` cover the coordinator's
+  (`queued`|`running`|`paused_rate_limited`|`succeeded`|`failed`|`cancelled`),
+  `failure_reason`, `created_at`, `started_at`, `ended_at`,
+  `resume_at` (ISO8601, set when `paused_rate_limited`),
+  `rate_limit_retries` (integer counter, incremented each pause).
+  Indexes on `(project_id, state)` and `state` cover the coordinator's
   `listActive()` and the UI's per-project list.
 - `plan_run_children` — one row per child step. Composite PK
   `(plan_run_id, seq)`; `seed_id`, `run_id` (FK SET NULL to `runs`),
@@ -2277,6 +2279,7 @@ type AdvanceResult =
   | { kind: 'advanced'; mergedChildSeq: number; dispatchedChildSeq?: number }
   | { kind: 'plan_failed'; failedSeq: number; reason: string }
   | { kind: 'plan_succeeded' }
+  | { kind: 'paused_rate_limited'; childSeq: number; resumeAt: string }
   | { kind: 'noop'; reason: string }
 ```
 
@@ -2284,7 +2287,14 @@ Transitions, per advance call:
 
 1. If `planRun.state === 'queued'` → transition to `running`, stamp
    `startedAt`, fall through.
-2. If there is an in-flight child:
+2. If `planRun.state === 'paused_rate_limited'`: check `now >= resume_at`;
+   if not yet, return `noop` with `reason:'plan_paused_rate_limited'`;
+   if the retry ceiling is exceeded (`rate_limit_retries >= maxRetries`
+   and `maxRetries > 0`), fail terminally with
+   `rate_limit_ceiling_exceeded:retries=N`; otherwise transition to
+   `running`, clear `resume_at`, emit `plan_run.resumed_rate_limited`,
+   and fall through to dispatch the pending child.
+3. If there is an in-flight child:
    - linked run non-terminal → `waiting_for_run`;
    - linked run terminal-succeeded and child.state ≠ `pr_open` →
      decide pr_open vs trivial-merge (see below);
@@ -2293,22 +2303,24 @@ Transitions, per advance call:
      the next; `open` → `waiting_for_merge`; `closed_unmerged` or
      `http_error` 4xx → `plan_failed` with reason
      `pr_closed_without_merge`;
-   - linked run terminal-failed/cancelled → `plan_failed` with
-     reason `` `child_${reason ?? 'failed'}` ``.
-3. If no in-flight child, call `pickNextPending`:
+   - linked run terminal-failed with `failureReason === 'rate_limited'`
+     → see **Rate-limit pause and resume** below;
+   - linked run terminal-failed/cancelled (other reasons) → `plan_failed`
+     with reason `` `child_${reason ?? 'failed'}` ``.
+4. If no in-flight child, call `pickNextPending`:
    - null → `plan_succeeded` (transition the parent row, stamp
      `endedAt`);
-   - non-null → call `showSeed(child.seedId)`; `status === 'closed'`
-     → flip child to `skipped` (resume semantics, below) and loop;
-     `status === 'open'` → spawn via `dispatch.ts`, persist
-     `child.runId` + `child.state='dispatched'` + `child.startedAt`,
-     return `dispatched`. A `RunSpawnError` becomes `plan_failed`
-     with reason `` `dispatch_failed:${err.message}` ``.
+   - non-null → call `showSeed(child.seedId)`; if `SeedNotFoundError`
+     → `plan_failed`; `status === 'open'` → spawn via `dispatch.ts`,
+     persist `child.runId` + `child.state='dispatched'` +
+     `child.startedAt`, return `dispatched`. A `RunSpawnError` becomes
+     `plan_failed` with reason `` `dispatch_failed:${err.message}` ``.
 
 Every transition is mirrored as a system event on the most-recently-
 dispatched child run via the existing emit seam — kinds: `plan_run.advanced`,
 `plan_run.dispatched`, `plan_run.waiting_for_merge`, `plan_run.merged`,
-`plan_run.failed`, `plan_run.succeeded`.
+`plan_run.failed`, `plan_run.succeeded`, `plan_run.paused_rate_limited`,
+`plan_run.resumed_rate_limited`.
 
 **Trivial-merge advance rule.** A child run that succeeded but produced
 no commits is treated as merged without ever opening a PR. The signal
@@ -2374,6 +2386,10 @@ left to do). Side-effect-free until all gates pass.
 |---|---|---|
 | `WARREN_PLAN_RUN_TICK_MS` | `10000` (10s) | Coordinator tick interval. Faster than the scheduler's 60s because in-flight plans are typically short-lived dispatch chains. |
 | `WARREN_PLAN_RUN_DISABLED` | unset | When set (`1`/`true`), `bootPlanRunCoordinator` skips boot — same shape as `WARREN_SCHEDULER_DISABLED`. Useful for diagnostic warren instances that should serve the API but not advance plans. |
+| `WARREN_PLAN_RUN_RATE_LIMIT_BUFFER_MS` | `30000` (30s) | Buffer added to `resets_at` when computing `resume_at`. Guards against clock skew. |
+| `WARREN_PLAN_RUN_RATE_LIMIT_BACKOFF_BASE_MS` | `3600000` (1h) | Base pause when `resets_at` is absent. Doubles each retry up to the ceil. |
+| `WARREN_PLAN_RUN_RATE_LIMIT_BACKOFF_CEIL_MS` | `28800000` (8h) | Maximum single-pause duration for the exponential backoff. |
+| `WARREN_PLAN_RUN_RATE_LIMIT_MAX_RETRIES` | `5` | Max number of rate-limit pauses before the plan-run fails terminally. Set to `0` to disable the ceiling (unbounded retries — not recommended). |
 
 The coordinator uses the same single-flight wrapper shape as
 `bootScheduler` (`src/server/scheduler.ts`) — overlapping ticks are
@@ -2399,6 +2415,51 @@ byte-identical to the §11.P baseline. See §11.P.Plot below. The
 between-child durability of those Plot writes depends on the `.plot/`
 preservation contract documented at the bottom of §11.O — without it,
 only the last child's `run_dispatched` would survive on disk.
+
+### 11.P.RateLimit PlanRun rate-limit pause and resume (pl-a77b, 2026-06-20)
+
+When an agent hits the Anthropic subscription rate limit mid-run, the
+warren bridge (`src/runs/stream/bridge.ts`) detects the `rate_limit_event`
+telemetry that burrow emits as a `kind=telemetry / stream=system`
+envelope with `payload.type === "rate_limit_event"`. It extracts
+`payload.rate_limit_info.resets_at` and surfaces it in the bridge
+result as `rateLimitResetsAt`. The reconnect registry (`bridge-reconnect.ts`)
+passes `failureReason: "rate_limited"` + `resetsAt` to `reapRun` when
+the run also ends failed, so the `runs` table carries the precise reset
+time instead of the generic `no_model_response` reason.
+
+The coordinator (`src/plan-runs/coordinator.ts`) intercepts
+`rate_limited` children specially instead of failing the plan:
+
+1. **Pause**: reset the child back to `pending` (clear `run_id`,
+   `started_at`, `ended_at`, `failure_reason`), increment
+   `rate_limit_retries`, transition the plan-run to
+   `paused_rate_limited`, set `resume_at`:
+   - when `run.resets_at` is present: `resets_at + bufferMs`
+   - when absent: exponential backoff `min(base × 2^retries, ceil)`
+   — emit `plan_run.paused_rate_limited` on the child's run id.
+
+2. **Resume** (next tick when `now >= resume_at`): ceiling check —
+   if `rate_limit_retries >= maxRetries` (and `maxRetries > 0`) fail
+   terminally with reason `rate_limit_ceiling_exceeded:retries=N`;
+   otherwise transition back to `running` (clear `resume_at`), emit
+   `plan_run.resumed_rate_limited`, and dispatch the same pending child.
+
+The child is re-dispatched with the same seed, prompt, and config as
+the original attempt — no partial work is assumed from the rate-limited
+run. The serial gate (one in-flight child per plan-run) means rate-limit
+exposure is inherently bounded: at most one child is running at any time.
+
+**UI surface.** The UI (`src/ui/src/`) reads `run.failure_reason ===
+'rate_limited'` and `run.resets_at` to display a `rate_limited` status
+badge and a "resets at HH:MM" banner (mirroring the GitHub merge-rate
+limit banner already present for PR rate limits). The `paused_rate_limited`
+plan-run state surfaces similarly on the PlanRun detail page.
+
+**No cross-plan concurrency cap.** Multiple distinct PlanRuns can run
+in parallel (one active child each). A per-agent global concurrency cap
+is left to a future iteration — the serial-per-plan guarantee already
+bounds throughput for the common single-plan case.
 
 ### 11.P.Plot PlanRun + Plot composition (pl-7937, 2026-05-18)
 
