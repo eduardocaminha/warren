@@ -27,19 +27,24 @@ import {
 } from "../db/schema.ts";
 import { SeedNotFoundError, type SeedShowResult } from "../seeds-cli/index.ts";
 import {
+	DEFAULT_RATE_LIMIT_BACKOFF_BASE_MS,
+	DEFAULT_RATE_LIMIT_BACKOFF_CEIL_MS,
+	DEFAULT_RATE_LIMIT_BUFFER_MS,
+	DEFAULT_RATE_LIMIT_MAX_RETRIES,
+	type RateLimitConfig,
+} from "./config.ts";
+import {
 	type CoordinatorReopenPrFn,
 	checkParentRunMerged,
-	hasEmptyPushEvent,
-	isFatalHttpError,
+	type HandleInFlightDecision,
+	handleSucceededChild,
 	isTerminalRun,
-	mergeDeadlineExceeded,
-	resolveChildPrReopen,
 } from "./merge-gate.ts";
 import type { AutoTransitionResult } from "./plot-transition.ts";
 import type { PrMergeChecker } from "./pr-merge.ts";
 import { pausePlanRunForRateLimit } from "./rate-limit-pause.ts";
 
-export type { CoordinatorReopenPrFn } from "./merge-gate.ts";
+export type { CoordinatorReopenPrFn, HandleInFlightDecision } from "./merge-gate.ts";
 export {
 	computeResumeAt,
 	RATE_LIMIT_FALLBACK_PAUSE_MS,
@@ -83,6 +88,7 @@ export const PLAN_RUN_EVENT_KINDS = [
 	"plan_run.plot_auto_done_failed",
 	"plan_run.waiting_for_pr_reopen",
 	"plan_run.paused_rate_limited",
+	"plan_run.resumed_rate_limited",
 ] as const;
 export type PlanRunEventKind = (typeof PLAN_RUN_EVENT_KINDS)[number];
 
@@ -114,6 +120,8 @@ export interface AdvancePlanRunInput {
 	readonly mergeTimeoutMs?: number;
 	/** warren-22de: PR-(re)open seam. */
 	readonly reopenPr?: CoordinatorReopenPrFn;
+	/** warren-e521: rate-limit pause/resume/ceiling config. */
+	readonly rateLimitConfig?: RateLimitConfig;
 	readonly now?: () => Date;
 }
 
@@ -122,9 +130,17 @@ export const DEFAULT_MERGE_TIMEOUT_MS = 30 * 60 * 1000;
 
 const IN_FLIGHT_STATES: readonly PlanRunChildState[] = ["dispatched", "running", "pr_open"];
 
+const DEFAULT_RATE_LIMIT_CONFIG: RateLimitConfig = {
+	bufferMs: DEFAULT_RATE_LIMIT_BUFFER_MS,
+	backoffBaseMs: DEFAULT_RATE_LIMIT_BACKOFF_BASE_MS,
+	backoffCeilMs: DEFAULT_RATE_LIMIT_BACKOFF_CEIL_MS,
+	maxRetries: DEFAULT_RATE_LIMIT_MAX_RETRIES,
+};
+
 export async function advancePlanRun(input: AdvancePlanRunInput): Promise<AdvanceResult> {
 	const nowFn = input.now ?? (() => new Date());
 	const mergeTimeoutMs = input.mergeTimeoutMs ?? DEFAULT_MERGE_TIMEOUT_MS;
+	const rateLimitConfig = input.rateLimitConfig ?? DEFAULT_RATE_LIMIT_CONFIG;
 	let planRun = input.planRun;
 
 	// (a) Queued → running.
@@ -133,9 +149,44 @@ export async function advancePlanRun(input: AdvancePlanRunInput): Promise<Advanc
 		planRun = await input.repos.planRuns.transitionTo(planRun.id, "running", { startedAt });
 	}
 
-	// Guard: paused plans must wait for warren-e521 to resume them.
+	// (warren-e521) paused_rate_limited: wait until resume_at, then resume or fail at ceiling.
+	// We track how many retries were in flight so the resumed_rate_limited event can be
+	// emitted on the newly dispatched run rather than a stale (cleared) child run.
+	let resumedFromRateLimit: { retries: number } | null = null;
 	if (planRun.state === "paused_rate_limited") {
-		return { kind: "noop", reason: "plan_paused_rate_limited" };
+		const now = nowFn();
+		if (planRun.resumeAt === null || now < new Date(planRun.resumeAt)) {
+			return { kind: "noop", reason: "plan_paused_rate_limited" };
+		}
+		// Ceiling check: fail terminally if we've exhausted retries (0 = unlimited).
+		if (rateLimitConfig.maxRetries > 0 && planRun.rateLimitRetries >= rateLimitConfig.maxRetries) {
+			const reason = `rate_limit_ceiling_exceeded:retries=${planRun.rateLimitRetries}`;
+			const endedAt = now.toISOString();
+			await input.repos.planRuns.transitionTo(planRun.id, "failed", {
+				endedAt,
+				failureReason: reason,
+				resumeAt: null,
+			});
+			// Emit on the most recent child run (may be null for a plan with no dispatches yet).
+			const childrenForAnchor = await input.repos.planRuns.listChildren(planRun.id);
+			const anchor = mostRecentDispatchedRunId(childrenForAnchor);
+			if (anchor !== null) {
+				await input.emit(anchor, "plan_run.failed", {
+					planRunId: planRun.id,
+					reason,
+				});
+			}
+			return {
+				kind: "plan_failed",
+				failedSeq: childrenForAnchor.find((c) => c.state === "pending")?.seq ?? 0,
+				reason,
+			};
+		}
+		// Resume: transition back to running, then let the dispatch loop re-queue the child.
+		// We'll emit plan_run.resumed_rate_limited on the NEW run after dispatch below.
+		const retries = planRun.rateLimitRetries;
+		planRun = await input.repos.planRuns.transitionTo(planRun.id, "running", { resumeAt: null });
+		resumedFromRateLimit = { retries };
 	}
 
 	// warren-d9a2: gate on parent run's PR being merged before dispatching
@@ -170,6 +221,7 @@ export async function advancePlanRun(input: AdvancePlanRunInput): Promise<Advanc
 				mergeTimeoutMs,
 				now: nowFn,
 				reopenPr: input.reopenPr,
+				rateLimitConfig,
 			});
 			if (decision.kind === "merged") {
 				mergedChildSeq = inFlight.seq;
@@ -299,6 +351,14 @@ export async function advancePlanRun(input: AdvancePlanRunInput): Promise<Advanc
 			seq: next.seq,
 			seedId: next.seedId,
 		});
+		// Emit resumed_rate_limited on the NEW run so observers see it paired with
+		// the dispatch event (child's old runId was cleared during pause — warren-e521).
+		if (resumedFromRateLimit !== null) {
+			await input.emit(spawnResult.runId, "plan_run.resumed_rate_limited", {
+				planRunId: planRun.id,
+				rateLimitRetries: resumedFromRateLimit.retries,
+			});
+		}
 		if (mergedChildSeq !== undefined) {
 			await input.emit(spawnResult.runId, "plan_run.advanced", {
 				planRunId: planRun.id,
@@ -324,14 +384,11 @@ interface HandleInFlightInput {
 	readonly mergeTimeoutMs: number;
 	readonly now: () => Date;
 	readonly reopenPr?: CoordinatorReopenPrFn; // warren-22de: (re)open PR before failing
+	readonly rateLimitConfig: RateLimitConfig; // warren-e521: backoff config for pause
 }
 
-type HandleInFlightDecision =
-	| { readonly kind: "merged" }
-	| { readonly kind: "result"; readonly result: AdvanceResult };
-
 async function handleInFlight(input: HandleInFlightInput): Promise<HandleInFlightDecision> {
-	const { planRun, child, repos, checkPrMerged, emit, mergeTimeoutMs, now, reopenPr } = input;
+	const { planRun, child, repos, emit, now, rateLimitConfig } = input;
 	if (child.runId === null) {
 		return {
 			kind: "result",
@@ -370,6 +427,7 @@ async function handleInFlight(input: HandleInFlightInput): Promise<HandleInFligh
 			repos,
 			emit,
 			now,
+			rateLimitConfig,
 		});
 		return { kind: "result", result: { kind: "paused_rate_limited", childSeq, resumeAt } };
 	}
@@ -399,152 +457,18 @@ async function handleInFlight(input: HandleInFlightInput): Promise<HandleInFligh
 		};
 	}
 
-	// run.state === 'succeeded': effectivePrUrl updated by reopenPr (warren-22de) falls through to polling.
-	let effectivePrUrl = run.prUrl;
-
-	if (child.state !== "pr_open") {
-		// First observation. Decide pr_open vs trivial-merge.
-		if (effectivePrUrl === null) {
-			const trivial = await hasEmptyPushEvent(repos, child.runId);
-			if (trivial) {
-				const mergedAt = now().toISOString();
-				await repos.planRuns.updateChild({
-					planRunId: planRun.id,
-					seq: child.seq,
-					patch: { state: "merged", prMergedAt: mergedAt, endedAt: mergedAt },
-					now: now(),
-				});
-				await emit(child.runId, "plan_run.merged", {
-					planRunId: planRun.id,
-					mergedChildSeq: child.seq,
-					trivial: true,
-				});
-				return { kind: "merged" };
-			}
-			// warren-22de: reap's pr_open may fail transiently; retry within budget.
-			const prReopen = await resolveChildPrReopen({ run, mergeTimeoutMs, now, reopenPr });
-			if (prReopen.kind === "expired") {
-				const reason = "child_succeeded_without_pr";
-				const endedAt = now().toISOString();
-				await repos.planRuns.updateChild({
-					planRunId: planRun.id,
-					seq: child.seq,
-					patch: { state: "failed", endedAt, failureReason: reason },
-					now: now(),
-				});
-				await repos.planRuns.transitionTo(planRun.id, "failed", { endedAt, failureReason: reason });
-				await emit(child.runId, "plan_run.failed", {
-					planRunId: planRun.id,
-					failedSeq: child.seq,
-					reason,
-				});
-				return { kind: "result", result: { kind: "plan_failed", failedSeq: child.seq, reason } };
-			}
-			if (prReopen.kind === "pending") {
-				await emit(child.runId, "plan_run.waiting_for_pr_reopen", {
-					planRunId: planRun.id,
-					seq: child.seq,
-				});
-				return { kind: "result", result: { kind: "noop", reason: `pr_reopen_pending:${run.id}` } };
-			}
-			await repos.runs.setPrUrl(run.id, prReopen.url);
-			effectivePrUrl = prReopen.url;
-		}
-		// Real PR (or reopened URL) — flip to pr_open and fall through to poll.
-		await repos.planRuns.updateChild({
-			planRunId: planRun.id,
-			seq: child.seq,
-			patch: { state: "pr_open" },
-			now: now(),
-		});
-	}
-
-	// pr_open: poll merge state.
-	if (effectivePrUrl === null) {
-		return {
-			kind: "result",
-			result: { kind: "noop", reason: `pr_open_without_pr_url:${child.runId}` },
-		};
-	}
-	const polled = await checkPrMerged(effectivePrUrl);
-	if (polled.kind === "merged") {
-		await repos.planRuns.updateChild({
-			planRunId: planRun.id,
-			seq: child.seq,
-			patch: { state: "merged", prMergedAt: polled.mergedAt, endedAt: now().toISOString() },
-			now: now(),
-		});
-		await emit(child.runId, "plan_run.merged", {
-			planRunId: planRun.id,
-			mergedChildSeq: child.seq,
-			prUrl: effectivePrUrl,
-			mergedAt: polled.mergedAt,
-		});
-		return { kind: "merged" };
-	}
-	if (polled.kind === "open") {
-		// warren-3937: a PR that stays open past the merge budget (failing
-		// required checks / BLOCKED / stuck auto-merge) fails the plan rather
-		// than waiting forever. The clock starts when the child run ended.
-		if (mergeDeadlineExceeded(run.endedAt, now, mergeTimeoutMs)) {
-			const reason = "child_pr_merge_timeout";
-			const endedAt = now().toISOString();
-			await repos.planRuns.updateChild({
-				planRunId: planRun.id,
-				seq: child.seq,
-				patch: { state: "failed", endedAt, failureReason: reason },
-				now: now(),
-			});
-			await repos.planRuns.transitionTo(planRun.id, "failed", {
-				endedAt,
-				failureReason: reason,
-			});
-			await emit(child.runId, "plan_run.failed", {
-				planRunId: planRun.id,
-				failedSeq: child.seq,
-				reason,
-				prUrl: effectivePrUrl,
-			});
-			return {
-				kind: "result",
-				result: { kind: "plan_failed", failedSeq: child.seq, reason },
-			};
-		}
-		await emit(child.runId, "plan_run.waiting_for_merge", {
-			planRunId: planRun.id,
-			seq: child.seq,
-			prUrl: effectivePrUrl,
-		});
-		return { kind: "result", result: { kind: "waiting_for_merge" } };
-	}
-	if (polled.kind === "closed_unmerged" || isFatalHttpError(polled)) {
-		const reason = "pr_closed_without_merge";
-		const endedAt = now().toISOString();
-		await repos.planRuns.updateChild({
-			planRunId: planRun.id,
-			seq: child.seq,
-			patch: { state: "failed", endedAt, failureReason: reason },
-			now: now(),
-		});
-		await repos.planRuns.transitionTo(planRun.id, "failed", {
-			endedAt,
-			failureReason: reason,
-		});
-		await emit(child.runId, "plan_run.failed", {
-			planRunId: planRun.id,
-			failedSeq: child.seq,
-			reason,
-			prUrl: effectivePrUrl,
-			...(polled.kind === "http_error" ? { httpStatus: polled.status } : {}),
-		});
-		return {
-			kind: "result",
-			result: { kind: "plan_failed", failedSeq: child.seq, reason },
-		};
-	}
-	// `missing_token` or transient `http_error` (status 0 or 5xx that
-	// survived pr-merge.ts retries) — keep waiting.
-	return { kind: "result", result: { kind: "waiting_for_merge" } };
+	// run.state === "succeeded": PR state machine extracted to merge-gate.ts (warren-e521).
+	return handleSucceededChild({
+		planRun,
+		child: child as typeof child & { runId: string },
+		run,
+		repos,
+		checkPrMerged: input.checkPrMerged,
+		emit,
+		mergeTimeoutMs: input.mergeTimeoutMs,
+		now,
+		reopenPr: input.reopenPr,
+	});
 }
 
 function mostRecentDispatchedRunId(children: readonly PlanRunChildRow[]): string | null {

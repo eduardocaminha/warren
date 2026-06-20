@@ -24,6 +24,7 @@
 
 import type { Repos } from "../db/repos/index.ts";
 import type { PlanRunRow } from "../db/schema.ts";
+import type { RateLimitConfig } from "./config.ts";
 import {
 	type AdvanceResult,
 	advancePlanRun,
@@ -71,6 +72,11 @@ export interface PlanRunTickDeps {
 	 * on a child that succeeded with no prUrl and no empty-push event.
 	 */
 	readonly reopenPr?: CoordinatorReopenPrFn;
+	/**
+	 * Rate-limit pause/resume/ceiling config (warren-e521). When omitted,
+	 * the coordinator uses its built-in defaults.
+	 */
+	readonly rateLimitConfig?: RateLimitConfig;
 }
 
 export interface PlanRunAdvanceLog {
@@ -101,6 +107,7 @@ export async function runPlanRunTick(deps: PlanRunTickDeps): Promise<PlanRunTick
 				...(deps.transitionPlot !== undefined ? { transitionPlot: deps.transitionPlot } : {}),
 				...(deps.mergeTimeoutMs !== undefined ? { mergeTimeoutMs: deps.mergeTimeoutMs } : {}),
 				...(deps.reopenPr !== undefined ? { reopenPr: deps.reopenPr } : {}),
+				...(deps.rateLimitConfig !== undefined ? { rateLimitConfig: deps.rateLimitConfig } : {}),
 				...(deps.now !== undefined ? { now: deps.now } : {}),
 			});
 			advances.push({ planRunId: planRun.id, result });

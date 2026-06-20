@@ -407,7 +407,6 @@ export type PlotSyncResponse =
 /* Plan-runs — typed facade over /plan-runs (warren-8ffc).                 */
 /* Wire envelope is camelCase, mirroring /runs.                            */
 /* ----------------------------------------------------------------------- */
-
 export type PlanRunState =
 	| "queued"
 	| "running"
@@ -455,6 +454,7 @@ export interface PlanRunRow {
 	endedAt: string | null;
 	plotId: string | null;
 	resumeAt: string | null;
+	rateLimitRetries: number;
 }
 
 export interface PlanRunChildRow {

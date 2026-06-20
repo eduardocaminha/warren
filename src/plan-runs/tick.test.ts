@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { openDatabase, type WarrenDb } from "../db/client.ts";
 import { createRepos, type Repos } from "../db/repos/index.ts";
 import { agents } from "../db/schema.ts";
+import type { RateLimitConfig } from "./config.ts";
 import type { CoordinatorShowSeedFn, CoordinatorSpawnFn } from "./coordinator.ts";
 import type { PrMergeChecker } from "./pr-merge.ts";
 import { bootPlanRunCoordinator, runPlanRunTick } from "./tick.ts";
@@ -306,5 +307,148 @@ describe("bootPlanRunCoordinator", () => {
 		} finally {
 			await handle.stop();
 		}
+	});
+});
+
+/* ------------------------------------------------------------------ */
+/* paused_rate_limited plan-run resume via tick (warren-e521)          */
+/* ------------------------------------------------------------------ */
+
+describe("runPlanRunTick — paused_rate_limited resume (warren-e521)", () => {
+	let h: Harness;
+
+	beforeEach(async () => {
+		h = await setup();
+	});
+
+	afterEach(async () => {
+		await h.db.close();
+	});
+
+	const aggressiveRateLimitConfig: RateLimitConfig = {
+		bufferMs: 0,
+		backoffBaseMs: 60_000,
+		backoffCeilMs: 60 * 60 * 1000,
+		maxRetries: 3,
+	};
+
+	test("paused plan before resume_at returns noop (not included in tick advances)", async () => {
+		const futureResume = new Date(NOW.getTime() + 60_000).toISOString();
+		const { planRun } = await h.repos.planRuns.create({
+			planId: "pl-r",
+			projectId: h.projectId,
+			agentName: "claude-code",
+			children: [{ seq: 1, seedId: "warren-r1" }],
+			now: NOW,
+		});
+		await h.repos.planRuns.transitionTo(planRun.id, "running", { startedAt: NOW.toISOString() });
+		await h.repos.planRuns.transitionTo(planRun.id, "paused_rate_limited", {
+			resumeAt: futureResume,
+		});
+		const reloaded = await h.repos.planRuns.require(planRun.id);
+
+		const result = await runPlanRunTick({
+			repos: h.repos,
+			showSeed: openSeed,
+			checkPrMerged: noopPoll,
+			spawn: async () => ({ runId: "unused" }),
+			rateLimitConfig: aggressiveRateLimitConfig,
+			now: () => NOW,
+		});
+
+		expect(result.errors).toEqual([]);
+		expect(result.advances).toHaveLength(1);
+		const advance = result.advances[0];
+		expect(advance?.result.kind).toBe("noop");
+		if (advance?.result.kind === "noop") {
+			expect(advance.result.reason).toBe("plan_paused_rate_limited");
+		}
+		// Still paused
+		const recheck = await h.repos.planRuns.require(reloaded.id);
+		expect(recheck.state).toBe("paused_rate_limited");
+	});
+
+	test("paused plan at resume_at is re-dispatched by the tick", async () => {
+		const { planRun } = await h.repos.planRuns.create({
+			planId: "pl-r2",
+			projectId: h.projectId,
+			agentName: "claude-code",
+			children: [{ seq: 1, seedId: "warren-r2" }],
+			now: NOW,
+		});
+		await h.repos.planRuns.transitionTo(planRun.id, "running", { startedAt: NOW.toISOString() });
+		// Set resumeAt = NOW so it's ready to resume
+		await h.repos.planRuns.transitionTo(planRun.id, "paused_rate_limited", {
+			resumeAt: NOW.toISOString(),
+		});
+
+		const dispatched: string[] = [];
+		const spawn: CoordinatorSpawnFn = async ({ child, prompt }) => {
+			const run = await h.repos.runs.create({
+				agentName: "claude-code",
+				projectId: h.projectId,
+				prompt,
+				renderedAgentJson: { sections: {} },
+				trigger: "plan-run",
+				seedId: child.seedId,
+			});
+			dispatched.push(run.id);
+			return { runId: run.id };
+		};
+
+		const result = await runPlanRunTick({
+			repos: h.repos,
+			showSeed: openSeed,
+			checkPrMerged: noopPoll,
+			spawn,
+			rateLimitConfig: aggressiveRateLimitConfig,
+			now: () => NOW,
+		});
+
+		expect(result.errors).toEqual([]);
+		expect(result.advances).toHaveLength(1);
+		const advance = result.advances[0];
+		expect(advance?.result.kind).toBe("dispatched");
+		expect(dispatched).toHaveLength(1);
+		const reloaded = await h.repos.planRuns.require(planRun.id);
+		expect(reloaded.state).toBe("running");
+		expect(reloaded.resumeAt).toBeNull();
+	});
+
+	test("ceiling hit at resume_at fails the plan terminally", async () => {
+		const { planRun } = await h.repos.planRuns.create({
+			planId: "pl-r3",
+			projectId: h.projectId,
+			agentName: "claude-code",
+			children: [{ seq: 1, seedId: "warren-r3" }],
+			now: NOW,
+		});
+		await h.repos.planRuns.transitionTo(planRun.id, "running", { startedAt: NOW.toISOString() });
+		// Set retries = maxRetries (3) and resumeAt = NOW
+		await h.repos.planRuns.transitionTo(planRun.id, "paused_rate_limited", {
+			resumeAt: NOW.toISOString(),
+			rateLimitRetriesDelta: aggressiveRateLimitConfig.maxRetries,
+		});
+
+		let spawnCalled = false;
+		const result = await runPlanRunTick({
+			repos: h.repos,
+			showSeed: openSeed,
+			checkPrMerged: noopPoll,
+			spawn: async () => {
+				spawnCalled = true;
+				return { runId: "unused" };
+			},
+			rateLimitConfig: aggressiveRateLimitConfig,
+			now: () => NOW,
+		});
+
+		expect(spawnCalled).toBe(false);
+		expect(result.errors).toEqual([]);
+		const advance = result.advances[0];
+		expect(advance?.result.kind).toBe("plan_failed");
+		const reloaded = await h.repos.planRuns.require(planRun.id);
+		expect(reloaded.state).toBe("failed");
+		expect(reloaded.failureReason).toContain("rate_limit_ceiling_exceeded");
 	});
 });

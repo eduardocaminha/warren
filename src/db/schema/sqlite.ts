@@ -401,6 +401,8 @@ export const planRuns = sqliteTable(
 		endedAt: text("ended_at"),
 		// Resume timestamp for `paused_rate_limited` plan-runs (warren-3797).
 		resumeAt: text("resume_at"),
+		// Count of rate-limit pauses for backoff + ceiling enforcement (warren-e521).
+		rateLimitRetries: integer("rate_limit_retries").notNull().default(0),
 	},
 	(t) => [
 		index(INDEX_NAMES.planRunsProjectState).on(t.projectId, t.state),

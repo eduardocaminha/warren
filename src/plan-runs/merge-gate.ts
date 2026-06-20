@@ -9,7 +9,12 @@
  * open-but-unmergeable PR fails the plan rather than hanging forever.
  */
 
-import { type PlanRunRow, RUN_TERMINAL_STATES, type RunRow } from "../db/schema.ts";
+import {
+	type PlanRunChildRow,
+	type PlanRunRow,
+	RUN_TERMINAL_STATES,
+	type RunRow,
+} from "../db/schema.ts";
 import type { AdvanceResult, CoordinatorEmitFn, CoordinatorRepos } from "./coordinator.ts";
 
 /**
@@ -202,4 +207,178 @@ export async function hasEmptyPushEvent(repos: CoordinatorRepos, runId: string):
 		if (ev.kind === "reap.empty_push") return true;
 	}
 	return false;
+}
+
+export type HandleInFlightDecision =
+	| { readonly kind: "merged" }
+	| { readonly kind: "result"; readonly result: AdvanceResult };
+
+interface HandleSucceededChildInput {
+	readonly planRun: PlanRunRow;
+	readonly child: PlanRunChildRow & { readonly runId: string };
+	readonly run: RunRow;
+	readonly repos: CoordinatorRepos;
+	readonly checkPrMerged: PrMergeChecker;
+	readonly emit: CoordinatorEmitFn;
+	readonly mergeTimeoutMs: number;
+	readonly now: () => Date;
+	readonly reopenPr?: CoordinatorReopenPrFn;
+}
+
+/**
+ * Handle a child run that has succeeded: decide trivial-merge vs PR-open,
+ * poll GitHub merge state, and advance or fail the plan-run accordingly.
+ * Extracted from coordinator.ts handleInFlight to keep that file under the
+ * file-size ratchet. Called only when run.state === "succeeded".
+ */
+export async function handleSucceededChild(
+	input: HandleSucceededChildInput,
+): Promise<HandleInFlightDecision> {
+	const { planRun, child, run, repos, checkPrMerged, emit, mergeTimeoutMs, now, reopenPr } = input;
+	// run.state === 'succeeded': effectivePrUrl updated by reopenPr (warren-22de) falls through to polling.
+	let effectivePrUrl = run.prUrl;
+
+	if (child.state !== "pr_open") {
+		// First observation. Decide pr_open vs trivial-merge.
+		if (effectivePrUrl === null) {
+			const trivial = await hasEmptyPushEvent(repos, child.runId);
+			if (trivial) {
+				const mergedAt = now().toISOString();
+				await repos.planRuns.updateChild({
+					planRunId: planRun.id,
+					seq: child.seq,
+					patch: { state: "merged", prMergedAt: mergedAt, endedAt: mergedAt },
+					now: now(),
+				});
+				await emit(child.runId, "plan_run.merged", {
+					planRunId: planRun.id,
+					mergedChildSeq: child.seq,
+					trivial: true,
+				});
+				return { kind: "merged" };
+			}
+			// warren-22de: reap's pr_open may fail transiently; retry within budget.
+			const prReopen = await resolveChildPrReopen({ run, mergeTimeoutMs, now, reopenPr });
+			if (prReopen.kind === "expired") {
+				const reason = "child_succeeded_without_pr";
+				const endedAt = now().toISOString();
+				await repos.planRuns.updateChild({
+					planRunId: planRun.id,
+					seq: child.seq,
+					patch: { state: "failed", endedAt, failureReason: reason },
+					now: now(),
+				});
+				await repos.planRuns.transitionTo(planRun.id, "failed", { endedAt, failureReason: reason });
+				await emit(child.runId, "plan_run.failed", {
+					planRunId: planRun.id,
+					failedSeq: child.seq,
+					reason,
+				});
+				return { kind: "result", result: { kind: "plan_failed", failedSeq: child.seq, reason } };
+			}
+			if (prReopen.kind === "pending") {
+				await emit(child.runId, "plan_run.waiting_for_pr_reopen", {
+					planRunId: planRun.id,
+					seq: child.seq,
+				});
+				return { kind: "result", result: { kind: "noop", reason: `pr_reopen_pending:${run.id}` } };
+			}
+			await repos.runs.setPrUrl(run.id, prReopen.url);
+			effectivePrUrl = prReopen.url;
+		}
+		// Real PR (or reopened URL) — flip to pr_open and fall through to poll.
+		await repos.planRuns.updateChild({
+			planRunId: planRun.id,
+			seq: child.seq,
+			patch: { state: "pr_open" },
+			now: now(),
+		});
+	}
+
+	// pr_open: poll merge state.
+	if (effectivePrUrl === null) {
+		return {
+			kind: "result",
+			result: { kind: "noop", reason: `pr_open_without_pr_url:${child.runId}` },
+		};
+	}
+	const polled = await checkPrMerged(effectivePrUrl);
+	if (polled.kind === "merged") {
+		await repos.planRuns.updateChild({
+			planRunId: planRun.id,
+			seq: child.seq,
+			patch: { state: "merged", prMergedAt: polled.mergedAt, endedAt: now().toISOString() },
+			now: now(),
+		});
+		await emit(child.runId, "plan_run.merged", {
+			planRunId: planRun.id,
+			mergedChildSeq: child.seq,
+			prUrl: effectivePrUrl,
+			mergedAt: polled.mergedAt,
+		});
+		return { kind: "merged" };
+	}
+	if (polled.kind === "open") {
+		// warren-3937: a PR that stays open past the merge budget (failing
+		// required checks / BLOCKED / stuck auto-merge) fails the plan rather
+		// than waiting forever. The clock starts when the child run ended.
+		if (mergeDeadlineExceeded(run.endedAt, now, mergeTimeoutMs)) {
+			const reason = "child_pr_merge_timeout";
+			const endedAt = now().toISOString();
+			await repos.planRuns.updateChild({
+				planRunId: planRun.id,
+				seq: child.seq,
+				patch: { state: "failed", endedAt, failureReason: reason },
+				now: now(),
+			});
+			await repos.planRuns.transitionTo(planRun.id, "failed", {
+				endedAt,
+				failureReason: reason,
+			});
+			await emit(child.runId, "plan_run.failed", {
+				planRunId: planRun.id,
+				failedSeq: child.seq,
+				reason,
+				prUrl: effectivePrUrl,
+			});
+			return {
+				kind: "result",
+				result: { kind: "plan_failed", failedSeq: child.seq, reason },
+			};
+		}
+		await emit(child.runId, "plan_run.waiting_for_merge", {
+			planRunId: planRun.id,
+			seq: child.seq,
+			prUrl: effectivePrUrl,
+		});
+		return { kind: "result", result: { kind: "waiting_for_merge" } };
+	}
+	if (polled.kind === "closed_unmerged" || isFatalHttpError(polled)) {
+		const reason = "pr_closed_without_merge";
+		const endedAt = now().toISOString();
+		await repos.planRuns.updateChild({
+			planRunId: planRun.id,
+			seq: child.seq,
+			patch: { state: "failed", endedAt, failureReason: reason },
+			now: now(),
+		});
+		await repos.planRuns.transitionTo(planRun.id, "failed", {
+			endedAt,
+			failureReason: reason,
+		});
+		await emit(child.runId, "plan_run.failed", {
+			planRunId: planRun.id,
+			failedSeq: child.seq,
+			reason,
+			prUrl: effectivePrUrl,
+			...(polled.kind === "http_error" ? { httpStatus: polled.status } : {}),
+		});
+		return {
+			kind: "result",
+			result: { kind: "plan_failed", failedSeq: child.seq, reason },
+		};
+	}
+	// `missing_token` or transient `http_error` (status 0 or 5xx that
+	// survived pr-merge.ts retries) — keep waiting.
+	return { kind: "result", result: { kind: "waiting_for_merge" } };
 }

@@ -34,7 +34,7 @@ import type { DrizzleAdapter } from "./drizzle-adapter.ts";
 const ALLOWED_TRANSITIONS: Record<PlanRunState, readonly PlanRunState[]> = {
 	queued: ["running", "cancelled"],
 	running: ["succeeded", "failed", "cancelled", "paused_rate_limited"],
-	paused_rate_limited: ["running", "cancelled"],
+	paused_rate_limited: ["running", "failed", "cancelled"],
 	succeeded: [],
 	failed: [],
 	cancelled: [],
@@ -93,6 +93,8 @@ export interface TransitionPlanRunOptions {
 	endedAt?: string | null;
 	/** ISO8601 resume timestamp (warren-3797). Set when pausing for rate-limit; cleared on resume. */
 	resumeAt?: string | null;
+	/** Increment the rate-limit retry counter by this delta (warren-e521). Typically +1 on pause. */
+	rateLimitRetriesDelta?: number;
 }
 
 export interface UpdateChildInput {
@@ -167,6 +169,7 @@ export class PlanRunsRepo {
 			startedAt: null,
 			endedAt: null,
 			resumeAt: null,
+			rateLimitRetries: 0,
 		};
 		const childRows: PlanRunChildRow[] = input.children.map((c) => ({
 			planRunId: id,
@@ -265,16 +268,16 @@ export class PlanRunsRepo {
 
 	/**
 	 * Non-terminal plan_runs the coordinator should advance on each tick.
-	 * Excludes `succeeded` / `failed` / `cancelled`. Ordered by createdAt so
-	 * the tick walks them in insertion order — fairness without per-row
-	 * scheduler bookkeeping.
+	 * Includes `paused_rate_limited` so the tick can resume paused plans once
+	 * `now >= resume_at` — the coordinator guards further on the timestamp
+	 * (warren-e521). Ordered by createdAt for fairness.
 	 */
 	async listActive(): Promise<PlanRunRow[]> {
 		return this.adapter.pickAll(
 			this.db
 				.select()
 				.from(this.planRuns)
-				.where(inArray(this.planRuns.state, ["queued", "running"]))
+				.where(inArray(this.planRuns.state, ["queued", "running", "paused_rate_limited"]))
 				.orderBy(asc(this.planRuns.createdAt)),
 		);
 	}
@@ -298,6 +301,9 @@ export class PlanRunsRepo {
 		if (opts.endedAt !== undefined) patch.endedAt = opts.endedAt;
 		if (opts.failureReason !== undefined) patch.failureReason = opts.failureReason;
 		if (opts.resumeAt !== undefined) patch.resumeAt = opts.resumeAt;
+		if (opts.rateLimitRetriesDelta !== undefined && opts.rateLimitRetriesDelta !== 0) {
+			patch.rateLimitRetries = current.rateLimitRetries + opts.rateLimitRetriesDelta;
+		}
 		await this.adapter.runWrite(
 			this.db.update(this.planRuns).set(patch).where(eq(this.planRuns.id, id)),
 		);
