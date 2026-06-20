@@ -96,6 +96,7 @@ export async function runCiFixerPass(input: RunCiFixerPassInput): Promise<void> 
 		history: (prUrl) => repos.runs.fixAttemptHistoryByPrUrl(prUrl),
 		spawn,
 		now,
+		logTailLines: settings.logTailLines,
 	});
 
 	for (const result of results) {

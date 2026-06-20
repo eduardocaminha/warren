@@ -25,7 +25,14 @@
 
 import { composeRunBranch } from "../runs/branch.ts";
 import { parsePullRequestUrl } from "../runs/pr.ts";
-import { classifyCheckRuns, fetchCheckRuns } from "./check-runs.ts";
+import {
+	type CheckRun,
+	classifyCheckRuns,
+	extractJobId,
+	type FetchJobLogTailFn,
+	fetchCheckRuns,
+	fetchJobLogTail,
+} from "./check-runs.ts";
 import { buildFixerPrompt, type CiFixerSettings, decideDispatch } from "./dispatch.ts";
 
 /** Trigger string stamped on poller-dispatched runs — the discriminator
@@ -84,6 +91,12 @@ export interface PollProjectCiFixerInput {
 	readonly history: FixAttemptHistoryFn;
 	readonly spawn: CiFixerSpawnFn;
 	readonly now: Date;
+	/** Max CI-log lines to splice into the fixer prompt (warren-a993).
+	 * `ciFixer.logTailLines` from project config. `<= 0` disables the fetch. */
+	readonly logTailLines: number;
+	/** Test seam for the Actions job-log fetch; defaults to the live
+	 * `fetchJobLogTail`. */
+	readonly fetchLog?: FetchJobLogTailFn;
 }
 
 /**
@@ -136,7 +149,8 @@ async function pollCandidate(
 		return { kind: "skipped", prUrl: candidate.prUrl, reason: decision.reason };
 	}
 
-	const prompt = buildFixerPrompt({ prUrl: candidate.prUrl, failures, logTail: null });
+	const logTail = await resolveLogTail(input, { owner: parsed.owner, repo: parsed.repo }, failures);
+	const prompt = buildFixerPrompt({ prUrl: candidate.prUrl, failures, logTail });
 	const spawned = await input.spawn({
 		prompt,
 		parentRunId: candidate.runId,
@@ -149,4 +163,35 @@ async function pollCandidate(
 		runId: spawned.runId,
 		parentRunId: candidate.runId,
 	};
+}
+
+/**
+ * Resolve the CI log tail to splice into the fixer prompt (warren-a993).
+ * Walks the failing check-runs, resolving each one's Actions job id from its
+ * `details_url` (check-run id fallback), and returns the first non-empty log
+ * tail. A null result (logging disabled, no Actions job, or every fetch
+ * failed) leaves `buildFixerPrompt` to fall back to the check-name-only
+ * prompt — log extraction never blocks a dispatch.
+ */
+async function resolveLogTail(
+	input: PollProjectCiFixerInput,
+	repo: { owner: string; repo: string },
+	failures: readonly CheckRun[],
+): Promise<string | null> {
+	if (input.logTailLines <= 0) return null;
+	const fetchLog = input.fetchLog ?? fetchJobLogTail;
+	for (const failure of failures) {
+		const tail = await fetchLog(
+			{
+				owner: repo.owner,
+				repo: repo.repo,
+				jobId: extractJobId(failure.detailsUrl, failure.id),
+				token: input.token,
+				...(input.fetch !== undefined ? { fetch: input.fetch } : {}),
+			},
+			input.logTailLines,
+		);
+		if (tail !== null) return tail;
+	}
+	return null;
 }

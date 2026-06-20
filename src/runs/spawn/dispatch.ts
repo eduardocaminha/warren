@@ -196,16 +196,16 @@ export async function spawnRun(input: SpawnRunInput): Promise<SpawnRunResult> {
 		now: input.now?.(),
 	});
 
-	// warren-9993: compose the burrow workspace branch as `${prefix}/${run.id}`
-	// so the branch traces back to the warren run on `git log` / PR review.
-	// Precedence project default > env > "burrow" (the legacy default,
-	// preserved for backward compatibility).
+	// warren-9993/a993: burrow branch = `${prefix}/${run.id}` (prefix precedence
+	// project default > env > "burrow"); a CI-fixer run's `targetBranch` pins it
+	// to the open PR head ref instead, so the fixer's commits re-run that PR's CI.
 	const branch = composeRunBranch(
 		resolveRunBranchPrefix({
 			projectDefault: projectDefaults?.runBranchPrefix,
 			envDefault: input.runBranchPrefixDefault,
 		}),
 		run.id,
+		input.targetBranch,
 	);
 
 	// warren-e26f: when the run is bound to a Plot, inject the env vars the

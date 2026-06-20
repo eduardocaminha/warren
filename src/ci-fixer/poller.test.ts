@@ -45,6 +45,7 @@ function harness(over: Partial<PollProjectCiFixerInput> = {}): Harness {
 			return { runId: "run_fixer" };
 		},
 		now: NOW,
+		logTailLines: 0,
 		...over,
 	};
 	return { spawnCalls, input };
@@ -69,6 +70,49 @@ describe("pollProjectCiFixer", () => {
 		expect(spawnCalls[0]?.prUrl).toBe("https://github.com/o/r/pull/3");
 		expect(spawnCalls[0]?.prompt).toContain("https://github.com/o/r/pull/3");
 		expect(spawnCalls[0]?.prompt).toContain("- test: failure (https://ci/1)");
+	});
+
+	test("splices the CI log tail into the prompt when logTailLines > 0", async () => {
+		const logCalls: { jobId: number; tailLines: number }[] = [];
+		const { spawnCalls, input } = harness({
+			logTailLines: 50,
+			fetchLog: async (i, tailLines) => {
+				logCalls.push({ jobId: i.jobId, tailLines });
+				return "error: boom\nstack frame";
+			},
+		});
+		const results = await pollProjectCiFixer(input);
+
+		expect(results[0]?.kind).toBe("dispatched");
+		// details_url `https://ci/1` has no `/job/<id>` segment → check-run id fallback.
+		expect(logCalls).toEqual([{ jobId: 1, tailLines: 50 }]);
+		expect(spawnCalls[0]?.prompt).toContain("CI log tail:");
+		expect(spawnCalls[0]?.prompt).toContain("error: boom");
+	});
+
+	test("falls back to the check-name-only prompt when the log fetch yields null", async () => {
+		const { spawnCalls, input } = harness({
+			logTailLines: 50,
+			fetchLog: async () => null,
+		});
+		const results = await pollProjectCiFixer(input);
+
+		expect(results[0]?.kind).toBe("dispatched");
+		expect(spawnCalls[0]?.prompt).not.toContain("CI log tail:");
+		expect(spawnCalls[0]?.prompt).toContain("No CI log could be fetched");
+	});
+
+	test("does not fetch a log when logTailLines is 0", async () => {
+		let called = false;
+		const { input } = harness({
+			logTailLines: 0,
+			fetchLog: async () => {
+				called = true;
+				return "should not be used";
+			},
+		});
+		await pollProjectCiFixer(input);
+		expect(called).toBe(false);
 	});
 
 	test("skips with not_failing when CI is green", async () => {

@@ -325,7 +325,7 @@ export async function reapRun(input: ReapRunInput): Promise<ReapRunResult> {
 			}
 		}
 
-		// Auto-open PR (warren-f6af). See runPrOpen for the gate semantics.
+		// Auto-open PR (warren-f6af); a CI-fixer run self-skips inside runPrOpen (warren-a993).
 		if (
 			input.autoOpenPr?.enabled === true &&
 			input.outcome === "succeeded" &&

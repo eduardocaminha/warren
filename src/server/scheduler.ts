@@ -111,9 +111,10 @@ export function bootScheduler(input: BootSchedulerInput): SchedulerHandle {
 	// warren-0b75: CI-fixer dispatch wraps `spawnRun` like the cron path,
 	// pinning trigger="ci-fixer" (the discriminator fixAttemptHistoryByPrUrl
 	// counts) and back-linking the fixer to the PR's opener via parentRunId so
-	// the fixer's workspace forks from the opener's pushed branch. The PR-head
-	// targetBranch push (so the PR's CI re-runs) is honored by spawn/reap in
-	// warren-a993; the poller already carries it on the spawn input here.
+	// the fixer's workspace forks from the opener's pushed branch. warren-a993:
+	// `targetBranch` pins the burrow branch to the PR head ref so the fixer's
+	// commits push back onto the open PR (re-running its CI) instead of opening
+	// a fresh `${prefix}/run_xxx` branch; reap honors the same branch on push.
 	const ciFixerSpawn: TickCiFixerSpawnFn = async (
 		args: TickCiFixerSpawnInput,
 	): Promise<{ runId: string }> => {
@@ -125,6 +126,7 @@ export function bootScheduler(input: BootSchedulerInput): SchedulerHandle {
 			prompt: args.prompt,
 			trigger: "ci-fixer",
 			parentRunId: args.parentRunId,
+			targetBranch: args.targetBranch,
 			projectsConfig: input.projectsConfig,
 			projectSpawn: input.projectSpawn,
 			warrenConfigs: input.warrenConfigs,

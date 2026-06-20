@@ -113,6 +113,18 @@ export interface SpawnRunInput {
 	 * Ignored when `parentRunId` is unset (root run → null clone_kind).
 	 */
 	readonly cloneKind?: CloneKind;
+	/**
+	 * Existing branch the run must push to instead of the composed
+	 * `${prefix}/${runId}` (warren-a993). The CI-fixer poller sets this to
+	 * the PR head branch so the fixer's commits push to the open PR and its
+	 * CI re-runs, rather than opening a fresh `${prefix}/run_xxx` branch (and
+	 * a second PR). A non-empty value short-circuits the prefix composition
+	 * (see `composeRunBranch`); empty / whitespace-only falls back to the
+	 * composed branch so a stray override can never strand the spawn on a
+	 * blank ref. Pairs with `parentRunId` (`cloneKind: "continue"`) so the
+	 * workspace also forks from that same branch tip.
+	 */
+	readonly targetBranch?: string;
 	/** Override the project refresher; defaults to `refreshProject`. */
 	readonly refreshProjectFn?: typeof refreshProject;
 	/**
