@@ -142,6 +142,7 @@ export function createConversationHandler(deps: ServerDeps): RouteHandler {
 			runBranchPrefixDefault: deps.runBranchPrefixDefault,
 			seedsCli: deps.seedsCli,
 			runtimeOverride,
+			logger: ctx.logger,
 			...(deps.now !== undefined ? { now: deps.now } : {}),
 		});
 
