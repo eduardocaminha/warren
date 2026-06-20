@@ -181,19 +181,30 @@ export type WorkerState = (typeof WORKER_STATES)[number];
  * `sd plan` walk; the coordinator (warren-2623) advances the row through
  * these states as it executes each child seed sequentially:
  *
- *   - `queued`     — row inserted by POST /plan-runs; first tick will flip
- *                    to `running` and dispatch the lowest-seq child.
- *   - `running`    — at least one child has been dispatched. The row stays
- *                    here until every child is `merged` / `skipped`, OR a
- *                    child terminal-fails / its PR closes without merge.
- *   - `succeeded`  — every child reached `merged` or `skipped`.
- *   - `failed`     — a child terminal-failed or its PR closed unmerged;
- *                    `failure_reason` carries the discriminator.
- *   - `cancelled`  — operator hit POST /plan-runs/:id/cancel.
+ *   - `queued`              — row inserted by POST /plan-runs; first tick will flip
+ *                             to `running` and dispatch the lowest-seq child.
+ *   - `running`             — at least one child has been dispatched. The row stays
+ *                             here until every child is `merged` / `skipped`, OR a
+ *                             child terminal-fails / its PR closes without merge.
+ *   - `paused_rate_limited` — a child run hit the Anthropic rate limit; the plan
+ *                             is paused until `resume_at` (= resets_at + buffer).
+ *                             The tick (warren-e521) re-dispatches the same child
+ *                             once `now >= resume_at`. (warren-3797)
+ *   - `succeeded`           — every child reached `merged` or `skipped`.
+ *   - `failed`              — a child terminal-failed or its PR closed unmerged;
+ *                             `failure_reason` carries the discriminator.
+ *   - `cancelled`           — operator hit POST /plan-runs/:id/cancel.
  *
  * TS-only narrowing — no SQL CHECK constraint (mx-2ab984).
  */
-export const PLAN_RUN_STATES = ["queued", "running", "succeeded", "failed", "cancelled"] as const;
+export const PLAN_RUN_STATES = [
+	"queued",
+	"running",
+	"paused_rate_limited",
+	"succeeded",
+	"failed",
+	"cancelled",
+] as const;
 export type PlanRunState = (typeof PLAN_RUN_STATES)[number];
 
 export const PLAN_RUN_TERMINAL_STATES = [

@@ -132,6 +132,13 @@ function logAdvance(
 		logger.warn({ planRunId, reason: result.reason }, "plan_run.noop");
 		return;
 	}
+	if (result.kind === "paused_rate_limited") {
+		logger.warn(
+			{ planRunId, childSeq: result.childSeq, resumeAt: result.resumeAt },
+			"plan_run.paused_rate_limited",
+		);
+		return;
+	}
 	logger.info({ planRunId, kind: result.kind }, "plan_run.advanced");
 }
 

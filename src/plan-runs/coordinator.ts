@@ -1,36 +1,21 @@
 /**
  * Per-PlanRun decision loop (pl-a258 step 5 / warren-2623).
  *
- * `advancePlanRun` is the load-bearing state machine. One call examines
- * the current PlanRun, decides exactly one of:
+ * `advancePlanRun` is the state machine: one call dispatches the next child,
+ * waits for a run/merge, advances after a merge, pauses on rate-limit, fails
+ * terminally on other errors, or returns noop when nothing is actionable.
+ * The full state-machine spec lives in warren-2623 step (a)/(b)/(c).
  *
- *   - dispatch the next pending child
- *   - wait for the in-flight child's run to finish
- *   - wait for the in-flight child's PR to merge
- *   - advance: previous child merged, dispatch the next (or succeed)
- *   - fail the plan (terminal child run, PR closed unmerged, dispatch error)
- *   - succeed the plan (every child reached merged / skipped)
- *   - noop (something unexpected — return diagnostic, don't crash)
+ * Resume semantics (warren-fcc9): a `closed` seed at dispatch time becomes
+ * `skipped` so re-dispatching the same plan id picks up mid-plan.
  *
- * The state machine is described in warren-2623 step (a)/(b)/(c). Resume
- * semantics (warren-fcc9): a seed that's already `closed` at dispatch
- * time gets flipped to `skipped` without spawning a run, so re-dispatching
- * the same plan id picks up where the prior PlanRun left off.
+ * Trivial-merge (mx-fd8619): zero-commit push with `reap.empty_push` event
+ * advances directly to `merged` without GitHub polling. Dropped commits
+ * (warren-72b9) reap `failed` first.
  *
- * Trivial-merge (mx-fd8619): when the child run terminal-succeeds with
- * `run.prUrl === null` AND reap emitted a `reap.empty_push` system event
- * (commitsAhead === 0), the coordinator advances directly to `merged`
- * without GitHub polling. Dropped commits (warren-72b9) reap `failed` first.
- *
- * Events fire via `emit(runId, kind, payload)` on the most recently
- * dispatched child run; callers wire it to `repos.events.append`
- * (mirrors the scheduler's `trigger.*` system events in
- * src/triggers/tick.ts).
- *
- * The coordinator itself never throws — every failure path is encoded
- * in the AdvanceResult union. The tick wrapper (tick.ts) still wraps
- * calls in try/catch so a programmer error in the repo or spawn seam
- * can't tear down the loop.
+ * Events fire on the most recently dispatched child run (wired to
+ * `repos.events.append` by the tick — mirrors `trigger.*` system events).
+ * The coordinator never throws — all failure paths are in `AdvanceResult`.
  */
 
 import type { Repos } from "../db/repos/index.ts";
@@ -52,8 +37,14 @@ import {
 } from "./merge-gate.ts";
 import type { AutoTransitionResult } from "./plot-transition.ts";
 import type { PrMergeChecker } from "./pr-merge.ts";
+import { pausePlanRunForRateLimit } from "./rate-limit-pause.ts";
 
 export type { CoordinatorReopenPrFn } from "./merge-gate.ts";
+export {
+	computeResumeAt,
+	RATE_LIMIT_FALLBACK_PAUSE_MS,
+	RATE_LIMIT_RESUME_BUFFER_MS,
+} from "./rate-limit-pause.ts";
 
 export type CoordinatorRepos = Pick<Repos, "planRuns" | "runs" | "events">;
 
@@ -77,16 +68,7 @@ export type CoordinatorEmitFn = (
 	payload: Record<string, unknown>,
 ) => Promise<void>;
 
-/**
- * Optional Plot auto-done hook (warren-b290 / pl-7937 step 5). Called once
- * when the coordinator transitions a PlanRun to `succeeded` AND the row
- * carries a non-null `plot_id`. The implementation owns reading the Plot,
- * gating on `status === 'active'`, calling `setStatus('done')`, and
- * logging — the coordinator just maps the returned `AutoTransitionResult`
- * onto a `plan_run.plot_*` system event on the anchor child run. Default
- * is a no-op, so tests that don't care about Plot wiring get the same
- * behavior as the pre-pl-7937 baseline.
- */
+/** warren-b290 / pl-7937: auto-transition the bound Plot to `done` on plan_succeeded. */
 export type CoordinatorTransitionPlotFn = (planRun: PlanRunRow) => Promise<AutoTransitionResult>;
 
 export const PLAN_RUN_EVENT_KINDS = [
@@ -100,6 +82,7 @@ export const PLAN_RUN_EVENT_KINDS = [
 	"plan_run.plot_status_skipped",
 	"plan_run.plot_auto_done_failed",
 	"plan_run.waiting_for_pr_reopen",
+	"plan_run.paused_rate_limited",
 ] as const;
 export type PlanRunEventKind = (typeof PLAN_RUN_EVENT_KINDS)[number];
 
@@ -115,7 +98,8 @@ export type AdvanceResult =
 	  }
 	| { readonly kind: "plan_failed"; readonly failedSeq: number; readonly reason: string }
 	| { readonly kind: "plan_succeeded" }
-	| { readonly kind: "noop"; readonly reason: string };
+	| { readonly kind: "noop"; readonly reason: string }
+	| { readonly kind: "paused_rate_limited"; readonly childSeq: number; readonly resumeAt: string };
 
 export interface AdvancePlanRunInput {
 	readonly planRun: PlanRunRow;
@@ -124,11 +108,11 @@ export interface AdvancePlanRunInput {
 	readonly checkPrMerged: PrMergeChecker;
 	readonly spawn: CoordinatorSpawnFn;
 	readonly emit: CoordinatorEmitFn;
-	/** warren-b290: Plot auto-done hook fired on plan_succeeded when plotId is set. */
+	/** warren-b290: plot auto-done hook on plan_succeeded. */
 	readonly transitionPlot?: CoordinatorTransitionPlotFn;
-	/** warren-3937: merge-wait budget (ms); defaults to {@link DEFAULT_MERGE_TIMEOUT_MS}, 0 disables. */
+	/** warren-3937: merge-wait budget (ms); 0 disables. Default: {@link DEFAULT_MERGE_TIMEOUT_MS}. */
 	readonly mergeTimeoutMs?: number;
-	/** warren-22de: PR-(re)open seam. See {@link CoordinatorReopenPrFn}. */
+	/** warren-22de: PR-(re)open seam. */
 	readonly reopenPr?: CoordinatorReopenPrFn;
 	readonly now?: () => Date;
 }
@@ -149,6 +133,11 @@ export async function advancePlanRun(input: AdvancePlanRunInput): Promise<Advanc
 		planRun = await input.repos.planRuns.transitionTo(planRun.id, "running", { startedAt });
 	}
 
+	// Guard: paused plans must wait for warren-e521 to resume them.
+	if (planRun.state === "paused_rate_limited") {
+		return { kind: "noop", reason: "plan_paused_rate_limited" };
+	}
+
 	// warren-d9a2: gate on parent run's PR being merged before dispatching
 	// the first child. Auto-plan-runs carry parentRunId — the parent's
 	// branch has the seeds state the children need on main.
@@ -166,8 +155,7 @@ export async function advancePlanRun(input: AdvancePlanRunInput): Promise<Advanc
 
 	let mergedChildSeq: number | undefined;
 
-	// Loop until we hit a terminal/waiting decision. Each iteration reloads
-	// children so a merge/skip can fall through to the dispatch arm.
+	// Loop: reload children each iteration so a merge/skip falls through to dispatch.
 	for (;;) {
 		const children = await input.repos.planRuns.listChildren(planRun.id);
 		const inFlight = children.find((c) => IN_FLIGHT_STATES.includes(c.state));
@@ -202,11 +190,8 @@ export async function advancePlanRun(input: AdvancePlanRunInput): Promise<Advanc
 			if (anchor !== null) {
 				await input.emit(anchor, "plan_run.succeeded", { planRunId: planRun.id });
 			}
-			// warren-b290 / pl-7937 step 5: auto-transition the bound Plot
-			// from `active` → `done`. Best-effort — every outcome surfaces
-			// as a `plan_run.plot_*` system event on the anchor child run
-			// (when one exists). Skipped entirely when no plot_id is set
-			// on the PlanRun or no hook is wired in (tests).
+			// warren-b290 / pl-7937 step 5: auto-transition the bound Plot to `done`
+			// when plan_succeeded. Best-effort; no-op when plot_id is unset or hook absent.
 			if (planRun.plotId !== null && input.transitionPlot !== undefined) {
 				const transitionResult = await input.transitionPlot(planRun);
 				if (anchor !== null) {
@@ -374,6 +359,19 @@ async function handleInFlight(input: HandleInFlightInput): Promise<HandleInFligh
 			});
 		}
 		return { kind: "result", result: { kind: "waiting_for_run" } };
+	}
+
+	// warren-3797: pause instead of fail when the child hit the rate limit.
+	if (run.state === "failed" && run.failureReason === "rate_limited" && child.runId !== null) {
+		const { childSeq, resumeAt } = await pausePlanRunForRateLimit({
+			planRun,
+			child: { ...child, runId: child.runId },
+			run,
+			repos,
+			emit,
+			now,
+		});
+		return { kind: "result", result: { kind: "paused_rate_limited", childSeq, resumeAt } };
 	}
 
 	if (run.state === "failed" || run.state === "cancelled") {

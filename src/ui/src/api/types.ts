@@ -573,7 +573,13 @@ export interface RunTriggerResponse {
 /* boundary is the HTTP wire, not a TS import (mx-1bd551).                 */
 /* ----------------------------------------------------------------------- */
 
-export type PlanRunState = "queued" | "running" | "succeeded" | "failed" | "cancelled";
+export type PlanRunState =
+	| "queued"
+	| "running"
+	| "paused_rate_limited"
+	| "succeeded"
+	| "failed"
+	| "cancelled";
 
 export const PLAN_RUN_TERMINAL_STATES: readonly PlanRunState[] = [
 	"succeeded",
@@ -581,7 +587,11 @@ export const PLAN_RUN_TERMINAL_STATES: readonly PlanRunState[] = [
 	"cancelled",
 ];
 
-export const PLAN_RUN_ACTIVE_STATES: readonly PlanRunState[] = ["queued", "running"];
+export const PLAN_RUN_ACTIVE_STATES: readonly PlanRunState[] = [
+	"queued",
+	"running",
+	"paused_rate_limited",
+];
 
 export type PlanRunChildState =
 	| "pending"
@@ -617,6 +627,8 @@ export interface PlanRunRow {
 	 * single-run path unchanged.
 	 */
 	plotId: string | null;
+	/** ISO8601 resume time for `paused_rate_limited` plan-runs (warren-3797). */
+	resumeAt: string | null;
 }
 
 export interface PlanRunChildRow {
