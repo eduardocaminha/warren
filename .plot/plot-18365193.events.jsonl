@@ -7,3 +7,22 @@
 {"type":"attachment_added","actor":"user:operator","at":"2026-06-21T22:56:22.525Z","data":{"id":"att-005","type":"seeds_issue","ref":"warren-0727","role":"tracks"}}
 {"type":"attachment_added","actor":"user:operator","at":"2026-06-21T22:56:22.528Z","data":{"id":"att-006","type":"seeds_issue","ref":"warren-9a1b","role":"tracks"}}
 {"type":"attachment_removed","actor":"user:operator","at":"2026-06-21T22:57:35.905Z","data":{"id":"att-001"}}
+{"type":"intent_edited","actor":"user:operator","at":"2026-06-21T23:04:11.707Z","data":{"field":"goal","value":"Permitir escolher o runtime da conversa do Leveret (pi-chat / claude-code-chat) e trocar no meio via re-wake, rodando o overseer na subscription do Claude."}}
+{"type":"intent_edited","actor":"user:operator","at":"2026-06-21T23:04:11.707Z","data":{"field":"non_goals","value":["pi-chat continua o default","override por-run (runtime_override), sem duplicar agente","switch no meio via re-wake (replay do transcript = memória compartilhada)","não reescrever a máquina de conversa (já é genérica por mode)"]}}
+{"type":"intent_edited","actor":"user:operator","at":"2026-06-21T23:04:11.707Z","data":{"field":"constraints","value":["pi-chat continua o default","override por-run (runtime_override), sem duplicar agente","switch no meio via re-wake (replay do transcript = memória compartilhada)","não reescrever a máquina de conversa (já é genérica por mode)"]}}
+{"type":"intent_edited","actor":"user:operator","at":"2026-06-21T23:04:11.707Z","data":{"field":"success_criteria","value":["criar conversa com runtime=claude-code-chat dispatcha o run nesse runtime","re-wake com runtime diferente resume com o transcript inteiro (switch no meio)","o select default em pi-chat","check:all verde em todos os PRs"]}}
+{"type":"attachment_removed","actor":"user:operator","at":"2026-06-21T23:38:07.671Z","data":{"id":"att-002"}}
+{"type":"attachment_removed","actor":"user:operator","at":"2026-06-21T23:38:11.512Z","data":{"id":"att-003"}}
+{"type":"attachment_removed","actor":"user:operator","at":"2026-06-21T23:38:12.493Z","data":{"id":"att-004"}}
+{"type":"attachment_removed","actor":"user:operator","at":"2026-06-21T23:38:12.794Z","data":{"id":"att-005"}}
+{"type":"attachment_removed","actor":"user:operator","at":"2026-06-21T23:38:13.227Z","data":{"id":"att-006"}}
+{"type":"attachment_added","actor":"user:operator","at":"2026-06-21T23:38:20.177Z","data":{"id":"att-001","type":"seeds_issue","ref":"pl-8c5b","role":"tracks"}}
+{"type":"attachment_added","actor":"user:operator","at":"2026-06-21T23:38:25.327Z","data":{"id":"att-002","type":"seeds_issue","ref":"warren-fe84","role":"tracks"}}
+{"type":"attachment_added","actor":"user:operator","at":"2026-06-21T23:38:25.344Z","data":{"id":"att-003","type":"seeds_issue","ref":"warren-163d","role":"tracks"}}
+{"type":"attachment_added","actor":"user:operator","at":"2026-06-21T23:38:25.350Z","data":{"id":"att-004","type":"seeds_issue","ref":"warren-0727","role":"tracks"}}
+{"type":"attachment_added","actor":"user:operator","at":"2026-06-21T23:38:25.354Z","data":{"id":"att-005","type":"seeds_issue","ref":"warren-9a1b","role":"tracks"}}
+{"type":"attachment_removed","actor":"user:operator","at":"2026-06-21T23:38:30.889Z","data":{"id":"att-001"}}
+{"type":"attachment_removed","actor":"user:operator","at":"2026-06-21T23:38:31.847Z","data":{"id":"att-002"}}
+{"type":"attachment_removed","actor":"user:operator","at":"2026-06-21T23:38:32.074Z","data":{"id":"att-003"}}
+{"type":"attachment_removed","actor":"user:operator","at":"2026-06-21T23:38:32.282Z","data":{"id":"att-004"}}
+{"type":"attachment_removed","actor":"user:operator","at":"2026-06-21T23:38:32.555Z","data":{"id":"att-005"}}

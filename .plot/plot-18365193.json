@@ -1,56 +1,30 @@
 {
-  "attachments": [
-    {
-      "added_at": "2026-06-21T22:55:56.618Z",
-      "added_by": "user:operator",
-      "id": "att-002",
-      "ref": "pl-8c5b",
-      "role": "plan",
-      "type": "seeds_issue"
-    },
-    {
-      "added_at": "2026-06-21T22:56:22.506Z",
-      "added_by": "user:operator",
-      "id": "att-003",
-      "ref": "warren-fe84",
-      "role": "tracks",
-      "type": "seeds_issue"
-    },
-    {
-      "added_at": "2026-06-21T22:56:22.523Z",
-      "added_by": "user:operator",
-      "id": "att-004",
-      "ref": "warren-163d",
-      "role": "tracks",
-      "type": "seeds_issue"
-    },
-    {
-      "added_at": "2026-06-21T22:56:22.525Z",
-      "added_by": "user:operator",
-      "id": "att-005",
-      "ref": "warren-0727",
-      "role": "tracks",
-      "type": "seeds_issue"
-    },
-    {
-      "added_at": "2026-06-21T22:56:22.528Z",
-      "added_by": "user:operator",
-      "id": "att-006",
-      "ref": "warren-9a1b",
-      "role": "tracks",
-      "type": "seeds_issue"
-    }
-  ],
+  "attachments": [],
   "created_at": "2026-06-21T22:36:34.630Z",
   "id": "plot-18365193",
   "intent": {
-    "constraints": [],
-    "goal": "Permitir claude subscription no Leveret",
-    "non_goals": [],
-    "success_criteria": []
+    "constraints": [
+      "pi-chat continua o default",
+      "override por-run (runtime_override), sem duplicar agente",
+      "switch no meio via re-wake (replay do transcript = memória compartilhada)",
+      "não reescrever a máquina de conversa (já é genérica por mode)"
+    ],
+    "goal": "Permitir escolher o runtime da conversa do Leveret (pi-chat / claude-code-chat) e trocar no meio via re-wake, rodando o overseer na subscription do Claude.",
+    "non_goals": [
+      "pi-chat continua o default",
+      "override por-run (runtime_override), sem duplicar agente",
+      "switch no meio via re-wake (replay do transcript = memória compartilhada)",
+      "não reescrever a máquina de conversa (já é genérica por mode)"
+    ],
+    "success_criteria": [
+      "criar conversa com runtime=claude-code-chat dispatcha o run nesse runtime",
+      "re-wake com runtime diferente resume com o transcript inteiro (switch no meio)",
+      "o select default em pi-chat",
+      "check:all verde em todos os PRs"
+    ]
   },
   "name": "Leveret com claude subscription",
   "schema_version": 1,
   "status": "drafting",
-  "updated_at": "2026-06-21T22:57:35.905Z"
+  "updated_at": "2026-06-21T23:38:32.555Z"
 }
