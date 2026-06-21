@@ -53,6 +53,8 @@ export interface SupervisorDeps {
 	readonly sleep: (ms: number) => Promise<void>;
 	readonly now: () => number;
 	readonly logger: SupervisorLogger;
+	/** Probe burrow's /healthz. Returns true if reachable; false on timeout or error. Omit to disable the liveness probe. */
+	readonly probeBurrow?: (socketPath: string, timeoutMs: number) => Promise<boolean>;
 }
 
 export interface SupervisorOpts {
@@ -64,6 +66,12 @@ export interface SupervisorOpts {
 	readonly burrowRestartWindowMs?: number;
 	readonly burrowBackoffBaseMs?: number;
 	readonly burrowBackoffCapMs?: number;
+	/** How often to probe burrow's /healthz (ms). Default: 30s. */
+	readonly burrowLivenessIntervalMs?: number;
+	/** Per-probe HTTP timeout (ms). Default: 5s. */
+	readonly burrowLivenessTimeoutMs?: number;
+	/** Consecutive failures before killing and restarting burrow. Default: 3. */
+	readonly burrowLivenessFailureThreshold?: number;
 }
 
 export interface SupervisorResult {
@@ -78,6 +86,9 @@ export interface SupervisorResult {
 export const DEFAULT_SIGNAL_GRACE_MS = 5_000;
 export const DEFAULT_BURROW_RESTART_BUDGET = 5;
 export const DEFAULT_BURROW_RESTART_WINDOW_MS = 60_000;
+export const DEFAULT_BURROW_LIVENESS_INTERVAL_MS = 30_000;
+export const DEFAULT_BURROW_LIVENESS_TIMEOUT_MS = 5_000;
+export const DEFAULT_BURROW_LIVENESS_FAILURE_THRESHOLD = 3;
 
 /**
  * Run the supervisor's lifecycle. Resolves when the orchestrator decides to
@@ -129,8 +140,23 @@ export async function runSupervisor(
 	const uninstallTerm = deps.installSignalHandler("SIGTERM", () => onSignal("SIGTERM"));
 	const uninstallInt = deps.installSignalHandler("SIGINT", () => onSignal("SIGINT"));
 
+	const livenessIntervalMs = opts.burrowLivenessIntervalMs ?? DEFAULT_BURROW_LIVENESS_INTERVAL_MS;
+	const livenessTimeoutMs = opts.burrowLivenessTimeoutMs ?? DEFAULT_BURROW_LIVENESS_TIMEOUT_MS;
+	const livenessFailureThreshold =
+		opts.burrowLivenessFailureThreshold ?? DEFAULT_BURROW_LIVENESS_FAILURE_THRESHOLD;
+
 	try {
-		const burrowSupervisor = superviseBurrow(state, deps, opts, budget, baseBackoff, capBackoff);
+		const burrowSupervisor = superviseBurrow(
+			state,
+			deps,
+			opts,
+			budget,
+			baseBackoff,
+			capBackoff,
+			livenessIntervalMs,
+			livenessTimeoutMs,
+			livenessFailureThreshold,
+		);
 		const warrenWatcher = state.warren.exited.then((code) => ({ kind: "warren" as const, code }));
 
 		const outcome = await Promise.race([
@@ -181,7 +207,23 @@ async function superviseBurrow(
 	budget: RestartBudget,
 	baseBackoff: number,
 	capBackoff: number,
+	livenessIntervalMs: number,
+	livenessTimeoutMs: number,
+	livenessFailureThreshold: number,
 ): Promise<"burrow_budget_exhausted" | "burrow_clean_exit"> {
+	// Run liveness probe in background. When it detects N consecutive
+	// /healthz timeouts it kills the current burrow child; the exit-watch
+	// loop below sees the non-zero exit and restarts via the existing
+	// RestartBudget + backoff path — no separate restart logic needed.
+	void burrowLivenessProbeLoop(
+		state,
+		deps,
+		opts.socketPath,
+		livenessIntervalMs,
+		livenessTimeoutMs,
+		livenessFailureThreshold,
+	);
+
 	let attempt = 0;
 	while (true) {
 		const child = state.burrow;
@@ -239,6 +281,83 @@ async function superviseBurrow(
 }
 
 /**
+ * Periodically probes burrow's /healthz. After `failureThreshold` consecutive
+ * probe failures, kills the current burrow child so the exit-watch loop in
+ * `superviseBurrow` triggers a restart via the existing RestartBudget + backoff.
+ * No-ops when `deps.probeBurrow` is absent (opt-out for tests that don't need it).
+ */
+async function burrowLivenessProbeLoop(
+	state: SupervisorState,
+	deps: SupervisorDeps,
+	socketPath: string,
+	intervalMs: number,
+	timeoutMs: number,
+	failureThreshold: number,
+): Promise<void> {
+	if (deps.probeBurrow === undefined) return;
+
+	let consecutiveFailures = 0;
+	let lastKilledChild: SupervisedChild | undefined;
+
+	while (!state.shuttingDown) {
+		await deps.sleep(intervalMs);
+		if (state.shuttingDown) break;
+
+		const child = state.burrow;
+		// Skip if no child or if this child was already killed — wait for the
+		// exit-watch loop to replace it with a fresh restart.
+		if (child === undefined || child === lastKilledChild) continue;
+
+		const ok = await deps.probeBurrow(socketPath, timeoutMs).catch(() => false);
+		if (state.shuttingDown) break;
+
+		({ consecutiveFailures, lastKilledChild } = applyLivenessProbeResult(
+			ok,
+			child,
+			consecutiveFailures,
+			failureThreshold,
+			lastKilledChild,
+			deps.logger,
+		));
+	}
+}
+
+/**
+ * Pure update step for one liveness probe result. Logs and kills when the
+ * failure threshold is reached; resets the counter on recovery. Returns the
+ * new state so the caller (burrowLivenessProbeLoop) stays a simple loop.
+ */
+function applyLivenessProbeResult(
+	ok: boolean,
+	child: SupervisedChild,
+	consecutiveFailures: number,
+	failureThreshold: number,
+	lastKilledChild: SupervisedChild | undefined,
+	logger: SupervisorLogger,
+): { consecutiveFailures: number; lastKilledChild: SupervisedChild | undefined } {
+	if (!ok) {
+		const newCount = consecutiveFailures + 1;
+		logger.warn(
+			{ consecutiveFailures: newCount, failureThreshold },
+			"supervisor: burrow liveness probe failed",
+		);
+		if (newCount >= failureThreshold) {
+			logger.error(
+				{ consecutiveFailures: newCount, pid: child.pid },
+				"supervisor: burrow liveness threshold reached, killing for restart",
+			);
+			child.kill("SIGKILL");
+			return { consecutiveFailures: 0, lastKilledChild: child };
+		}
+		return { consecutiveFailures: newCount, lastKilledChild };
+	}
+	if (consecutiveFailures > 0) {
+		logger.info({ consecutiveFailures }, "supervisor: burrow liveness probe recovered");
+	}
+	return { consecutiveFailures: 0, lastKilledChild };
+}
+
+/**
  * Send SIGTERM, wait up to `graceMs`, then SIGKILL if the child is still alive.
  * Always awaits the child's actual exit so the supervisor doesn't return
  * before its children are cleaned up.
@@ -290,7 +409,21 @@ export function productionDeps(options: ProductionDepsOptions): SupervisorDeps {
 		sleep: defaultSleep,
 		now: () => Date.now(),
 		logger: options.logger,
+		probeBurrow: productionProbeBurrow,
 	};
+}
+
+async function productionProbeBurrow(socketPath: string, timeoutMs: number): Promise<boolean> {
+	try {
+		const init: RequestInit & { unix?: string } = {
+			signal: AbortSignal.timeout(timeoutMs),
+			unix: socketPath,
+		};
+		const resp = await fetch("http://localhost/healthz", init);
+		return resp.ok;
+	} catch {
+		return false;
+	}
 }
 
 const defaultSpawn: SpawnFn = (cmd, name) => {
