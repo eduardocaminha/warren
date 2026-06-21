@@ -140,8 +140,23 @@ export async function runSupervisor(
 	const uninstallTerm = deps.installSignalHandler("SIGTERM", () => onSignal("SIGTERM"));
 	const uninstallInt = deps.installSignalHandler("SIGINT", () => onSignal("SIGINT"));
 
+	const livenessIntervalMs = opts.burrowLivenessIntervalMs ?? DEFAULT_BURROW_LIVENESS_INTERVAL_MS;
+	const livenessTimeoutMs = opts.burrowLivenessTimeoutMs ?? DEFAULT_BURROW_LIVENESS_TIMEOUT_MS;
+	const livenessFailureThreshold =
+		opts.burrowLivenessFailureThreshold ?? DEFAULT_BURROW_LIVENESS_FAILURE_THRESHOLD;
+
 	try {
-		const burrowSupervisor = superviseBurrow(state, deps, opts, budget, baseBackoff, capBackoff);
+		const burrowSupervisor = superviseBurrow(
+			state,
+			deps,
+			opts,
+			budget,
+			baseBackoff,
+			capBackoff,
+			livenessIntervalMs,
+			livenessTimeoutMs,
+			livenessFailureThreshold,
+		);
 		const warrenWatcher = state.warren.exited.then((code) => ({ kind: "warren" as const, code }));
 
 		const outcome = await Promise.race([
@@ -192,6 +207,9 @@ async function superviseBurrow(
 	budget: RestartBudget,
 	baseBackoff: number,
 	capBackoff: number,
+	livenessIntervalMs: number,
+	livenessTimeoutMs: number,
+	livenessFailureThreshold: number,
 ): Promise<"burrow_budget_exhausted" | "burrow_clean_exit"> {
 	// Run liveness probe in background. When it detects N consecutive
 	// /healthz timeouts it kills the current burrow child; the exit-watch
@@ -201,9 +219,9 @@ async function superviseBurrow(
 		state,
 		deps,
 		opts.socketPath,
-		opts.burrowLivenessIntervalMs ?? DEFAULT_BURROW_LIVENESS_INTERVAL_MS,
-		opts.burrowLivenessTimeoutMs ?? DEFAULT_BURROW_LIVENESS_TIMEOUT_MS,
-		opts.burrowLivenessFailureThreshold ?? DEFAULT_BURROW_LIVENESS_FAILURE_THRESHOLD,
+		livenessIntervalMs,
+		livenessTimeoutMs,
+		livenessFailureThreshold,
 	);
 
 	let attempt = 0;
@@ -279,7 +297,7 @@ async function burrowLivenessProbeLoop(
 	if (deps.probeBurrow === undefined) return;
 
 	let consecutiveFailures = 0;
-	let lastKilledChild: SupervisedChild | undefined = undefined;
+	let lastKilledChild: SupervisedChild | undefined;
 
 	while (!state.shuttingDown) {
 		await deps.sleep(intervalMs);
@@ -290,39 +308,53 @@ async function burrowLivenessProbeLoop(
 		// exit-watch loop to replace it with a fresh restart.
 		if (child === undefined || child === lastKilledChild) continue;
 
-		let ok: boolean;
-		try {
-			ok = await deps.probeBurrow(socketPath, timeoutMs);
-		} catch {
-			ok = false;
-		}
+		const ok = await deps.probeBurrow(socketPath, timeoutMs).catch(() => false);
 		if (state.shuttingDown) break;
 
-		if (ok) {
-			if (consecutiveFailures > 0) {
-				deps.logger.info(
-					{ consecutiveFailures },
-					"supervisor: burrow liveness probe recovered",
-				);
-				consecutiveFailures = 0;
-			}
-		} else {
-			consecutiveFailures++;
-			deps.logger.warn(
-				{ consecutiveFailures, failureThreshold },
-				"supervisor: burrow liveness probe failed",
-			);
-			if (consecutiveFailures >= failureThreshold) {
-				deps.logger.error(
-					{ consecutiveFailures, pid: child.pid },
-					"supervisor: burrow liveness threshold reached, killing for restart",
-				);
-				lastKilledChild = child;
-				child.kill("SIGKILL");
-				consecutiveFailures = 0;
-			}
-		}
+		({ consecutiveFailures, lastKilledChild } = applyLivenessProbeResult(
+			ok,
+			child,
+			consecutiveFailures,
+			failureThreshold,
+			lastKilledChild,
+			deps.logger,
+		));
 	}
+}
+
+/**
+ * Pure update step for one liveness probe result. Logs and kills when the
+ * failure threshold is reached; resets the counter on recovery. Returns the
+ * new state so the caller (burrowLivenessProbeLoop) stays a simple loop.
+ */
+function applyLivenessProbeResult(
+	ok: boolean,
+	child: SupervisedChild,
+	consecutiveFailures: number,
+	failureThreshold: number,
+	lastKilledChild: SupervisedChild | undefined,
+	logger: SupervisorLogger,
+): { consecutiveFailures: number; lastKilledChild: SupervisedChild | undefined } {
+	if (!ok) {
+		const newCount = consecutiveFailures + 1;
+		logger.warn(
+			{ consecutiveFailures: newCount, failureThreshold },
+			"supervisor: burrow liveness probe failed",
+		);
+		if (newCount >= failureThreshold) {
+			logger.error(
+				{ consecutiveFailures: newCount, pid: child.pid },
+				"supervisor: burrow liveness threshold reached, killing for restart",
+			);
+			child.kill("SIGKILL");
+			return { consecutiveFailures: 0, lastKilledChild: child };
+		}
+		return { consecutiveFailures: newCount, lastKilledChild };
+	}
+	if (consecutiveFailures > 0) {
+		logger.info({ consecutiveFailures }, "supervisor: burrow liveness probe recovered");
+	}
+	return { consecutiveFailures: 0, lastKilledChild };
 }
 
 /**
