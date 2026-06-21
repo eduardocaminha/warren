@@ -1,2 +1,3 @@
 {"type":"plot_created","actor":"user:operator","at":"2026-06-21T14:55:44.795Z","data":{"name":"Fix duplicates"}}
 {"type":"intent_edited","actor":"user:operator","at":"2026-06-21T14:55:44.823Z","data":{"field":"goal","value":"I've run bun check:dups and found 33 cloned code entries. I need to fix them all. We should evaluate these. Success criteria should be no clones."}}
+{"type":"run_dispatched","actor":"user:operator","at":"2026-06-21T14:56:56.910Z","data":{"run_id":"run_jqxcfmj6tkzb","agent":"planner","model":"claude-opus-4-8","project":"prj_jxtvqcvqh6yj"}}
