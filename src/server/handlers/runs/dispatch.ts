@@ -154,11 +154,17 @@ export function createRunHandler(deps: ServerDeps): RouteHandler {
 		// keeping every side effect (spawn + bridge start) deduped.
 		const dispatch = async (): Promise<IdempotentDispatch> => {
 			const result = await spawnRun(options);
-			deps.bridges.start(result.run.id, result.burrowRun.id, result.burrow.id);
-			return {
-				run: result.run,
-				burrow: { id: result.burrow.id, workspacePath: result.burrow.workspacePath },
-			};
+			if (!result.pending) {
+				deps.bridges.start(result.run.id, result.burrowRun.id, result.burrow.id);
+				return {
+					run: result.run,
+					burrow: { id: result.burrow.id, workspacePath: result.burrow.workspacePath },
+				};
+			}
+			// Run is gated (warren-82a1): queued, burrow not yet provisioned.
+			// Return the run so the caller can track it; burrow will be wired
+			// when the concurrency gate tick dispatches it.
+			return { run: result.run, burrow: null };
 		};
 
 		// `Idempotency-Key` present + a store wired → dedupe duplicate

@@ -27,6 +27,13 @@ export interface SpawnRunInput {
 	 * dispatch + rollback so a single run never crosses workers.
 	 */
 	readonly burrowClientPool: BurrowClientPool;
+	/**
+	 * Environment override for the concurrency gate (warren-82a1). Reads
+	 * `WARREN_MAX_CONCURRENT_CLAUDE_CODE_RUNS` from this object; defaults
+	 * to `process.env` when omitted. Tests pass `{}` to disable the gate
+	 * or a specific value to exercise it.
+	 */
+	readonly concurrencyEnv?: Record<string, string | undefined>;
 	readonly agentName: string;
 	readonly projectId: string;
 	readonly prompt: string;
@@ -177,9 +184,23 @@ export interface SpawnPlotAppender {
 	appendRunDispatched(input: AppendPlotRunDispatchedInput): Promise<void>;
 }
 
-export interface SpawnRunResult {
+/** Successful dispatch: burrow provisioned and run queued in burrow. */
+export interface SpawnRunDispatched {
+	readonly pending: false;
 	readonly run: RunRow;
 	readonly burrow: Burrow;
 	readonly burrowRun: BurrowRun;
 	readonly agent: AgentDefinition;
 }
+
+/**
+ * Gated dispatch (warren-82a1): burrow NOT provisioned yet — the run is
+ * queued in warren waiting for a concurrency slot to open. The tick in
+ * `src/runs/concurrency-gate.ts` picks it up and dispatches when ready.
+ */
+export interface SpawnRunPending {
+	readonly pending: true;
+	readonly run: RunRow;
+}
+
+export type SpawnRunResult = SpawnRunDispatched | SpawnRunPending;

@@ -55,6 +55,20 @@ export {
 export { type ParsedBurrowConfig, parseBurrowConfig } from "./burrow-config.ts";
 export { type CancelRunInput, type CancelRunResult, cancelRun } from "./cancel.ts";
 export {
+	bootConcurrencyGateTick,
+	type ConcurrencyGateHandle,
+	type ConcurrencyGateTickDeps,
+	type ConcurrencyGateTickLogger,
+	countActiveClaudeRuns,
+	DEFAULT_GATE_TICK_MS,
+	GATED_AGENT_NAME,
+	type GateTickResult,
+	isGateClosed,
+	isGatedAgent,
+	loadMaxConcurrentClaudeRuns,
+	runConcurrencyGateTick,
+} from "./concurrency-gate.ts";
+export {
 	type BootConversationIdleDetectorInput,
 	bootConversationIdleDetector,
 	CONVERSATION_IDLE_FINALIZED_KIND,
@@ -144,7 +158,9 @@ export {
 export {
 	DEFAULT_DISPATCHER_HANDLE,
 	resolveDispatcherHandle,
+	type SpawnRunDispatched,
 	type SpawnRunInput,
+	type SpawnRunPending,
 	type SpawnRunResult,
 	spawnRun,
 } from "./spawn/index.ts";

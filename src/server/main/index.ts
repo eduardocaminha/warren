@@ -404,7 +404,7 @@ export async function bootServer(opts: BootServerOptions = {}): Promise<WarrenSe
 	// idle-timeout coordinator (warren-005d, finalizes an idle conversation's
 	// anchoring run; the conversation itself stays active). See
 	// detector-wiring.ts.
-	const { pauseDetector, watchdog, mergePoller, conversationIdleDetector } =
+	const { pauseDetector, watchdog, mergePoller, conversationIdleDetector, concurrencyGate } =
 		bootBackgroundDetectors({
 			env,
 			repos,
@@ -520,6 +520,7 @@ export async function bootServer(opts: BootServerOptions = {}): Promise<WarrenSe
 			await watchdog.stop();
 			await mergePoller.stop();
 			await conversationIdleDetector.stop();
+			concurrencyGate.stop();
 			await scheduler.stop();
 			await previewEvictionWorker.stop();
 			await workspaceGcWorker.stop();

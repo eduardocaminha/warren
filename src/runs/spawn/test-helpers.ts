@@ -84,14 +84,15 @@ export interface RecordedCall {
 	body: unknown;
 }
 
-function defaultBurrow(plan: BurrowFetchPlan): Burrow {
+function defaultBurrow(plan: BurrowFetchPlan, seq = 0): Burrow {
+	const id = seq === 0 ? "bur_aaaaaaaaaaaa" : `bur_${"b".repeat(12 - String(seq).length)}${seq}`;
 	return {
-		id: "bur_aaaaaaaaaaaa",
+		id,
 		parentId: null,
 		kind: "task",
 		name: null,
 		projectRoot: "/data/projects/x/y",
-		workspacePath: "/data/burrow/workspaces/bur_aaaaaaaaaaaa",
+		workspacePath: `/data/burrow/workspaces/${id}`,
 		branch: "warren/run/abc",
 		provider: "local",
 		providerStateJson: null,
@@ -122,11 +123,16 @@ function defaultBurrowRun(plan: BurrowFetchPlan): BurrowRun {
 	};
 }
 
-function routeBurrowFetch(plan: BurrowFetchPlan, method: string, path: string): Response | null {
+function routeBurrowFetch(
+	plan: BurrowFetchPlan,
+	method: string,
+	path: string,
+	seq = 0,
+): Response | null {
 	if (method === "POST" && path === "/burrows") {
 		return jsonResponse(
 			plan.burrowsUpStatus ?? 201,
-			plan.burrowsUpBody ?? serializeBurrow(defaultBurrow(plan)),
+			plan.burrowsUpBody ?? serializeBurrow(defaultBurrow(plan, seq)),
 		);
 	}
 	if (method === "POST" && /^\/burrows\/[^/]+\/runs$/.test(path)) {
@@ -149,13 +155,16 @@ export function makeBurrowClient(plan: BurrowFetchPlan = {}): {
 	calls: RecordedCall[];
 } {
 	const calls: RecordedCall[] = [];
+	let burrowSeq = 0;
 	const fetchImpl = stub(async (input, init) => {
 		const url = new URL(String(input), "http://localhost");
 		const path = url.pathname;
 		const method = init?.method ?? "GET";
 		const body = typeof init?.body === "string" ? JSON.parse(init.body) : undefined;
 		calls.push({ method, path, body });
-		const routed = routeBurrowFetch(plan, method, path);
+		const seq = burrowSeq;
+		if (method === "POST" && path === "/burrows") burrowSeq++;
+		const routed = routeBurrowFetch(plan, method, path, seq);
 		if (routed !== null) return routed;
 		return jsonResponse(404, {
 			error: { code: "not_found", message: `unmatched ${method} ${path}` },

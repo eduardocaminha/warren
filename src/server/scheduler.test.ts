@@ -128,6 +128,7 @@ describe("bootScheduler", () => {
 				trigger: input.trigger ?? "manual",
 			});
 			return {
+				pending: false,
 				run,
 				burrow: { id: "bur_a", workspacePath: "/ws" } as Burrow,
 				burrowRun: { id: "rb_a" } as BurrowRun,
@@ -207,6 +208,7 @@ describe("bootScheduler", () => {
 				trigger: input.trigger ?? "manual",
 			});
 			return {
+				pending: false,
 				run,
 				burrow: { id: "bur_b", workspacePath: "/ws" } as Burrow,
 				burrowRun: { id: "rb_b" } as BurrowRun,

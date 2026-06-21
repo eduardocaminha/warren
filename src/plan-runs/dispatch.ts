@@ -77,7 +77,9 @@ export function createPlanRunSpawn(input: CreatePlanRunSpawnInput): CoordinatorS
 				: {}),
 			...(input.now !== undefined ? { now: input.now } : {}),
 		});
-		input.bridges.start(result.run.id, result.burrowRun.id, result.burrow.id);
+		if (!result.pending) {
+			input.bridges.start(result.run.id, result.burrowRun.id, result.burrow.id);
+		}
 		return { runId: result.run.id };
 	};
 }

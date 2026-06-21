@@ -67,6 +67,7 @@ import {
 import { interactiveRuntimeOverride } from "../../warren-config/schema.ts";
 import { composeRunBranch, resolveRunBranchPrefix } from "../branch.ts";
 import { parseBurrowConfig } from "../burrow-config.ts";
+import { isGateClosed, isGatedAgent, loadMaxConcurrentClaudeRuns } from "../concurrency-gate.ts";
 import { buildSeedFiles } from "../seed.ts";
 import { readCachedAgent, readProjectDefaults, resolveOverride } from "./agent-cache.ts";
 import {
@@ -180,13 +181,14 @@ export async function spawnRun(input: SpawnRunInput): Promise<SpawnRunResult> {
 	// error.
 	const placement = await input.burrowClientPool.placeFor({ projectId: projectAfterRefresh.id });
 
-	const run = await input.repos.runs.create({
+	// warren-82a1: cap gated agents; pending runs skip burrow provisioning.
+	const maxConcurrent = loadMaxConcurrentClaudeRuns(input.concurrencyEnv);
+	const createBase = {
 		agentName: agent.name,
 		projectId: projectAfterRefresh.id,
 		prompt: input.prompt,
 		renderedAgentJson: agent,
 		trigger: input.trigger ?? "manual",
-		workerId: placement.workerName,
 		...(input.seedId !== undefined ? { seedId: input.seedId } : {}),
 		...(input.plotId !== undefined && input.plotId !== "" ? { plotId: input.plotId } : {}),
 		...(input.mode !== undefined ? { mode: input.mode } : {}),
@@ -194,7 +196,13 @@ export async function spawnRun(input: SpawnRunInput): Promise<SpawnRunResult> {
 			? { parentRunId: input.parentRunId, cloneKind: input.cloneKind ?? "continue" }
 			: {}),
 		now: input.now?.(),
-	});
+	};
+	if (isGatedAgent(agent.name) && (await isGateClosed(input.repos, maxConcurrent))) {
+		const run = await input.repos.runs.create({ ...createBase, workerId: null });
+		return { pending: true, run };
+	}
+
+	const run = await input.repos.runs.create({ ...createBase, workerId: placement.workerName });
 
 	// warren-9993: compose the burrow workspace branch as `${prefix}/${run.id}`
 	// so the branch traces back to the warren run on `git log` / PR review.
@@ -291,7 +299,7 @@ export async function spawnRun(input: SpawnRunInput): Promise<SpawnRunResult> {
 				now: input.now?.() ?? new Date(),
 			});
 		}
-		return { run: updated, burrow, burrowRun, agent };
+		return { pending: false, run: updated, burrow, burrowRun, agent };
 	} catch (err) {
 		await rollback(input, run.id, burrow, placement.client);
 		throw err;

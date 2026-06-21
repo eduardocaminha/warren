@@ -88,6 +88,7 @@ function buildSpawnStub(repos: Repos, agentName: string, projectId: string) {
 		};
 		await repos.runs.attachBurrow(run.id, { burrowId: burrow.id, burrowRunId: burrowRun.id });
 		return {
+			pending: false,
 			run,
 			burrow,
 			burrowRun,

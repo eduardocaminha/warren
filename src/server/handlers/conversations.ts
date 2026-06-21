@@ -160,12 +160,16 @@ export function createConversationHandler(deps: ServerDeps): RouteHandler {
 			...(deps.now !== undefined ? { now: deps.now() } : {}),
 		});
 
-		deps.bridges.start(result.run.id, result.burrowRun.id, result.burrow.id, "conversation");
+		if (!result.pending) {
+			deps.bridges.start(result.run.id, result.burrowRun.id, result.burrow.id, "conversation");
+		}
 
 		return jsonResponse(201, {
 			conversation,
 			run: { id: result.run.id, mode: result.run.mode },
-			burrow: { id: result.burrow.id, workspacePath: result.burrow.workspacePath },
+			burrow: result.pending
+				? null
+				: { id: result.burrow.id, workspacePath: result.burrow.workspacePath },
 		});
 	};
 }
@@ -464,12 +468,14 @@ export function rewakeConversationHandler(deps: ServerDeps): RouteHandler {
 			...(deps.now !== undefined ? { now: deps.now } : {}),
 		});
 
-		deps.bridges.start(
-			result.turn.run.id,
-			result.turn.burrowRun.id,
-			result.turn.burrow.id,
-			"conversation",
-		);
+		if (!result.turn.pending) {
+			deps.bridges.start(
+				result.turn.run.id,
+				result.turn.burrowRun.id,
+				result.turn.burrow.id,
+				"conversation",
+			);
+		}
 
 		const conversation = await deps.repos.conversations.require(id);
 
