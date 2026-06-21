@@ -1,2 +1,9 @@
 {"type":"plot_created","actor":"user:operator","at":"2026-06-21T22:36:34.630Z","data":{"name":"Leveret com claude subscription"}}
 {"type":"intent_edited","actor":"user:operator","at":"2026-06-21T22:36:34.660Z","data":{"field":"goal","value":"Permitir claude subscription no Leveret"}}
+{"type":"attachment_added","actor":"user:operator","at":"2026-06-21T22:55:56.547Z","data":{"id":"att-001","type":"seeds_issue","ref":"pl-8c5b","role":"plan"}}
+{"type":"attachment_added","actor":"user:operator","at":"2026-06-21T22:55:56.618Z","data":{"id":"att-002","type":"seeds_issue","ref":"pl-8c5b","role":"plan"}}
+{"type":"attachment_added","actor":"user:operator","at":"2026-06-21T22:56:22.506Z","data":{"id":"att-003","type":"seeds_issue","ref":"warren-fe84","role":"tracks"}}
+{"type":"attachment_added","actor":"user:operator","at":"2026-06-21T22:56:22.523Z","data":{"id":"att-004","type":"seeds_issue","ref":"warren-163d","role":"tracks"}}
+{"type":"attachment_added","actor":"user:operator","at":"2026-06-21T22:56:22.525Z","data":{"id":"att-005","type":"seeds_issue","ref":"warren-0727","role":"tracks"}}
+{"type":"attachment_added","actor":"user:operator","at":"2026-06-21T22:56:22.528Z","data":{"id":"att-006","type":"seeds_issue","ref":"warren-9a1b","role":"tracks"}}
+{"type":"attachment_removed","actor":"user:operator","at":"2026-06-21T22:57:35.905Z","data":{"id":"att-001"}}
