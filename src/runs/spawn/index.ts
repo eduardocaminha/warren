@@ -22,6 +22,8 @@ export {
 export type {
 	AppendPlotRunDispatchedInput,
 	SpawnPlotAppender,
+	SpawnRunDispatched,
 	SpawnRunInput,
+	SpawnRunPending,
 	SpawnRunResult,
 } from "./types.ts";

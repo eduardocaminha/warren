@@ -53,11 +53,7 @@ export interface CreateRunInput {
 	trigger: string;
 	burrowId?: string | null;
 	burrowRunId?: string | null;
-	/**
-	 * Worker that will host the burrow for this run (warren-135b). Resolved
-	 * by the spawn flow's `placeFor` (pl-9ba1 step 4) and denormalized here
-	 * so streaming / cancel / steer route without joining `burrows`.
-	 */
+	/** Worker hosting this run (warren-135b); denormalized so routing bypasses the burrows join. */
 	workerId?: string | null;
 	/**
 	 * Back-link to the seeds issue this run was dispatched against (pl-bb70
@@ -174,15 +170,7 @@ export class RunsRepo {
 		return row;
 	}
 
-	/**
-	 * Order key for the listAll / listByProject / listByAgent triplet
-	 * (warren-fd4b). 'started' = startedAt DESC, the historical default
-	 * (covered by runsProjectStarted). 'cost' = costUsd, with explicit
-	 * NULLS LAST in both directions so unbilled runs always sink — the
-	 * "spot expensive runs" goal cares about the populated tail, and a
-	 * pile of NULLs at the top of a DESC sort would defeat the feature.
-	 * id ASC remains the stable tiebreaker.
-	 */
+	/** sort=cost uses NULLS LAST so unbilled runs always sink (warren-fd4b); sort=started is the default. */
 	private orderByClause(sort: "started" | "cost" = "started", dir: "asc" | "desc" = "desc"): SQL[] {
 		if (sort === "cost") {
 			const col = this.runs.costUsd;
@@ -234,13 +222,7 @@ export class RunsRepo {
 		);
 	}
 
-	/**
-	 * Every run row bound to a given `plotId`, ordered by id (stable for
-	 * tests). Powers the Plot detail/summary surfaces that enumerate every
-	 * run bound to a Plot — callers re-sort the underlying events by `ts`
-	 * so dispatch-order surprises don't affect the result. The
-	 * `runs_plot_id` index (sqlite + postgres) covers the predicate.
-	 */
+	/** All runs bound to a plotId, ordered by id (stable); callers re-sort events by ts. */
 	async listByPlotId(plotId: string): Promise<RunRow[]> {
 		return this.adapter.pickAll(
 			this.db
@@ -560,13 +542,7 @@ export class RunsRepo {
 		return row ?? null;
 	}
 
-	/**
-	 * In-flight load per worker for the least-loaded leg of `placeFor`
-	 * (warren-135b / pl-9ba1 step 2). Counts `queued` + `running` runs
-	 * grouped by `workerId`. Rows with a null `workerId` (legacy or
-	 * unplaced) are excluded. Result is keyed by worker name; workers
-	 * with zero in-flight runs are absent (the caller defaults to 0).
-	 */
+	/** In-flight load per worker for placeFor (warren-135b); zeros omitted — caller defaults to 0. */
 	async countInflightByWorker(): Promise<Map<string, number>> {
 		const rows = await this.adapter.pickAll<{ workerId: string | null; count: number | string }>(
 			this.db
@@ -585,12 +561,35 @@ export class RunsRepo {
 		return out;
 	}
 
-	/**
-	 * Atomic queued → running transition. Returns the claimed row, or null
-	 * if the row no longer exists or is no longer in `queued`. Used to keep
-	 * the warren-side state in sync with burrow's "the run loop just picked
-	 * this up" observation.
-	 */
+	async countInflightForAgent(agentName: string): Promise<number> {
+		const [row] = await this.adapter.pickAll<{ count: number | string }>(
+			this.db
+				.select({ count: sql<number>`count(*)`.as("count") })
+				.from(this.runs)
+				.where(
+					and(eq(this.runs.agentName, agentName), inArray(this.runs.state, ["queued", "running"])),
+				),
+		);
+		return Number(row?.count ?? 0);
+	}
+
+	async listPendingDispatch(agentName: string): Promise<RunRow[]> {
+		return this.adapter.pickAll(
+			this.db
+				.select()
+				.from(this.runs)
+				.where(
+					and(
+						eq(this.runs.agentName, agentName),
+						eq(this.runs.state, "queued"),
+						sql`${this.runs.burrowId} IS NULL`,
+					),
+				)
+				.orderBy(asc(this.runs.id)),
+		);
+	}
+
+	/** Atomic queued → running; returns null if missing or no longer queued. */
 	async claimById(id: string, now: Date = new Date()): Promise<RunRow | null> {
 		return this.adapter.runInTransaction(async (tx) => {
 			const txDb = tx.drizzle as SqliteDrizzleDb;

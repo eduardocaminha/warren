@@ -140,6 +140,7 @@ describe("spawnRun: end-to-end + placement", () => {
 			prompt: "p",
 		});
 		expect((await repos.runs.require(result.run.id)).workerId).toBe("alpha");
+		if (result.pending) throw new Error("expected dispatched result");
 		expect((await repos.burrows.require(result.burrow.id)).workerId).toBe("alpha");
 	});
 

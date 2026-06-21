@@ -35,14 +35,18 @@ import type { SpawnFn } from "../../projects/clone.ts";
 import type { ProjectsConfig } from "../../projects/config.ts";
 import {
 	type AutoOpenPrConfig,
+	bootConcurrencyGateTick,
 	bootConversationIdleDetector,
 	bootConversationMergePoller,
 	bootPauseDetector,
 	bootWatchdog,
+	type ConcurrencyGateHandle,
 	type ConversationIdleDetectorHandle,
 	createMergePollerDispatch,
 	createRepoIdleConversationReader,
+	DEFAULT_GATE_TICK_MS,
 	defaultPlotEventReader,
+	loadMaxConcurrentClaudeRuns,
 	loadWatchdogConfigFromEnv,
 	type MergePollerHandle,
 	type PauseDetectorHandle,
@@ -228,6 +232,39 @@ export function bootWatchdogFromEnv(input: WatchdogWiringInput): WatchdogHandle 
 	return handle;
 }
 
+/** Boot the concurrency gate tick (warren-82a1). Always on. */
+export function bootConcurrencyGateFromEnv(input: {
+	readonly env: EnvLike;
+	readonly repos: Repos;
+	readonly burrowClientPool: BurrowClientPool;
+	readonly bridges: BridgeRegistry;
+	readonly runBranchPrefixDefault?: string;
+	readonly logger: Logger;
+	readonly now?: () => Date;
+}): ConcurrencyGateHandle {
+	const { env, logger } = input;
+	const maxConcurrent = loadMaxConcurrentClaudeRuns(env as Record<string, string | undefined>);
+	const tickMs = parseIntEnv(env, "WARREN_CONCURRENCY_GATE_TICK_MS", DEFAULT_GATE_TICK_MS);
+	const handle = bootConcurrencyGateTick(
+		{
+			repos: input.repos,
+			burrowClientPool: input.burrowClientPool,
+			bridges: input.bridges,
+			...(input.runBranchPrefixDefault !== undefined
+				? { runBranchPrefixDefault: input.runBranchPrefixDefault }
+				: {}),
+			...(input.now !== undefined ? { now: input.now } : {}),
+		},
+		{
+			maxConcurrent,
+			tickMs,
+			logger: pauseLoggerFromPino(logger),
+		},
+	);
+	logger.info({ maxConcurrent, tickMs }, "concurrency gate running");
+	return handle;
+}
+
 /**
  * Superset input for `bootBackgroundDetectors` — the pause detector, run
  * heartbeat watchdog, and send-off merge poller share most of their deps, so
@@ -254,6 +291,7 @@ export interface BackgroundDetectorHandles {
 	readonly watchdog: WatchdogHandle;
 	readonly mergePoller: MergePollerHandle;
 	readonly conversationIdleDetector: ConversationIdleDetectorHandle;
+	readonly concurrencyGate: ConcurrencyGateHandle;
 }
 
 /**
@@ -307,5 +345,16 @@ export function bootBackgroundDetectors(
 		logger: input.logger,
 		...now,
 	});
-	return { pauseDetector, watchdog, mergePoller, conversationIdleDetector };
+	const concurrencyGate = bootConcurrencyGateFromEnv({
+		env: input.env,
+		repos: input.repos,
+		burrowClientPool: input.burrowClientPool,
+		bridges: input.bridges,
+		...(input.runBranchPrefixDefault !== undefined
+			? { runBranchPrefixDefault: input.runBranchPrefixDefault }
+			: {}),
+		logger: input.logger,
+		...now,
+	});
+	return { pauseDetector, watchdog, mergePoller, conversationIdleDetector, concurrencyGate };
 }

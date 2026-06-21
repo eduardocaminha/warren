@@ -13,6 +13,7 @@ describe("createMergePollerDispatch", () => {
 		const spawnRunFn = async (input: SpawnRunInput): Promise<SpawnRunResult> => {
 			captured.push(input);
 			return {
+				pending: false,
 				run: { id: "run_planner" } as SpawnRunResult["run"],
 				burrow: { id: "bur_a", workspacePath: "/ws" } as Burrow,
 				burrowRun: { id: "rb_a" } as BurrowRun,

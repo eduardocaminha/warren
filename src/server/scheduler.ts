@@ -96,7 +96,9 @@ export function bootScheduler(input: BootSchedulerInput): SchedulerHandle {
 		// Same hand-off as POST /runs — bridge the dispatched run so its
 		// events flow into warren.events. Without this the scheduled run
 		// would emit events into burrow that the warren wire never sees.
-		input.bridges.start(result.run.id, result.burrowRun.id, result.burrow.id);
+		if (!result.pending) {
+			input.bridges.start(result.run.id, result.burrowRun.id, result.burrow.id);
+		}
 		return { runId: result.run.id };
 	};
 

@@ -164,6 +164,19 @@ export async function runRun(
 	}
 
 	const runId = spawnResult.run.id;
+
+	// warren-82a1: run is held at the concurrency gate — no burrow yet.
+	if (spawnResult.pending) {
+		writeJsonLine(context.stdio.stdout, {
+			event: "run.queued",
+			runId,
+			agent: spawnResult.run.agentName,
+			project: spawnResult.run.projectId,
+			pending: true,
+		});
+		return { exitCode: 0, runId };
+	}
+
 	writeJsonLine(context.stdio.stdout, {
 		event: "run.spawned",
 		runId,

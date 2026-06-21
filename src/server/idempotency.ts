@@ -30,11 +30,13 @@ export const DEFAULT_IDEMPOTENCY_TTL_MS = 10 * 60 * 1000;
 
 /**
  * The cached `POST /runs` 201 body. Mirrors the shape the handler returns
- * so a replay is byte-identical to the original response.
+ * so a replay is byte-identical to the original response. `burrow` is null
+ * when the run was gated by the concurrency cap (warren-82a1) — the run is
+ * queued and will be dispatched once a slot opens.
  */
 export interface IdempotentDispatch {
 	readonly run: RunRow;
-	readonly burrow: { readonly id: string; readonly workspacePath: string };
+	readonly burrow: { readonly id: string; readonly workspacePath: string } | null;
 }
 
 interface Entry {
