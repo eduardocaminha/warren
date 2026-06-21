@@ -46,7 +46,12 @@ interface Harness {
 }
 
 function makeHarness(
-	opts: { socketReady?: boolean; burrowChildren?: FakeChild[]; warrenChildren?: FakeChild[] } = {},
+	opts: {
+		socketReady?: boolean;
+		burrowChildren?: FakeChild[];
+		warrenChildren?: FakeChild[];
+		probeBurrow?: (socketPath: string, timeoutMs: number) => Promise<boolean>;
+	} = {},
 ): Harness {
 	const burrowQueue: FakeChild[] = [...(opts.burrowChildren ?? [])];
 	const warrenQueue: FakeChild[] = [...(opts.warrenChildren ?? [])];
@@ -90,6 +95,7 @@ function makeHarness(
 		sleep: async () => undefined,
 		now: () => now,
 		logger,
+		probeBurrow: opts.probeBurrow,
 	};
 
 	const harness: Harness = {
@@ -354,6 +360,120 @@ describe("runSupervisor", () => {
 		await supervisorP;
 
 		expect(h.signalHandlers.size).toBe(0);
+	});
+});
+
+describe("burrow liveness probe", () => {
+	test("healthy burrow: probe fires repeatedly but never triggers a restart", async () => {
+		let probeCalls = 0;
+		const burrow = makeChild("burrow");
+		const warren = makeChild("warren");
+		const h = makeHarness({
+			burrowChildren: [burrow],
+			warrenChildren: [warren],
+			probeBurrow: async () => {
+				probeCalls++;
+				return true;
+			},
+		});
+
+		const supervisorP = runSupervisor(h.deps, {
+			...cmd,
+			burrowLivenessIntervalMs: 1,
+			burrowLivenessTimeoutMs: 100,
+			burrowLivenessFailureThreshold: 3,
+		});
+		await flushMicrotasks();
+
+		// Probe fired at least once but never sent SIGKILL.
+		expect(probeCalls).toBeGreaterThan(0);
+		expect(burrow.signalsReceived).not.toContain("SIGKILL");
+
+		warren.resolveExit(0);
+		await flushMicrotasks();
+		burrow.resolveExit(0);
+
+		const result = await supervisorP;
+		expect(result.exitCode).toBe(0);
+		expect(result.reason).toBe("warren_exited");
+	});
+
+	test("hung burrow: N consecutive probe failures trigger SIGKILL and restart", async () => {
+		let probeCalls = 0;
+		const burrow1 = makeChild("burrow", 1);
+		const burrow2 = makeChild("burrow", 2);
+		const warren = makeChild("warren");
+		const h = makeHarness({
+			burrowChildren: [burrow1, burrow2],
+			warrenChildren: [warren],
+			// First 2 calls fail (burrow1 hung), all subsequent succeed (burrow2 healthy).
+			probeBurrow: async () => {
+				probeCalls++;
+				return probeCalls > 2;
+			},
+		});
+
+		const supervisorP = runSupervisor(h.deps, {
+			...cmd,
+			burrowLivenessIntervalMs: 1,
+			burrowLivenessTimeoutMs: 100,
+			burrowLivenessFailureThreshold: 2,
+		});
+		await flushMicrotasks();
+
+		// After 2 consecutive failures burrow1 should have been SIGKILL'd.
+		expect(burrow1.signalsReceived).toContain("SIGKILL");
+
+		// Simulate burrow1 dying (as it would in production after SIGKILL).
+		burrow1.resolveExit(137);
+		await flushMicrotasks();
+
+		// superviseBurrow restarts: burrow2 should now be spawned.
+		expect(h.spawned.filter((s) => s.name === "burrow")).toHaveLength(2);
+
+		warren.resolveExit(0);
+		await flushMicrotasks();
+		burrow2.resolveExit(0);
+
+		const result = await supervisorP;
+		expect(result.exitCode).toBe(0);
+		expect(result.reason).toBe("warren_exited");
+	});
+
+	test("isolated failure: fewer than threshold consecutive failures do not restart", async () => {
+		let probeCalls = 0;
+		const burrow = makeChild("burrow");
+		const warren = makeChild("warren");
+		const h = makeHarness({
+			burrowChildren: [burrow],
+			warrenChildren: [warren],
+			// 2 failures then recovery — threshold is 3, so no kill.
+			probeBurrow: async () => {
+				probeCalls++;
+				return probeCalls !== 1 && probeCalls !== 2;
+			},
+		});
+
+		const supervisorP = runSupervisor(h.deps, {
+			...cmd,
+			burrowLivenessIntervalMs: 1,
+			burrowLivenessTimeoutMs: 100,
+			burrowLivenessFailureThreshold: 3,
+		});
+		await flushMicrotasks();
+
+		// At least 3 probe calls (2 fail + 1 recover) but no SIGKILL.
+		expect(probeCalls).toBeGreaterThanOrEqual(3);
+		expect(burrow.signalsReceived).not.toContain("SIGKILL");
+		expect(h.spawned.filter((s) => s.name === "burrow")).toHaveLength(1);
+
+		warren.resolveExit(0);
+		await flushMicrotasks();
+		burrow.resolveExit(0);
+
+		const result = await supervisorP;
+		expect(result.exitCode).toBe(0);
+		expect(result.reason).toBe("warren_exited");
 	});
 });
 
