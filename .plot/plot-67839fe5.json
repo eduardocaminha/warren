@@ -1,0 +1,15 @@
+{
+  "attachments": [],
+  "created_at": "2026-06-21T14:55:44.795Z",
+  "id": "plot-67839fe5",
+  "intent": {
+    "constraints": [],
+    "goal": "I've run bun check:dups and found 33 cloned code entries. I need to fix them all. We should evaluate these. Success criteria should be no clones.",
+    "non_goals": [],
+    "success_criteria": []
+  },
+  "name": "Fix duplicates",
+  "schema_version": 1,
+  "status": "drafting",
+  "updated_at": "2026-06-21T14:55:44.823Z"
+}
