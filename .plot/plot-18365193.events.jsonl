@@ -49,3 +49,9 @@
 {"type":"run_dispatched","actor":"user:operator","at":"2026-06-22T01:20:58.707Z","data":{"run_id":"run_bc943rv8xb84","agent":"claude-code","model":"claude-opus-4-8","project":"prj_jxtvqcvqh6yj"}}
 {"type":"run_dispatched","actor":"user:operator","at":"2026-06-22T09:54:45.402Z","data":{"run_id":"run_nv89fhf87whc","agent":"claude-code","model":"claude-opus-4-8","project":"prj_jxtvqcvqh6yj"}}
 {"type":"status_changed","actor":"user:operator","at":"2026-06-22T10:05:36.154Z","data":{"from":"drafting","to":"ready"}}
+{"type":"attachment_added","actor":"user:operator","at":"2026-06-22T14:03:02.700Z","data":{"id":"att-001","type":"seeds_issue","ref":"pl-8c5b","role":"plan"}}
+{"type":"attachment_added","actor":"user:operator","at":"2026-06-22T14:03:07.937Z","data":{"id":"att-002","type":"seeds_issue","ref":"warren-fe84","role":"tracks"}}
+{"type":"attachment_added","actor":"user:operator","at":"2026-06-22T14:03:07.965Z","data":{"id":"att-003","type":"seeds_issue","ref":"warren-163d","role":"tracks"}}
+{"type":"attachment_added","actor":"user:operator","at":"2026-06-22T14:03:07.983Z","data":{"id":"att-004","type":"seeds_issue","ref":"warren-0727","role":"tracks"}}
+{"type":"attachment_added","actor":"user:operator","at":"2026-06-22T14:03:07.986Z","data":{"id":"att-005","type":"seeds_issue","ref":"warren-9a1b","role":"tracks"}}
+{"type":"status_changed","actor":"user:operator","at":"2026-06-22T14:03:16.599Z","data":{"from":"ready","to":"active"}}
