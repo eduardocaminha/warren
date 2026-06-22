@@ -1,0 +1,28 @@
+{
+  "attachments": [],
+  "created_at": "2026-06-22T23:02:10.928Z",
+  "id": "plot-9f52544d",
+  "intent": {
+    "constraints": [
+      "- O mecanismo de escrita é exclusivamente `cn update <name>` — warren não escreve no `.canopy/prompts.jsonl` diretamente",
+      "- Se `CANOPY_REPO_URL` estiver configurado (library tier), a edição precisa fazer push de volta ao repo remoto do canopy; sem URL configurada, a edição só afeta o `.canopy/` local do projeto",
+      "- O Plot é single-project (warren); se a mudança tocar no repo canopy em si, ganha um Plot irmão lá",
+      "- A API de edição deve respeitar a separação de tiers: library-tier vs project-tier (ambos existem em `src/registry/canopy.ts`)"
+    ],
+    "goal": "Permitir que o operador edite o conteúdo e a configuração de agentes canopy diretamente na UI do warren, com a mudança persistindo no canopy como nova versão via `cn update`, e o warren passando a usar a versão editada no próximo refresh/dispatch.",
+    "non_goals": [
+      "- Seleção de runtime (plot-4b256f45 — esse é o claude-code-chat)",
+      "- Edição de agentes built-in inline (os que vivem em `src/registry/builtins/`); só agentes versionados pelo canopy são editáveis pela UI"
+    ],
+    "success_criteria": [
+      "- `PATCH /agents/:name` (ou equivalente) aceita corpo editado, executa `cn update`, e dispara refresh; retorna a nova versão do agente",
+      "- A UI do warren exibe o conteúdo editável do agente (body, description, frontmatter) e persiste via esse endpoint",
+      "- Após salvar, o próximo dispatch usa a nova versão — confirmado via `GET /agents/:name` retornando `version: N+1`",
+      "- A mudança aparece no histórico do canopy (`cn history <name>` mostra nova entrada)"
+    ]
+  },
+  "name": "Editar agentes na UI do warren",
+  "schema_version": 1,
+  "status": "drafting",
+  "updated_at": "2026-06-22T23:06:36.560Z"
+}
