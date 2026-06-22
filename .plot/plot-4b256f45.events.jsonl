@@ -27,3 +27,4 @@
 {"type":"attachment_added","actor":"user:operator","at":"2026-06-22T20:14:38.540Z","data":{"id":"att-003","type":"seeds_issue","ref":"warren-7752","role":"tracks"}}
 {"type":"run_dispatched","actor":"user:operator","at":"2026-06-22T21:18:19.653Z","data":{"run_id":"run_88jvrqq318sg","agent":"leveret","model":"claude-opus-4-8","project":"prj_74w0r1ytsqqc"}}
 {"type":"status_changed","actor":"user:operator","at":"2026-06-22T21:19:36.076Z","data":{"from":"drafting","to":"ready"}}
+{"type":"status_changed","actor":"user:operator","at":"2026-06-22T21:19:48.368Z","data":{"from":"ready","to":"archived"}}
