@@ -15,6 +15,13 @@ defaultBranch: main
 defaultProvider: anthropic
 defaultModel: claude-opus-4-8
 
+# Override do runtime dos built-ins interativos. O planner e dispatchado
+# one-shot (send-off / conversation-merge-dispatch.ts), entao claude-code
+# (subscription/OAuth) roda ele sem queimar credito de API, em vez do pi
+# (API). Remover este bloco volta pro pi.
+interactiveAgents:
+  plannerRuntime: claude-code
+
 # ── Optional knobs (uncomment to set) ───────────────────────────────────
 
 # Pre-fills the NewRun UI prompt textarea and is used as the prompt for
