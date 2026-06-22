@@ -37,6 +37,7 @@ import type { Route, RouteContext, RouteHandler, ServerDeps } from "../types.ts"
 import {
 	getAgentHandler,
 	listAgentsHandler,
+	patchAgentHandler,
 	refreshAgentsHandler,
 	refreshProjectAgentsHandler,
 } from "./agents.ts";
@@ -260,6 +261,7 @@ const ROUTE_TABLE: readonly RouteEntry[] = [
 	{ method: "GET", pattern: "/agents", build: listAgentsHandler },
 	{ method: "POST", pattern: "/agents/refresh", build: refreshAgentsHandler },
 	{ method: "GET", pattern: "/agents/:name", build: getAgentHandler },
+	{ method: "PATCH", pattern: "/agents/:name", build: patchAgentHandler },
 
 	{ method: "GET", pattern: "/projects", build: listProjectsHandler },
 	{ method: "POST", pattern: "/projects", build: createProjectHandler },

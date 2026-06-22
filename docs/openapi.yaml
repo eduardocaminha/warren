@@ -75,6 +75,22 @@ paths:
           required: true
           schema:
             type: string
+    patch:
+      operationId: patchAgentHandler
+      tags:
+        - agents
+      summary: PATCH /agents/:name
+      responses:
+        '200':
+          description: Successful response.
+        default:
+          description: Error response (see `src/core/errors.ts`).
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
   /analytics/behavior:
     get:
       operationId: listBehaviorAnalyticsHandler
