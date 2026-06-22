@@ -1199,6 +1199,8 @@ export interface CreateConversationInput {
 	title?: string;
 	message?: string;
 	dispatcherHandle?: string;
+	/** Optional burrow runtime id (e.g. `"pi-chat"`, `"claude-code-chat"`). Defaults to pi-chat when omitted. */
+	runtimeOverride?: string;
 }
 
 export interface CreateConversationResponse {

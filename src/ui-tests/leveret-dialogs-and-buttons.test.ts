@@ -47,6 +47,16 @@ describe("NewConversationDialog (warren-ea70)", () => {
 			"navigate(`/leveret/" + "$" + "{encodeURIComponent(data.conversation.id)}`);",
 		);
 	});
+
+	test("shows a runtime select defaulting to pi-chat (warren-0727)", () => {
+		expect(NEW_CONV_DIALOG_SOURCE).toMatch(/useState\("pi-chat"\)/);
+		expect(NEW_CONV_DIALOG_SOURCE).toContain('value="pi-chat"');
+		expect(NEW_CONV_DIALOG_SOURCE).toContain('value="claude-code-chat"');
+	});
+
+	test("passes runtimeOverride to conversationsApi.create (warren-0727)", () => {
+		expect(NEW_CONV_DIALOG_SOURCE).toContain("runtimeOverride");
+	});
 });
 
 describe("RewakeButton (warren-c140)", () => {
@@ -62,5 +72,18 @@ describe("RewakeButton (warren-c140)", () => {
 	test("invalidates conversation and conversations queries on success", () => {
 		expect(REWAKE_BUTTON_SOURCE).toContain('queryKey: ["conversation", conversation.id]');
 		expect(REWAKE_BUTTON_SOURCE).toContain('queryKey: ["conversations"]');
+	});
+
+	test("exposes runtime select defaulting to pi-chat before re-wake button (warren-0727)", () => {
+		expect(REWAKE_BUTTON_SOURCE).toMatch(/useState\("pi-chat"\)/);
+		expect(REWAKE_BUTTON_SOURCE).toContain('value="pi-chat"');
+		expect(REWAKE_BUTTON_SOURCE).toContain('value="claude-code-chat"');
+	});
+
+	test("passes runtimeOverride to conversationsApi.rewake (warren-0727)", () => {
+		expect(REWAKE_BUTTON_SOURCE).toContain("runtimeOverride");
+		expect(REWAKE_BUTTON_SOURCE).toMatch(
+			/conversationsApi\.rewake\(conversation\.id,\s*\{\s*runtimeOverride\s*\}\)/,
+		);
 	});
 });
