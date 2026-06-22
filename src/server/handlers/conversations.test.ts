@@ -490,4 +490,59 @@ describe("conversation endpoints", () => {
 		const res = await fetch(`${url}/conversations/${conv.id}/send-off`, { method: "POST" });
 		expect(res.status).toBe(400);
 	});
+
+	test("POST /conversations forwards runtime_override to burrow as the agentId", async () => {
+		const calls: Call[] = [];
+		const ws = await mkdtemp(join(tmpdir(), "warren-conv-rt-"));
+		const burrowClient = makeBurrowClient(
+			{ burrowId: "bur_rt00000000", burrowRunId: "run_rt00000000", workspacePath: ws },
+			calls,
+		);
+		const deps = await depsFor(repos, burrowClient, { plotCreator: PLOT_CREATOR });
+		handle = startServer(deps, {
+			transport: { kind: "tcp", hostname: "127.0.0.1", port: 0 },
+			auth: NO_AUTH,
+			logger: silentLogger,
+		});
+		const url = tcpUrl(handle);
+
+		const res = await fetch(`${url}/conversations`, {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ project_id: projectId, runtime_override: "claude-code-chat" }),
+		});
+		expect(res.status).toBe(201);
+
+		const upCall = calls.find((c) => c.method === "POST" && c.path === "/burrows");
+		expect((upCall?.body as { agents?: string[] } | undefined)?.agents).toEqual([
+			"claude-code-chat",
+		]);
+	});
+
+	test("POST /conversations without runtime_override defaults to agent frontmatter runtime", async () => {
+		const calls: Call[] = [];
+		const ws = await mkdtemp(join(tmpdir(), "warren-conv-def-"));
+		const burrowClient = makeBurrowClient(
+			{ burrowId: "bur_def00000000", burrowRunId: "run_def00000000", workspacePath: ws },
+			calls,
+		);
+		const deps = await depsFor(repos, burrowClient, { plotCreator: PLOT_CREATOR });
+		handle = startServer(deps, {
+			transport: { kind: "tcp", hostname: "127.0.0.1", port: 0 },
+			auth: NO_AUTH,
+			logger: silentLogger,
+		});
+		const url = tcpUrl(handle);
+
+		const res = await fetch(`${url}/conversations`, {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ project_id: projectId }),
+		});
+		expect(res.status).toBe(201);
+
+		const upCall = calls.find((c) => c.method === "POST" && c.path === "/burrows");
+		// leveret has frontmatter.runtime = "pi-chat" in the beforeEach fixture.
+		expect((upCall?.body as { agents?: string[] } | undefined)?.agents).toEqual(["pi-chat"]);
+	});
 });

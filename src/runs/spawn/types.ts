@@ -77,6 +77,15 @@ export interface SpawnRunInput {
 	/** Optional per-run override of the agent's `frontmatter.model`. */
 	readonly modelOverride?: string;
 	/**
+	 * Optional per-run override of the burrow runtime id (e.g. `"pi-chat"`,
+	 * `"claude-code-chat"`). When set (and non-empty), wins over the
+	 * per-project config (`interactiveAgents.plannerRuntime`) AND the agent's
+	 * `frontmatter.runtime`; pi-chat (the DEFAULT_RUNTIME_ID) is used when
+	 * omitted. Forwarded into `readRuntimeId(agent, effectiveRuntimeOverride)`
+	 * so the same precedence chain applies (warren-fe84).
+	 */
+	readonly runtimeOverride?: string;
+	/**
 	 * Per-trigger spend cap (warren-a63d). When set, the spawn composer
 	 * folds it onto `frontmatter.maxCostUsd` (overriding the agent's own
 	 * value) before freezing `runs.rendered_agent_json`, so the bridge
