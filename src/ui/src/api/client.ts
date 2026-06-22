@@ -706,6 +706,9 @@ export const conversationsApi = {
 				...(input.dispatcherHandle !== undefined
 					? { dispatcher_handle: input.dispatcherHandle }
 					: {}),
+				...(input.runtimeOverride !== undefined
+					? { runtime_override: input.runtimeOverride }
+					: {}),
 			},
 		}),
 	/**
@@ -727,6 +730,7 @@ export const conversationsApi = {
 			dispatcherHandle?: string;
 			providerOverride?: string;
 			modelOverride?: string;
+			runtimeOverride?: string;
 		} = {},
 	) =>
 		request<RewakeConversationResponse>(`/conversations/${encodeURIComponent(id)}/re-wake`, {
@@ -739,6 +743,9 @@ export const conversationsApi = {
 					? { provider_override: input.providerOverride }
 					: {}),
 				...(input.modelOverride !== undefined ? { model_override: input.modelOverride } : {}),
+				...(input.runtimeOverride !== undefined
+					? { runtime_override: input.runtimeOverride }
+					: {}),
 			},
 		}),
 };

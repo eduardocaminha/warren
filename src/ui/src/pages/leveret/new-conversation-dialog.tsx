@@ -42,6 +42,7 @@ export function NewConversationDialog({ onOpenChange }: NewConversationDialogPro
 	const [selectedPlotId, setSelectedPlotId] = useState("");
 	const [title, setTitle] = useState("");
 	const [message, setMessage] = useState("");
+	const [runtimeOverride, setRuntimeOverride] = useState("pi-chat");
 
 	const projects = useQuery({
 		queryKey: ["projects"],
@@ -74,6 +75,7 @@ export function NewConversationDialog({ onOpenChange }: NewConversationDialogPro
 			plotId?: string;
 			title?: string;
 			message?: string;
+			runtimeOverride?: string;
 		}) => conversationsApi.create(input),
 		onSuccess: (data) => {
 			qc.invalidateQueries({ queryKey: ["conversations"] });
@@ -98,6 +100,7 @@ export function NewConversationDialog({ onOpenChange }: NewConversationDialogPro
 			...(plotMode === "attach" ? { plotId: selectedPlotId } : {}),
 			...(title.trim() !== "" ? { title: title.trim() } : {}),
 			...(message.trim() !== "" ? { message: message.trim() } : {}),
+			runtimeOverride,
 		});
 	};
 
@@ -249,6 +252,20 @@ export function NewConversationDialog({ onOpenChange }: NewConversationDialogPro
 							disabled={createMutation.isPending}
 							className="text-sm"
 						/>
+					</div>
+
+					<div className="space-y-1.5">
+						<Label htmlFor="new-conv-runtime">Runtime</Label>
+						<select
+							id="new-conv-runtime"
+							value={runtimeOverride}
+							onChange={(e) => setRuntimeOverride(e.target.value)}
+							disabled={createMutation.isPending}
+							className="flex h-9 w-full rounded-md border bg-(--color-card) px-3 py-1 text-sm shadow-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--color-ring) disabled:cursor-not-allowed disabled:opacity-60"
+						>
+							<option value="pi-chat">pi-chat (default)</option>
+							<option value="claude-code-chat">claude-code-chat</option>
+						</select>
 					</div>
 
 					{errorMessage !== null ? (
