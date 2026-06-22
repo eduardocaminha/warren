@@ -43,3 +43,4 @@
 {"type":"attachment_added","actor":"user:operator","at":"2026-06-21T23:47:24.670Z","data":{"id":"att-005","type":"seeds_issue","ref":"warren-9a1b","role":"tracks"}}
 {"type":"plan_run_dispatched","actor":"user:operator","at":"2026-06-22T00:05:50.701Z","data":{"plan_run_id":"plnr_vscenn062wf4","plan_id":"pl-8c5b","children_count":4}}
 {"type":"run_dispatched","actor":"user:operator","at":"2026-06-22T00:05:57.028Z","data":{"run_id":"run_cj2fy542vj2w","agent":"claude-code","model":"claude-opus-4-8","project":"prj_jxtvqcvqh6yj"}}
+{"type":"run_dispatched","actor":"user:operator","at":"2026-06-22T00:18:57.565Z","data":{"run_id":"run_zzhbjhge5wej","agent":"claude-code","model":"claude-opus-4-8","project":"prj_jxtvqcvqh6yj"}}
