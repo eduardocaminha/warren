@@ -24,6 +24,7 @@
 		"src/supervisor/main.ts": 612,
 		"src/supervisor/main.test.ts": 578,
 		"src/server/handlers/agents.test.ts": 533,
+		"src/server/handlers/conversations.test.ts": 548,
 		"src/server/main/index.ts": 548,
 		"src/server/integration.multi-worker.test.ts": 553,
 		"src/server/server.test.ts": 536

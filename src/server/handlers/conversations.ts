@@ -121,6 +121,7 @@ export function createConversationHandler(deps: ServerDeps): RouteHandler {
 		const handle = resolveDispatcherHandle(dispatcherHandle);
 		const opening = optionalString(body, "message") ?? DEFAULT_OPENING_PROMPT;
 		const title = optionalString(body, "title");
+		const runtimeOverride = optionalString(body, "runtime_override");
 
 		const project = await deps.repos.projects.require(projectId);
 		const plotId = await resolveConversationPlot(deps, body, project, handle);
@@ -140,6 +141,7 @@ export function createConversationHandler(deps: ServerDeps): RouteHandler {
 			warrenConfigs: deps.warrenConfigs,
 			runBranchPrefixDefault: deps.runBranchPrefixDefault,
 			seedsCli: deps.seedsCli,
+			runtimeOverride,
 			...(deps.now !== undefined ? { now: deps.now } : {}),
 		});
 
@@ -426,6 +428,7 @@ export function rewakeConversationHandler(deps: ServerDeps): RouteHandler {
 		const dispatcherHandle = optionalString(body, "dispatcher_handle");
 		const providerOverride = optionalString(body, "provider_override");
 		const modelOverride = optionalString(body, "model_override");
+		const runtimeOverride = optionalString(body, "runtime_override");
 
 		const result = await rewakeConversation({
 			repos: deps.repos,
@@ -462,6 +465,7 @@ export function rewakeConversationHandler(deps: ServerDeps): RouteHandler {
 			dispatcherHandle,
 			providerOverride,
 			modelOverride,
+			...(runtimeOverride !== undefined ? { runtimeOverride } : {}),
 			warrenConfigs: deps.warrenConfigs,
 			runBranchPrefixDefault: deps.runBranchPrefixDefault,
 			seedsCli: deps.seedsCli,

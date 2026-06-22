@@ -154,6 +154,7 @@ export type RewakeConversationInput = {
 	| "trigger"
 	| "providerOverride"
 	| "modelOverride"
+	| "runtimeOverride"
 	| "now"
 	| "projectsConfig"
 	| "projectSpawn"
@@ -254,6 +255,7 @@ function buildRewakeSpawnInput(
 		...(plotId !== undefined ? { plotId } : {}),
 		...(input.providerOverride !== undefined ? { providerOverride: input.providerOverride } : {}),
 		...(input.modelOverride !== undefined ? { modelOverride: input.modelOverride } : {}),
+		...(input.runtimeOverride !== undefined ? { runtimeOverride: input.runtimeOverride } : {}),
 		...(input.now !== undefined ? { now: input.now } : {}),
 		...(input.projectsConfig !== undefined ? { projectsConfig: input.projectsConfig } : {}),
 		...(input.projectSpawn !== undefined ? { projectSpawn: input.projectSpawn } : {}),
