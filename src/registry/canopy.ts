@@ -108,6 +108,19 @@ export interface RawAgentPrompt {
 	readonly frontmatter: Readonly<Record<string, unknown>>;
 }
 
+/**
+ * Options for `updateAgent()`. All fields are optional so callers can send
+ * only the delta (sections to upsert, frontmatter to set or remove).
+ */
+export interface AgentUpdateOptions {
+	/** Sections to upsert via `cn update --section name=body`. */
+	readonly sections?: ReadonlyArray<{ readonly name: string; readonly body: string }>;
+	/** Frontmatter keys to set via `cn update --fm key=value`. */
+	readonly frontmatter?: Readonly<Record<string, unknown>>;
+	/** Frontmatter keys to remove via `cn update --remove-fm key`. */
+	readonly frontmatterRemove?: ReadonlyArray<string>;
+}
+
 export interface CanopyClientOptions {
 	readonly cnBinary: string;
 	readonly cwd: string;
@@ -234,6 +247,41 @@ export class CanopyClient {
 			mixins: prompt.mixins ?? [],
 			frontmatter: prompt.frontmatter ?? {},
 		};
+	}
+
+	/**
+	 * Update a prompt, creating a new version. All changes are passed in a
+	 * single `cn update` invocation so a non-zero exit leaves the store
+	 * unchanged rather than partially written. Callers must call `syncCanopy()`
+	 * afterward to commit; skipping sync when this throws is intentional.
+	 */
+	async updateAgent(name: string, opts: AgentUpdateOptions): Promise<void> {
+		const args: string[] = ["update", name];
+		for (const section of opts.sections ?? []) {
+			args.push("--section", `${section.name}=${section.body}`);
+		}
+		for (const [key, value] of Object.entries(opts.frontmatter ?? {})) {
+			args.push("--fm", `${key}=${typeof value === "string" ? value : JSON.stringify(value)}`);
+		}
+		for (const key of opts.frontmatterRemove ?? []) {
+			args.push("--remove-fm", key);
+		}
+		const result = await this.invoke(args);
+		if (result.exitCode !== 0) {
+			throw new CanopyUnavailableError(
+				`cn update ${name} exited ${result.exitCode}: ${formatStderr(result)}`,
+			);
+		}
+	}
+
+	/** Stage and commit `.canopy/` changes made by a preceding `updateAgent()`. */
+	async syncCanopy(): Promise<void> {
+		const result = await this.invoke(["sync"]);
+		if (result.exitCode !== 0) {
+			throw new CanopyUnavailableError(
+				`cn sync exited ${result.exitCode}: ${formatStderr(result)}`,
+			);
+		}
 	}
 
 	/** Render a single prompt by name, returning the raw JSON envelope. */

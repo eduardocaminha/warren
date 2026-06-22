@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { CanopyClient, type SpawnFn, type SpawnResult } from "./canopy.ts";
+import { type AgentUpdateOptions, CanopyClient, type SpawnFn, type SpawnResult } from "./canopy.ts";
 import type { CanopyRegistryConfig } from "./config.ts";
 import { CanopyUnavailableError } from "./errors.ts";
 
@@ -332,6 +332,174 @@ describe("CanopyClient.forProjectPath", () => {
 		await expect(client.listAgents()).rejects.toMatchObject({
 			code: "canopy_unavailable",
 			recoveryHint: expect.stringContaining("/proj"),
+		});
+	});
+});
+
+describe("CanopyClient.updateAgent (warren-a283)", () => {
+	test("invokes `cn update <name>` with no extra args when opts is empty", async () => {
+		const { spawn, calls } = makeSpawn(() => ok(""));
+		const client = CanopyClient.forProjectPath({ projectPath: "/proj", spawn });
+		await client.updateAgent("my-agent", {});
+		expect(calls[0]?.cmd).toEqual(["cn", "update", "my-agent"]);
+		expect(calls[0]?.cwd).toBe("/proj");
+	});
+
+	test("appends --section name=body for each section", async () => {
+		const { spawn, calls } = makeSpawn(() => ok(""));
+		const client = CanopyClient.forProjectPath({ projectPath: "/proj", spawn });
+		const opts: AgentUpdateOptions = {
+			sections: [
+				{ name: "system", body: "be helpful" },
+				{ name: "skills", body: "use tools" },
+			],
+		};
+		await client.updateAgent("my-agent", opts);
+		expect(calls[0]?.cmd).toEqual([
+			"cn",
+			"update",
+			"my-agent",
+			"--section",
+			"system=be helpful",
+			"--section",
+			"skills=use tools",
+		]);
+	});
+
+	test("body with = characters is preserved (splits on first = only)", async () => {
+		const { spawn, calls } = makeSpawn(() => ok(""));
+		const client = CanopyClient.forProjectPath({ projectPath: "/proj", spawn });
+		await client.updateAgent("my-agent", {
+			sections: [{ name: "system", body: "key=value and more=stuff" }],
+		});
+		expect(calls[0]?.cmd).toContain("system=key=value and more=stuff");
+	});
+
+	test("appends --fm key=value for string frontmatter", async () => {
+		const { spawn, calls } = makeSpawn(() => ok(""));
+		const client = CanopyClient.forProjectPath({ projectPath: "/proj", spawn });
+		await client.updateAgent("my-agent", {
+			frontmatter: { provider: "anthropic", model: "claude-opus-4-7" },
+		});
+		const cmd = calls[0]?.cmd ?? [];
+		expect(cmd).toContain("--fm");
+		expect(cmd).toContain("provider=anthropic");
+		expect(cmd).toContain("model=claude-opus-4-7");
+	});
+
+	test("JSON-serializes non-string frontmatter values", async () => {
+		const { spawn, calls } = makeSpawn(() => ok(""));
+		const client = CanopyClient.forProjectPath({ projectPath: "/proj", spawn });
+		await client.updateAgent("my-agent", {
+			frontmatter: { maxTokens: 4096, streaming: true },
+		});
+		const cmd = calls[0]?.cmd ?? [];
+		expect(cmd).toContain("maxTokens=4096");
+		expect(cmd).toContain("streaming=true");
+	});
+
+	test("appends --remove-fm key for each frontmatterRemove entry", async () => {
+		const { spawn, calls } = makeSpawn(() => ok(""));
+		const client = CanopyClient.forProjectPath({ projectPath: "/proj", spawn });
+		await client.updateAgent("my-agent", { frontmatterRemove: ["oldKey", "legacy"] });
+		const cmd = calls[0]?.cmd ?? [];
+		const rfIdx = cmd.indexOf("--remove-fm");
+		expect(rfIdx).toBeGreaterThan(-1);
+		expect(cmd.filter((a) => a === "--remove-fm")).toHaveLength(2);
+		expect(cmd).toContain("oldKey");
+		expect(cmd).toContain("legacy");
+	});
+
+	test("all opts combined produce correct arg order: sections, fm, remove-fm", async () => {
+		const { spawn, calls } = makeSpawn(() => ok(""));
+		const client = CanopyClient.forProjectPath({ projectPath: "/proj", spawn });
+		await client.updateAgent("agent-x", {
+			sections: [{ name: "system", body: "body" }],
+			frontmatter: { provider: "anthropic" },
+			frontmatterRemove: ["old"],
+		});
+		expect(calls[0]?.cmd).toEqual([
+			"cn",
+			"update",
+			"agent-x",
+			"--section",
+			"system=body",
+			"--fm",
+			"provider=anthropic",
+			"--remove-fm",
+			"old",
+		]);
+	});
+
+	test("single invocation — all sections in one call (atomicity guarantee)", async () => {
+		const { spawn, calls } = makeSpawn(() => ok(""));
+		const client = CanopyClient.forProjectPath({ projectPath: "/proj", spawn });
+		await client.updateAgent("my-agent", {
+			sections: [
+				{ name: "s1", body: "b1" },
+				{ name: "s2", body: "b2" },
+				{ name: "s3", body: "b3" },
+			],
+		});
+		expect(calls).toHaveLength(1);
+	});
+
+	test("throws CanopyUnavailableError on non-zero exit", async () => {
+		const { spawn } = makeSpawn(() => fail("cn: prompt not found", 1));
+		const client = CanopyClient.forProjectPath({ projectPath: "/proj", spawn });
+		await expect(client.updateAgent("missing", {})).rejects.toBeInstanceOf(CanopyUnavailableError);
+		await expect(client.updateAgent("missing", {})).rejects.toMatchObject({
+			message: expect.stringContaining("exited 1"),
+		});
+	});
+
+	test("throws CanopyUnavailableError when spawn rejects", async () => {
+		const spawn: SpawnFn = async () => {
+			const err = new Error("ENOENT") as Error & { code: string };
+			err.code = "ENOENT";
+			throw err;
+		};
+		const client = CanopyClient.forProjectPath({ projectPath: "/proj", spawn });
+		await expect(client.updateAgent("my-agent", {})).rejects.toMatchObject({
+			code: "canopy_unavailable",
+			message: expect.stringContaining("failed to spawn"),
+		});
+	});
+});
+
+describe("CanopyClient.syncCanopy (warren-a283)", () => {
+	test("invokes `cn sync` with the client cwd", async () => {
+		const { spawn, calls } = makeSpawn(() => ok(""));
+		const client = CanopyClient.forProjectPath({ projectPath: "/proj", spawn });
+		await client.syncCanopy();
+		expect(calls[0]?.cmd).toEqual(["cn", "sync"]);
+		expect(calls[0]?.cwd).toBe("/proj");
+	});
+
+	test("resolves without throwing on zero exit", async () => {
+		const { spawn } = makeSpawn(() => ok(""));
+		const client = CanopyClient.forProjectPath({ projectPath: "/proj", spawn });
+		await expect(client.syncCanopy()).resolves.toBeUndefined();
+	});
+
+	test("throws CanopyUnavailableError on non-zero exit", async () => {
+		const { spawn } = makeSpawn(() => fail("nothing to commit", 1));
+		const client = CanopyClient.forProjectPath({ projectPath: "/proj", spawn });
+		await expect(client.syncCanopy()).rejects.toBeInstanceOf(CanopyUnavailableError);
+		await expect(client.syncCanopy()).rejects.toMatchObject({
+			message: expect.stringContaining("cn sync exited 1"),
+		});
+	});
+
+	test("throws CanopyUnavailableError when spawn rejects", async () => {
+		const spawn: SpawnFn = async () => {
+			const err = new Error("ENOENT") as Error & { code: string };
+			err.code = "ENOENT";
+			throw err;
+		};
+		const client = CanopyClient.forProjectPath({ projectPath: "/proj", spawn });
+		await expect(client.syncCanopy()).rejects.toMatchObject({
+			code: "canopy_unavailable",
 		});
 	});
 });
