@@ -7,3 +7,4 @@
 {"type":"run_dispatched","actor":"user:operator","at":"2026-06-22T21:49:04.322Z","data":{"run_id":"run_peyhtyxv4bq1","agent":"leveret","model":"claude-opus-4-8","project":"prj_74w0r1ytsqqc"}}
 {"type":"run_dispatched","actor":"user:operator","at":"2026-06-22T22:03:58.448Z","data":{"run_id":"run_8ms5xhbmezrm","agent":"planner","model":"claude-opus-4-8","project":"prj_74w0r1ytsqqc"}}
 {"type":"run_dispatched","actor":"user:operator","at":"2026-06-22T22:38:34.376Z","data":{"run_id":"run_fbscz2b9x9r2","agent":"planner","model":"claude-opus-4-8","project":"prj_74w0r1ytsqqc"}}
+{"type":"status_changed","actor":"user:operator","at":"2026-06-22T22:54:13.019Z","data":{"from":"drafting","to":"archived"}}
