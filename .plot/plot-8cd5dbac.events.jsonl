@@ -1,0 +1,4 @@
+{"type":"plot_created","actor":"user:operator","at":"2026-06-22T22:55:29.776Z","data":{"name":"Editar agentes via warren UI"}}
+{"type":"run_dispatched","actor":"user:operator","at":"2026-06-22T22:55:30.825Z","data":{"run_id":"run_5k35k4wayff5","agent":"leveret","model":"claude-opus-4-8","project":"prj_74w0r1ytsqqc"}}
+{"type":"run_dispatched","actor":"user:operator","at":"2026-06-22T23:00:13.271Z","data":{"run_id":"run_netptr3xxx4y","agent":"leveret","model":"claude-opus-4-8","project":"prj_74w0r1ytsqqc"}}
+{"type":"status_changed","actor":"user:operator","at":"2026-06-22T23:01:17.782Z","data":{"from":"drafting","to":"archived"}}
