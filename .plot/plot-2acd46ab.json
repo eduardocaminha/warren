@@ -1,0 +1,23 @@
+{
+  "attachments": [],
+  "created_at": "2026-06-22T18:38:32.745Z",
+  "id": "plot-2acd46ab",
+  "intent": {
+    "constraints": [
+      "Envolve warren (UI + API de edicao) E canopy (os agentes sao prompts do canopy lidos via CANOPY_REPO_URL; editar = escrever de volta no canopy, versionado pelo cn).",
+      "Plot e single-project, criado no projeto warren; se virar trabalho cross-repo de verdade, ganha um Plot irmao no canopy (igual ao par burrow/warren do claude-code-chat)."
+    ],
+    "goal": "Permitir editar os agentes (definidos no canopy) direto na UI do warren, em vez de editar o canopy na mao via cn update + push.",
+    "non_goals": [
+      "Nao e o select de runtime (esse e o claude-code-chat, plot-4b256f45); aqui e editar o conteudo/config dos agentes."
+    ],
+    "success_criteria": [
+      "Operador edita um agente na UI do warren e a mudanca persiste no canopy (nova versao via cn).",
+      "O warren passa a usar a versao editada no proximo refresh/dispatch."
+    ]
+  },
+  "name": "Editar agentes na UI do warren",
+  "schema_version": 1,
+  "status": "drafting",
+  "updated_at": "2026-06-22T18:38:32.795Z"
+}
