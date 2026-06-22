@@ -111,10 +111,11 @@ HTTP facade, the bwrap-friendly security flags in `docker-compose.yml`).
   install AND `package.json` + `bun.lock`. Bumping only one is a no-op —
   `Bun.spawn` resolves `./node_modules/.bin/burrow` before PATH, so the
   supervisor runs the local copy. Update both, regenerate the lockfile,
-  re-test. Currently pinned to `0.3.13`, published from the fork
-  `eduardocaminha/burrow` (SQLite vacuum stability + pi-v0.78.1 parser
-  fixtures). The `claude-code-chat` runtime that the Leveret conversation
-  UI exposes is pending pl-302c landing in that fork.
+  re-test. Pinned to the fork `github:eduardocaminha/burrow#bd77675` (a git
+  dependency, NOT the published `@os-eco/burrow-cli`, which lacks the
+  `claude-code-chat` runtime). The fork carries that runtime (pl-302c landed:
+  `claudeCodeChatRuntime` registered in `BUILT_IN_RUNTIMES`), which the
+  Leveret conversation UI's runtime select dispatches to.
 - Burrow needs three apparmor/seccomp/systempaths-unconfined flags + `cap_add:
   SYS_ADMIN` on Linux to do user-namespace nesting (see SPEC §5.3 and burrow
   `DEPLOY.md`). These are baked into `docker-compose.yml`; don't strip them.
