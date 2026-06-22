@@ -2221,6 +2221,76 @@ over the `runs_plot_id` index without an N+1. Brainstorm rides the
 existing `defaultPlotCreator` + `spawnRun` seams — no new sandbox
 shape, no new agent contract.
 
+### 11.O.Runtime Per-conversation runtime_override for Leveret (warren-34a7 / pl-8c5b, 2026-06-21)
+
+Leveret conversations are runtime-generic: `readRuntimeId(agent, configOverride)` already resolves
+`configOverride.runtime > frontmatter.runtime > DEFAULT_RUNTIME_ID`. This section threads a
+`runtime_override` field through every caller-facing surface so the operator can pin a specific
+burrow runtime (e.g. `claude-code-chat`) per conversation at create-time or switch runtimes
+mid-conversation via re-wake, without touching the agent frontmatter.
+
+`pi-chat` remains the default when `runtime_override` is omitted; the field is always optional.
+
+**Create-time runtime selection.** `POST /conversations` accepts an optional `runtime_override`
+string:
+
+```
+POST /conversations
+{ "project_id": "...", "runtime_override": "claude-code-chat" }
+```
+
+The field flows through `createConversationHandler` → `spawnRun({ runtimeOverride })` →
+`readRuntimeId(agent, { runtime: runtimeOverride })` → burrow provision call as the `agents`
+array. Omitting it lets the agent's `frontmatter.runtime` (or the DEFAULT_RUNTIME_ID fallback)
+win as before.
+
+**Mid-conversation runtime switch via re-wake.** `POST /conversations/:id/re-wake` also accepts
+`runtime_override`. Re-wake already spawns a fresh `mode:"conversation"` run that replays the
+full transcript (warren-6ccf); passing a different `runtime_override` on re-wake is the switch
+primitive — the new session replays the same transcript into a different runtime:
+
+```
+POST /conversations/:id/re-wake
+{ "runtime_override": "claude-code-chat" }
+```
+
+The field is forwarded through `rewakeConversationHandler` → `rewakeConversation({
+runtimeOverride })` → `buildRewakeSpawnInput` → `spawnRun({ runtimeOverride })`. The transcript
+replay is runtime-agnostic — the shared memory survives the switch.
+
+**Priority chain:**
+
+```
+per-call runtime_override  >  agent frontmatter.runtime  >  DEFAULT_RUNTIME_ID (pi-chat)
+```
+
+**UI surface.** Two components gained a runtime `<select>` (pi-chat default, claude-code-chat):
+
+- `NewConversationDialog` (`src/ui/src/pages/leveret/new-conversation-dialog.tsx`) — shown when
+  creating a new conversation from the Workspace/Leveret surface; `runtimeOverride` is forwarded
+  on `conversationsApi.create()`.
+- `RewakeButton` (`src/ui/src/pages/conversation-detail/rewake-button.tsx`) — shown alongside the
+  Re-wake button on ConversationDetail; `runtimeOverride` is forwarded on `conversationsApi.rewake()`.
+
+Both default to `pi-chat`, matching the server-side default.
+
+**Dependency.** The `claude-code-chat` burrow runtime is built by a separate burrow plan
+(pl-302c). Selecting it before that plan merges results in a run that fails at burrow provision
+time (no agent registered under that name). This is accepted behavior — the operator receives a
+clear run failure, not a silent drop. The UI does not gate the option on runtime availability.
+
+**Acceptance:**
+
+1. `POST /conversations` with `runtime_override: "claude-code-chat"` dispatches the anchoring run
+   under that runtime (burrow provision call carries `agents: ["claude-code-chat"]`); omitting it
+   falls back to the agent's `frontmatter.runtime` (`"pi-chat"` for leveret).
+2. `POST /conversations/:id/re-wake` with a different `runtime_override` spawns a fresh run under
+   the new runtime with the full prior transcript replayed — verifiable via the `agents` field on
+   the burrow provision call and the `conversation.rewake_replayed` system event on the new run.
+3. The NewConversationDialog runtime select defaults to `pi-chat` and forwards `runtimeOverride`
+   on create.
+4. `check:all` is green across all four PRs (warren-fe84, warren-163d, warren-0727, warren-9a1b).
+
 ### 11.P PlanRun: serial plan execution (pl-a258, 2026-05-18)
 
 PlanRun is a dispatch mode, not a fifth bundled feature. The substrate
