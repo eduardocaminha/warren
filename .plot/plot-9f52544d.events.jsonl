@@ -8,3 +8,4 @@
 {"type":"plan_attached","actor":"agent:planner","at":"2026-06-22T23:10:00.000Z","data":{"plan_id":"pl-dec4","seed_ids":["warren-a283","warren-81a3","warren-2c31","warren-91d0","warren-1283"],"label":"Agent editor: cn write-back + UI form"}}
 {"type":"plan_run_dispatched","actor":"user:operator","at":"2026-06-22T23:16:23.349Z","data":{"plan_run_id":"plnr_2m2tn8kr30sr","plan_id":"pl-dec4","children_count":5}}
 {"type":"run_dispatched","actor":"user:operator","at":"2026-06-22T23:16:26.871Z","data":{"run_id":"run_7yqtqzd7ha56","agent":"claude-code","model":"claude-opus-4-8","project":"prj_74w0r1ytsqqc"}}
+{"type":"run_dispatched","actor":"user:operator","at":"2026-06-22T23:28:17.539Z","data":{"run_id":"run_fasv757kscjf","agent":"claude-code","model":"claude-opus-4-8","project":"prj_74w0r1ytsqqc"}}
