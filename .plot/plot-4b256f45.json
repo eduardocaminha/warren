@@ -7,6 +7,22 @@
       "ref": "pl-cf38",
       "role": "plan",
       "type": "seeds_issue"
+    },
+    {
+      "added_at": "2026-06-22T20:14:38.524Z",
+      "added_by": "user:operator",
+      "id": "att-002",
+      "ref": "warren-0702",
+      "role": "tracks",
+      "type": "seeds_issue"
+    },
+    {
+      "added_at": "2026-06-22T20:14:38.540Z",
+      "added_by": "user:operator",
+      "id": "att-003",
+      "ref": "warren-7752",
+      "role": "tracks",
+      "type": "seeds_issue"
     }
   ],
   "created_at": "2026-06-22T18:11:55.732Z",
@@ -29,5 +45,5 @@
   "name": "claude-code-chat: warren no burrow do fork",
   "schema_version": 1,
   "status": "drafting",
-  "updated_at": "2026-06-22T18:13:43.371Z"
+  "updated_at": "2026-06-22T20:14:38.540Z"
 }

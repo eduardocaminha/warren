@@ -1,11 +1,10 @@
 {
   "lockfileVersion": 1,
-  "configVersion": 0,
   "workspaces": {
     "": {
       "name": "@os-eco/warren-cli",
       "dependencies": {
-        "@os-eco/burrow-cli": "^0.3.12",
+        "@os-eco/burrow-cli": "^0.3.13",
         "@os-eco/plot-cli": "^0.4.0",
         "@sentry/bun": "^10.59.0",
         "commander": "^15.0.0",
@@ -162,7 +161,7 @@
 
     "@opentelemetry/semantic-conventions": ["@opentelemetry/semantic-conventions@1.41.1", "", {}, "sha512-/UhIkaZgPutTFmQ7RnIJGgDXZmtEJ7Dvi86xNTFWcnRxVRNk/aotsqDJYeEvDP+FSMB2SdW+pQzNMcWP0rwuNA=="],
 
-    "@os-eco/burrow-cli": ["@os-eco/burrow-cli@0.3.12", "", { "dependencies": { "chalk": "^5.6.2", "commander": "^15.0.0", "drizzle-orm": "^0.45.2", "p-queue": "^9.2.0", "pino": "^10.3.1", "pino-pretty": "^13.1.3", "smol-toml": "^1.6.1", "zod": "^4.4.3" }, "bin": { "burrow": "src/cli/main.ts", "bw": "src/cli/main.ts" } }, "sha512-7ojyoiM71BVz/s53gGItquAdVL5tFkyIS7hECOuLrtvQgNdoA2BqI0UfGM2EIkT0gC6iSARrLwgYq2HhtaS/cQ=="],
+    "@os-eco/burrow-cli": ["@os-eco/burrow-cli@0.3.13", "", { "dependencies": { "chalk": "^5.6.2", "commander": "^15.0.0", "drizzle-orm": "^0.45.2", "p-queue": "^9.2.0", "pino": "^10.3.1", "pino-pretty": "^13.1.3", "smol-toml": "^1.6.1", "zod": "^4.4.3" }, "bin": { "burrow": "src/cli/main.ts", "bw": "src/cli/main.ts" } }, "sha512-7utx6q1pKgP0oHvPQjIoDl2LCvo4e26oRZVhkrmi5KBB0LvkNVwPxCSW3NQYBJvZHEgPl8//yYcKA0QuQaSeiA=="],
 
     "@os-eco/plot-cli": ["@os-eco/plot-cli@0.4.0", "", { "dependencies": { "pino": "^10.3.1" }, "bin": { "plot": "src/index.ts" } }, "sha512-Y//wUlLEpPt0OCJaFHRL7XIGVoSVhv0mYgOvSWZs6Qx6j1eA7cx0JuCnt43ikw/0b7K02teCWmYEC4CNz3gLlw=="],
 

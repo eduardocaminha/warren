@@ -93,6 +93,7 @@ describe("spawnRun: plotId gating + PLOT env injection (warren-a8c3 / warren-e26
 			agentName: "refactor-bot",
 			projectId: "prj_xxxxxxxxxxxx",
 			prompt: "fix it",
+			serverEnv: {}, // isolate from process.env so callback vars aren't injected
 		});
 
 		const up = calls.find((c) => c.method === "POST" && c.path === "/burrows");
