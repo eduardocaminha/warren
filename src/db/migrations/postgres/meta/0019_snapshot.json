@@ -1,6 +1,6 @@
 {
-	"id": "913b2abd-41f4-4f8e-95c4-553a4dd813ea",
-	"prevId": "07a79b58-011b-4d0a-9c24-aab3353f046d",
+	"id": "5c97a27b-79c5-4cad-95cc-dcee9e7893e7",
+	"prevId": "289acc02-f15a-4cd1-a6ee-2295dc31f25a",
 	"version": "7",
 	"dialect": "postgresql",
 	"tables": {
@@ -504,6 +504,12 @@
 					"primaryKey": false,
 					"notNull": false
 				},
+				"execution_project_id": {
+					"name": "execution_project_id",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": false
+				},
 				"state": {
 					"name": "state",
 					"type": "text",
@@ -721,12 +727,6 @@
 				},
 				"ended_at": {
 					"name": "ended_at",
-					"type": "text",
-					"primaryKey": false,
-					"notNull": false
-				},
-				"resume_at": {
-					"name": "resume_at",
 					"type": "text",
 					"primaryKey": false,
 					"notNull": false
@@ -1173,12 +1173,6 @@
 					"type": "text",
 					"primaryKey": false,
 					"notNull": false
-				},
-				"resets_at": {
-					"name": "resets_at",
-					"type": "text",
-					"primaryKey": false,
-					"notNull": false
 				}
 			},
 			"indexes": {
@@ -1280,6 +1274,21 @@
 					"columns": [
 						{
 							"expression": "mode",
+							"isExpression": false,
+							"asc": true,
+							"nulls": "last"
+						}
+					],
+					"isUnique": false,
+					"concurrently": false,
+					"method": "btree",
+					"with": {}
+				},
+				"runs_pr_url_idx": {
+					"name": "runs_pr_url_idx",
+					"columns": [
+						{
+							"expression": "pr_url",
 							"isExpression": false,
 							"asc": true,
 							"nulls": "last"

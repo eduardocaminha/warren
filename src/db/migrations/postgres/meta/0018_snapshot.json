@@ -1,5 +1,5 @@
 {
-	"id": "07a79b58-011b-4d0a-9c24-aab3353f046d",
+	"id": "289acc02-f15a-4cd1-a6ee-2295dc31f25a",
 	"prevId": "7351fade-2dc4-42d7-8464-508877d17df1",
 	"version": "7",
 	"dialect": "postgresql",
@@ -1167,12 +1167,6 @@
 					"type": "text",
 					"primaryKey": false,
 					"notNull": false
-				},
-				"resets_at": {
-					"name": "resets_at",
-					"type": "text",
-					"primaryKey": false,
-					"notNull": false
 				}
 			},
 			"indexes": {
@@ -1274,6 +1268,21 @@
 					"columns": [
 						{
 							"expression": "mode",
+							"isExpression": false,
+							"asc": true,
+							"nulls": "last"
+						}
+					],
+					"isUnique": false,
+					"concurrently": false,
+					"method": "btree",
+					"with": {}
+				},
+				"runs_pr_url_idx": {
+					"name": "runs_pr_url_idx",
+					"columns": [
+						{
+							"expression": "pr_url",
 							"isExpression": false,
 							"asc": true,
 							"nulls": "last"

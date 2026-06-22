@@ -8,6 +8,7 @@
 import type { BurrowClientPool } from "../../burrow-client/index.ts";
 import type { AnyWarrenDb } from "../../db/client.ts";
 import type { Repos } from "../../db/repos/index.ts";
+import type { MetricsRegistry } from "../../observability/metrics-registry.ts";
 import { createDefaultPlanSynthesizer } from "../../plot-plan-runs/index.ts";
 import {
 	createPlotAggregator,
@@ -60,6 +61,7 @@ export interface BuildServerDepsInput {
 	readonly workspaceGcTtlMs: number;
 	readonly previewAuth: PreviewAuth | undefined;
 	readonly sdBinary: string;
+	readonly metricsRegistry?: MetricsRegistry;
 	readonly now?: () => Date;
 }
 
@@ -83,6 +85,7 @@ export function buildServerDeps(input: BuildServerDepsInput): ServerDeps {
 		workspaceGcTtlMs,
 		previewAuth,
 		sdBinary,
+		metricsRegistry,
 		now,
 	} = input;
 
@@ -142,6 +145,7 @@ export function buildServerDeps(input: BuildServerDepsInput): ServerDeps {
 			seedsCli: { sdBinary, spawn: defaultSpawn },
 		}),
 		idempotencyStore: new IdempotencyStore(now !== undefined ? { now: () => now().getTime() } : {}),
+		...(metricsRegistry !== undefined ? { metricsRegistry } : {}),
 		...(now !== undefined ? { now } : {}),
 	};
 }

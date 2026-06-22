@@ -1,1 +1,0 @@
-ALTER TABLE "plan_runs" ADD COLUMN "resume_at" text;

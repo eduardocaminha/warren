@@ -1,8 +1,8 @@
 {
 	"version": "6",
 	"dialect": "sqlite",
-	"id": "e32dcaf8-cd53-47b5-89ed-20eb10274043",
-	"prevId": "a76babbd-2c18-4ae1-989d-53f065f08185",
+	"id": "4ef43775-ee3d-4ee3-8547-21aad1417fc7",
+	"prevId": "f3b79d25-2ca4-4802-afdd-b96aa4e35afd",
 	"tables": {
 		"agents": {
 			"name": "agents",
@@ -424,6 +424,13 @@
 					"notNull": false,
 					"autoincrement": false
 				},
+				"execution_project_id": {
+					"name": "execution_project_id",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": false,
+					"autoincrement": false
+				},
 				"state": {
 					"name": "state",
 					"type": "text",
@@ -635,13 +642,6 @@
 				},
 				"ended_at": {
 					"name": "ended_at",
-					"type": "text",
-					"primaryKey": false,
-					"notNull": false,
-					"autoincrement": false
-				},
-				"resume_at": {
-					"name": "resume_at",
 					"type": "text",
 					"primaryKey": false,
 					"notNull": false,
@@ -1054,13 +1054,6 @@
 					"primaryKey": false,
 					"notNull": false,
 					"autoincrement": false
-				},
-				"resets_at": {
-					"name": "resets_at",
-					"type": "text",
-					"primaryKey": false,
-					"notNull": false,
-					"autoincrement": false
 				}
 			},
 			"indexes": {
@@ -1092,6 +1085,11 @@
 				"runs_mode_idx": {
 					"name": "runs_mode_idx",
 					"columns": ["mode"],
+					"isUnique": false
+				},
+				"runs_pr_url_idx": {
+					"name": "runs_pr_url_idx",
+					"columns": ["pr_url"],
 					"isUnique": false
 				}
 			},

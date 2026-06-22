@@ -51,6 +51,33 @@ export interface SpawnRunInput {
 	readonly concurrencyEnv?: Record<string, string | undefined>;
 	readonly agentName: string;
 	readonly projectId: string;
+	/**
+	 * Coordination project id (warren-c1a4 / pl-fb43 step 3). Splits the
+	 * single project identity into two roles:
+	 *
+	 *   - `projectId` (execution) selects the repo cloned into the burrow
+	 *     workspace — where the agent actually does its work.
+	 *   - `seedProjectId` (coordination) selects the *host* project clone
+	 *     used for the post-dispatch bookkeeping: the seeds
+	 *     `updateExtensions` stamp (`role`/`lastRunId`/`lastRunAt`) and the
+	 *     `run_dispatched` Plot append/mirror.
+	 *
+	 * Defaults to `projectId` when unset/empty, so a same-repo run is
+	 * byte-identical to the pre-split behavior. When it differs, the seed
+	 * stamp and Plot operations target the coordination project's clone
+	 * while the workspace still clones the execution `projectId`. The
+	 * burrow provisioning path is unaffected — it always uses `projectId`.
+	 */
+	readonly seedProjectId?: string;
+	/**
+	 * Legibility-only repo ref for the cross-repo plan-run path (pl-fb43
+	 * step 5 / warren-d9f3). When the child was routed to a different
+	 * execution repo than the coordination project, this carries the raw
+	 * `extensions.repo` string so the `run_dispatched` Plot mirror on the
+	 * coordination project is self-describing about which repo the run
+	 * actually targeted. Omitted on same-repo dispatches.
+	 */
+	readonly executionRepo?: string;
 	readonly prompt: string;
 	readonly trigger?: string;
 	/**
@@ -144,6 +171,18 @@ export interface SpawnRunInput {
 	 * Ignored when `parentRunId` is unset (root run → null clone_kind).
 	 */
 	readonly cloneKind?: CloneKind;
+	/**
+	 * Existing branch the run must push to instead of the composed
+	 * `${prefix}/${runId}` (warren-a993). The CI-fixer poller sets this to
+	 * the PR head branch so the fixer's commits push to the open PR and its
+	 * CI re-runs, rather than opening a fresh `${prefix}/run_xxx` branch (and
+	 * a second PR). A non-empty value short-circuits the prefix composition
+	 * (see `composeRunBranch`); empty / whitespace-only falls back to the
+	 * composed branch so a stray override can never strand the spawn on a
+	 * blank ref. Pairs with `parentRunId` (`cloneKind: "continue"`) so the
+	 * workspace also forks from that same branch tip.
+	 */
+	readonly targetBranch?: string;
 	/** Override the project refresher; defaults to `refreshProject`. */
 	readonly refreshProjectFn?: typeof refreshProject;
 	/**
@@ -161,6 +200,15 @@ export interface SpawnRunInput {
 	 * existing deployments are unchanged.
 	 */
 	readonly runBranchPrefixDefault?: string;
+	/**
+	 * Server-process environment used to derive the warren API callback
+	 * vars injected into the sandbox (`WARREN_API_TOKEN` + `WARREN_API_URL`,
+	 * warren-f248). Defaults to `process.env` when omitted, so production
+	 * call sites need not thread it; tests substitute a fixture env to
+	 * assert the injected (or skipped) callback credential without touching
+	 * the real process environment.
+	 */
+	readonly serverEnv?: Readonly<Record<string, string | undefined>>;
 	/**
 	 * Seeds CLI shell-out deps for the post-dispatch extension write
 	 * (pl-bb70 step 4, warren-46cd). When both `seedId` and this are
@@ -210,6 +258,8 @@ export interface AppendPlotRunDispatchedInput {
 	readonly agentName: string;
 	readonly model: string | null;
 	readonly projectId: string;
+	/** pl-fb43 step 5: execution repo ref when it differs from coordination. */
+	readonly executionRepo?: string;
 }
 
 export interface SpawnPlotAppender {

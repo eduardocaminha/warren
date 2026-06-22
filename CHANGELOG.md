@@ -7,6 +7,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.5] — 2026-06-22
+
+### Added
+
+- **`feat(observability)`** — Phase 1 observability instrumentation:
+  optional Sentry error tracking (active only when `SENTRY_DSN` is set) and a
+  Prometheus `GET /metrics` endpoint exposing run-state, cost, token,
+  bridge, and log-rate series in valid v0.0.4 exposition text
+  (commit 29c09f4a).
+
+### Fixed
+
+- **`fix(observability)`** — the Sentry event scrubber now recurses one
+  level into nested record values, matching the pino `*.<field>` redact
+  policy in `src/server/main/redact.ts`. A secret nested one level deep in
+  `event.extra` or `event.request.headers` (e.g. `{ extra: { config: {
+  token } } }`) is now redacted before it reaches Sentry, closing a
+  defense-in-depth gap where nested secrets leaked even though the same
+  field was censored in the log line (warren-3ca4).
+- **`fix(metrics)`** — the live cost/token gauges in `GET /metrics` no
+  longer carry the `_total` suffix Prometheus reserves for counters. These
+  sums can decrease when runs are reaped, so they are renamed
+  `warren_cost_usd`, `warren_tokens_input`, and `warren_tokens_output`; the
+  genuine counter `warren_log_messages_total` keeps its suffix (warren-00bd).
+- **`fix(metrics)`** — `countersToMetrics()` builds its `PromMetric`
+  samples without mutating a `readonly PromSample[]` via a double-cast,
+  accumulating samples in a mutable map keyed by metric name instead
+  (warren-91db).
+
+## [0.9.4] — 2026-06-20
+
+### Changed
+
+- **`chore(deps)`** — bumped the pinned `@os-eco/seeds-cli` Docker image
+  install from 0.5.11 to 0.5.13, which fixes a critical bug in warren's
+  agent runtimes.
+
+- **`feat(runs)`** — the run heartbeat watchdog (warren-285d) is now **on by
+  default** (warren-b2dc) with a generous 45-minute built-in budget, instead
+  of arming only when `WARREN_RUN_HEARTBEAT_TIMEOUT_MS` was set. A fresh
+  deploy is now protected from silent-but-busy runaway runs without an
+  explicit env var, mirroring the conversation-idle coordinator. Tune the
+  budget via `WARREN_RUN_HEARTBEAT_TIMEOUT_MS`; opt out with
+  `WARREN_WATCHDOG_DISABLED=1` (or by pinning the budget to 0). `fly.toml`
+  pins the budget explicitly at the deploy-config layer.
+
+### Added
+
+- **`ci(pr-fixer)`** — the polling CI-fixer is wired into the scheduler
+  tick. Each tick, projects with `ciFixer.enabled` enumerate their open-PR
+  candidates (`RunsRepo.listPrCandidatesByProject`, indexed by the new
+  `runs_pr_url_idx`), classify each PR's check-runs, and dispatch a
+  `ci-fixer` run against the failing PR — gated by the per-PR retry +
+  cooldown history (`RunsRepo.fixAttemptHistoryByPrUrl`) and back-linked to
+  the PR's opener via `parentRunId`. Dispatched fixers stamp a
+  `ci_fixer.dispatched` system event on the opener run. The PR-head
+  `targetBranch` push and CI-log extraction land in warren-a993
+  (warren-0b75).
+
 ## [0.9.3] — 2026-06-16
 
 The remaining pl-dfb5 papercuts land: a project-scoped seeds-plan read

@@ -39,6 +39,11 @@ function tcpUrl(handle: ServeHandle): string {
 	return `http://${handle.transport.hostname}:${handle.transport.port}`;
 }
 
+// warren-ec44: these suites seed runs at fixed 2026-05 dates, so they must
+// pin an explicit ?from/?to window rather than rely on the handler's default
+// "last 30 days" relative to the system clock (which excludes the data once
+// the wall clock advances past it).
+
 interface SeedRunOpts {
 	projectId: string;
 	agentName: string;

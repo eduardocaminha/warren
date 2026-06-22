@@ -167,11 +167,8 @@ export interface CreateRunInput {
 	cloneFromRunId?: string;
 }
 
-/**
- * Ergonomic input for {@link WarrenClient.dispatch}. Mirrors
- * {@link CreateRunInput} but uses the user-facing field names (`model`,
- * `branch`, `provider`) from `warren run` CLI flags, mapped at request time.
- */
+/** Ergonomic input for {@link WarrenClient.dispatch}: mirrors {@link CreateRunInput} with
+ * `warren run` CLI field names (`model`/`branch`/`provider`), mapped at request time. */
 export interface DispatchRunInput {
 	agent: string;
 	project: string;
@@ -206,6 +203,18 @@ export interface ListProjectsResponse {
 export interface CreateProjectInput {
 	gitUrl: string;
 	defaultBranch?: string;
+}
+
+/** A plan from `GET /projects/:id/ready-plans` — approved, undispatched, ≥1 open child (warren-7937). */
+export interface ReadyPlan {
+	id: string;
+	name?: string;
+	status: string;
+	openChildCount: number;
+}
+
+export interface ListReadyPlansResponse {
+	plans: ReadyPlan[];
 }
 
 export interface RefreshProjectInput {
@@ -256,14 +265,11 @@ export interface ListRunsResponse {
 }
 
 /* ----------------------------------------------------------------------- */
-/* Plots — typed facade over /plots endpoints (warren-8ffc).               */
-/*                                                                          */
-/* The wire envelope under /plots is snake_case end-to-end (mirror of the  */
-/* @os-eco/plot-cli on-disk shape); the client surfaces it verbatim so     */
-/* readers can hand a `PlotEnvelope` straight to a Plot library consumer   */
-/* without re-keying. Inputs accept camelCase for ergonomics and the       */
-/* client maps to snake_case at the request boundary (parallel to          */
-/* `dispatch()` mapping `branch/model/provider` onto the runs wire).       */
+/* Plots — typed facade over /plots endpoints (warren-8ffc). Wire envelope */
+/* is snake_case end-to-end (mirror of @os-eco/plot-cli) and surfaced      */
+/* verbatim; inputs accept camelCase and map to snake_case at the boundary */
+/* (parallel to dispatch() mapping branch/model/provider onto the runs     */
+/* wire).                                                                   */
 /* ----------------------------------------------------------------------- */
 
 export type PlotStatus = "drafting" | "ready" | "active" | "done" | "archived";
@@ -405,101 +411,8 @@ export type PlotSyncResponse =
 
 /* ----------------------------------------------------------------------- */
 /* Plan-runs — typed facade over /plan-runs (warren-8ffc).                 */
-/* Wire envelope is camelCase, mirroring /runs.                            */
+/* Wire envelope is camelCase, mirroring /runs. Types live in              */
+/* `./types.plan-runs.ts` (warren-fcc8); re-exported here for the          */
+/* canonical `./types.ts` import surface.                                  */
 /* ----------------------------------------------------------------------- */
-export type PlanRunState =
-	| "queued"
-	| "running"
-	| "paused_rate_limited"
-	| "succeeded"
-	| "failed"
-	| "cancelled";
-
-export const PLAN_RUN_TERMINAL_STATES: ReadonlySet<PlanRunState> = new Set([
-	"succeeded",
-	"failed",
-	"cancelled",
-]);
-
-export function isTerminalPlanRunState(
-	state: PlanRunState,
-): state is "succeeded" | "failed" | "cancelled" {
-	return PLAN_RUN_TERMINAL_STATES.has(state);
-}
-
-export type PlanRunChildState =
-	| "pending"
-	| "dispatched"
-	| "running"
-	| "pr_open"
-	| "merged"
-	| "failed"
-	| "skipped";
-
-export interface PlanRunRow {
-	id: string;
-	planId: string;
-	projectId: string;
-	agentName: string;
-	promptTemplate: string;
-	ref: string | null;
-	providerOverride: string | null;
-	modelOverride: string | null;
-	dispatcherHandle: string;
-	trigger: string;
-	state: PlanRunState;
-	failureReason: string | null;
-	createdAt: string;
-	startedAt: string | null;
-	endedAt: string | null;
-	plotId: string | null;
-	resumeAt: string | null;
-	rateLimitRetries: number;
-}
-
-export interface PlanRunChildRow {
-	planRunId: string;
-	seq: number;
-	seedId: string;
-	runId: string | null;
-	state: PlanRunChildState;
-	createdAt: string;
-	updatedAt: string;
-	startedAt: string | null;
-	endedAt: string | null;
-	prMergedAt: string | null;
-	failureReason: string | null;
-}
-
-/** `POST /plan-runs` request body. Wire envelope is camelCase. */
-export interface CreatePlanRunInput {
-	project: string;
-	planId: string;
-	agent: string;
-	promptTemplate?: string;
-	ref?: string;
-	providerOverride?: string;
-	modelOverride?: string;
-	dispatcherHandle?: string;
-	plotId?: string;
-}
-
-export interface CreatePlanRunResponse {
-	planRun: PlanRunRow;
-	children: PlanRunChildRow[];
-}
-
-export interface PlanRunDetailResponse {
-	planRun: PlanRunRow;
-	children: PlanRunChildRow[];
-	runs: RunRow[];
-}
-
-export interface ListPlanRunsFilter {
-	project?: string;
-	state?: PlanRunState;
-}
-
-export interface ListPlanRunsResponse {
-	planRuns: PlanRunRow[];
-}
+export * from "./types.plan-runs.ts";
