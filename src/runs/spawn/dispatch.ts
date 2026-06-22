@@ -234,10 +234,9 @@ export async function spawnRun(input: SpawnRunInput): Promise<SpawnRunResult> {
 		input.serverEnv,
 	);
 
-	// warren-b802: resolve per-project runtime override for the planner
-	// interactive agent at dispatch time so the agent row
-	// stays honest as 'builtin'.
-	const runtimeOverride = interactiveRuntimeOverride(agent.name, projectDefaults);
+	// warren-b802: resolve per-project runtime override; warren-fe84 per-run override wins.
+	const runtimeOverride =
+		input.runtimeOverride ?? interactiveRuntimeOverride(agent.name, projectDefaults);
 
 	const log = bindRunLogger(input.logger, run.id);
 	let burrow: Burrow | null = null;

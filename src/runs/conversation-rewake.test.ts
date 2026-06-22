@@ -323,6 +323,39 @@ describe("rewakeConversation", () => {
 		expect(result.replayedMessageCount).toBe(0);
 		expect(calls[0]?.prompt).toContain('<conversation_transcript count="0">');
 	});
+
+	test("forwards runtimeOverride to the spawn input when provided", async () => {
+		const priorId = await seedPriorRun();
+		const calls: SpawnRunInput[] = [];
+		await rewakeConversation({
+			repos,
+			burrowClientPool: undefined as never,
+			conversationId: CONVERSATION_ID,
+			reader: stubReader(activeConversation(priorId), []),
+			rotator,
+			spawner: recordingSpawner(calls),
+			runtimeOverride: "claude-code-chat",
+			now: () => NOW,
+		});
+		expect(calls).toHaveLength(1);
+		expect(calls[0]?.runtimeOverride).toBe("claude-code-chat");
+	});
+
+	test("omits runtimeOverride from spawn input when not provided", async () => {
+		const priorId = await seedPriorRun();
+		const calls: SpawnRunInput[] = [];
+		await rewakeConversation({
+			repos,
+			burrowClientPool: undefined as never,
+			conversationId: CONVERSATION_ID,
+			reader: stubReader(activeConversation(priorId), []),
+			rotator,
+			spawner: recordingSpawner(calls),
+			now: () => NOW,
+		});
+		expect(calls).toHaveLength(1);
+		expect(calls[0]?.runtimeOverride).toBeUndefined();
+	});
 });
 
 describe("buildRewakePrompt", () => {

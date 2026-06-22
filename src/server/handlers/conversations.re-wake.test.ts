@@ -295,4 +295,40 @@ describe("conversation re-wake endpoints", () => {
 		const body = (await res.json()) as { error: { code: string; message: string } };
 		expect(body.error.code).toBe("not_found");
 	});
+
+	test("POST /conversations/:id/re-wake forwards runtime_override to burrow as the agentId", async () => {
+		const calls: Call[] = [];
+		const ws = await mkdtemp(join(tmpdir(), "warren-conv-ws-rt-"));
+		const client = makeBurrowClient(
+			{ burrowId: "bur_rt00000000", burrowRunId: "run_rt00000000", workspacePath: ws },
+			calls,
+		);
+		const deps = await depsFor(repos, client, { plotCreator: PLOT_CREATOR });
+		handle = startServer(deps, {
+			transport: { kind: "tcp", hostname: "127.0.0.1", port: 0 },
+			auth: NO_AUTH,
+			logger: silentLogger,
+		});
+		const url = tcpUrl(handle);
+
+		const conv = await createConversation(url);
+		const before = await repos.conversations.require(conv.id);
+		const priorRunId = before.anchoringRunId ?? "";
+		await repos.runs.markRunning(priorRunId);
+		await repos.runs.finalize(priorRunId, "succeeded");
+
+		calls.length = 0;
+
+		const res = await fetch(`${url}/conversations/${conv.id}/re-wake`, {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ runtime_override: "claude-code-chat" }),
+		});
+		expect(res.status).toBe(200);
+
+		const upCall = calls.find((c) => c.method === "POST" && c.path === "/burrows");
+		expect((upCall?.body as { agents?: string[] } | undefined)?.agents).toEqual([
+			"claude-code-chat",
+		]);
+	});
 });
