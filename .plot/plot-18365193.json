@@ -1,5 +1,46 @@
 {
-  "attachments": [],
+  "attachments": [
+    {
+      "added_at": "2026-06-22T14:03:02.700Z",
+      "added_by": "user:operator",
+      "id": "att-001",
+      "ref": "pl-8c5b",
+      "role": "plan",
+      "type": "seeds_issue"
+    },
+    {
+      "added_at": "2026-06-22T14:03:07.937Z",
+      "added_by": "user:operator",
+      "id": "att-002",
+      "ref": "warren-fe84",
+      "role": "tracks",
+      "type": "seeds_issue"
+    },
+    {
+      "added_at": "2026-06-22T14:03:07.965Z",
+      "added_by": "user:operator",
+      "id": "att-003",
+      "ref": "warren-163d",
+      "role": "tracks",
+      "type": "seeds_issue"
+    },
+    {
+      "added_at": "2026-06-22T14:03:07.983Z",
+      "added_by": "user:operator",
+      "id": "att-004",
+      "ref": "warren-0727",
+      "role": "tracks",
+      "type": "seeds_issue"
+    },
+    {
+      "added_at": "2026-06-22T14:03:07.986Z",
+      "added_by": "user:operator",
+      "id": "att-005",
+      "ref": "warren-9a1b",
+      "role": "tracks",
+      "type": "seeds_issue"
+    }
+  ],
   "created_at": "2026-06-21T22:36:34.630Z",
   "id": "plot-18365193",
   "intent": {
@@ -25,6 +66,6 @@
   },
   "name": "Leveret com claude subscription",
   "schema_version": 1,
-  "status": "ready",
-  "updated_at": "2026-06-22T10:05:36.154Z"
+  "status": "active",
+  "updated_at": "2026-06-22T14:03:16.599Z"
 }
