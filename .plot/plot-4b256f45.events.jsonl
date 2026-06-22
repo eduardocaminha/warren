@@ -1,8 +1,8 @@
-{"type":"plot_created","actor":"user:eduardo-caminha","at":"2026-06-22T18:11:55.732Z","data":{"name":"claude-code-chat: warren no burrow do fork"}}
-{"type":"intent_edited","actor":"user:eduardo-caminha","at":"2026-06-22T18:11:55.794Z","data":{"field":"goal","value":"Apontar a imagem do warren pro burrow do fork (eduardocaminha/burrow), pra o select de runtime claude-code-chat ter um destino real e funcionar end-to-end."}}
-{"type":"intent_edited","actor":"user:eduardo-caminha","at":"2026-06-22T18:11:55.794Z","data":{"field":"non_goals","value":["Nao constroi o runtime claude-code-chat; isso vive no Plot irmao do repo burrow (plot-1813944d, plano pl-302c)."]}}
-{"type":"intent_edited","actor":"user:eduardo-caminha","at":"2026-06-22T18:11:55.794Z","data":{"field":"constraints","value":["Depende do pl-302c estar feito e o burrow do fork instalavel.","O pin do burrow-cli vive em DOIS lugares (Dockerfile + package.json/bun.lock); mudar so um e no-op."]}}
-{"type":"intent_edited","actor":"user:eduardo-caminha","at":"2026-06-22T18:11:55.794Z","data":{"field":"success_criteria","value":["Imagem do warren builda instalando o burrow do fork.","Select claude-code-chat dispatcha pro runtime end-to-end.","Doc Relationship to burrow reflete o pin do fork."]}}
-{"type":"attachment_added","actor":"user:eduardo-caminha","at":"2026-06-22T18:11:55.852Z","data":{"id":"att-001","type":"seeds_issue","ref":"pl-302c","role":"plan"}}
-{"type":"attachment_removed","actor":"user:eduardo-caminha","at":"2026-06-22T18:13:43.314Z","data":{"id":"att-001"}}
-{"type":"attachment_added","actor":"user:eduardo-caminha","at":"2026-06-22T18:13:43.371Z","data":{"id":"att-001","type":"seeds_issue","ref":"pl-cf38","role":"plan"}}
+{"type":"plot_created","actor":"user:operator","at":"2026-06-22T18:11:55.732Z","data":{"name":"claude-code-chat: warren no burrow do fork"}}
+{"type":"intent_edited","actor":"user:operator","at":"2026-06-22T18:11:55.794Z","data":{"field":"goal","value":"Apontar a imagem do warren pro burrow do fork (eduardocaminha/burrow), pra o select de runtime claude-code-chat ter um destino real e funcionar end-to-end."}}
+{"type":"intent_edited","actor":"user:operator","at":"2026-06-22T18:11:55.794Z","data":{"field":"non_goals","value":["Nao constroi o runtime claude-code-chat; isso vive no Plot irmao do repo burrow (plot-1813944d, plano pl-302c)."]}}
+{"type":"intent_edited","actor":"user:operator","at":"2026-06-22T18:11:55.794Z","data":{"field":"constraints","value":["Depende do pl-302c estar feito e o burrow do fork instalavel.","O pin do burrow-cli vive em DOIS lugares (Dockerfile + package.json/bun.lock); mudar so um e no-op."]}}
+{"type":"intent_edited","actor":"user:operator","at":"2026-06-22T18:11:55.794Z","data":{"field":"success_criteria","value":["Imagem do warren builda instalando o burrow do fork.","Select claude-code-chat dispatcha pro runtime end-to-end.","Doc Relationship to burrow reflete o pin do fork."]}}
+{"type":"attachment_added","actor":"user:operator","at":"2026-06-22T18:11:55.852Z","data":{"id":"att-001","type":"seeds_issue","ref":"pl-302c","role":"plan"}}
+{"type":"attachment_removed","actor":"user:operator","at":"2026-06-22T18:13:43.314Z","data":{"id":"att-001"}}
+{"type":"attachment_added","actor":"user:operator","at":"2026-06-22T18:13:43.371Z","data":{"id":"att-001","type":"seeds_issue","ref":"pl-cf38","role":"plan"}}
