@@ -1,0 +1,15 @@
+{
+  "attachments": [],
+  "created_at": "2026-06-22T21:12:19.178Z",
+  "id": "plot-33554aa2",
+  "intent": {
+    "constraints": [],
+    "goal": "",
+    "non_goals": [],
+    "success_criteria": []
+  },
+  "name": "Teste do claude-code-chat",
+  "schema_version": 1,
+  "status": "drafting",
+  "updated_at": "2026-06-22T21:12:19.178Z"
+}
