@@ -26,6 +26,7 @@ import type { AgentsRepo } from "../../db/repos/agents.ts";
 import type { AgentDefinition } from "../schema.ts";
 import { BUGWATCH_BUILTIN } from "./bugwatch.ts";
 import { CLAUDE_CODE_BUILTIN } from "./claude-code.ts";
+import { HEALER_BUILTIN } from "./healer.ts";
 import { LEVERET_BUILTIN } from "./leveret.ts";
 import { NIGHTWATCH_BUILTIN } from "./nightwatch.ts";
 import { PI_BUILTIN } from "./pi.ts";
@@ -63,6 +64,7 @@ export const BUILTIN_AGENTS: readonly AgentDefinition[] = [
 	BUGWATCH_BUILTIN,
 	PR_FIXER_BUILTIN,
 	LEVERET_BUILTIN,
+	HEALER_BUILTIN,
 ];
 
 export const BUILTIN_AGENT_NAMES: ReadonlySet<string> = new Set(BUILTIN_AGENTS.map((a) => a.name));
@@ -213,6 +215,7 @@ export function stampAgentSource(agent: AgentDefinition, source: AgentSource): A
 export {
 	BUGWATCH_BUILTIN,
 	CLAUDE_CODE_BUILTIN,
+	HEALER_BUILTIN,
 	LEVERET_BUILTIN,
 	NIGHTWATCH_BUILTIN,
 	PI_BUILTIN,

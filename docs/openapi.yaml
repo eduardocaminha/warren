@@ -11,6 +11,8 @@ info:
 tags:
   - name: agents
     description: '`/agents` routes.'
+  - name: alerts
+    description: '`/alerts` routes.'
   - name: analytics
     description: '`/analytics` routes.'
   - name: burrows
@@ -77,6 +79,20 @@ paths:
           required: true
           schema:
             type: string
+  /alerts/heal:
+    post:
+      operationId: healAlertHandler
+      tags:
+        - alerts
+      summary: POST /alerts/heal
+      responses:
+        '200':
+          description: Successful response.
+        default:
+          description: Error response (see `src/core/errors.ts`).
+      description: >-
+        warren-3db0: closed-loop alert intake. Token-gated via the standard bearer gate (not
+        auth-exempt); webhook senders carry the bearer.
   /analytics/behavior:
     get:
       operationId: listBehaviorAnalyticsHandler

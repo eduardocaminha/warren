@@ -17,6 +17,12 @@ Total routes: **60**.
 | `POST` | `/agents/refresh` | `refreshAgentsHandler` |  |
 | `GET` | `/agents/:name` | `getAgentHandler` |  |
 
+## /alerts
+
+| Method | Pattern | Handler | Notes |
+| --- | --- | --- | --- |
+| `POST` | `/alerts/heal` | `healAlertHandler` | warren-3db0: closed-loop alert intake. Token-gated via the standard bearer gate (not auth-exempt); webhook senders carry the bearer. |
+
 ## /analytics
 
 | Method | Pattern | Handler | Notes |

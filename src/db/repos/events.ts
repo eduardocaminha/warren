@@ -206,6 +206,28 @@ export class EventsRepo {
 		);
 	}
 
+	/**
+	 * Most-recent events of a single kind across all runs (warren-3db0).
+	 * Backs the healer's per-fingerprint attempt history: the intake
+	 * fetches recent `heal.dispatched` rows and filters them by the
+	 * `payload.fingerprint` in JS (the payload is opaque JSON, so a
+	 * dialect-agnostic SQL filter isn't available). Ordered newest-first
+	 * and capped so a long alert history never fans out into an unbounded
+	 * scan. `heal.dispatched` is a rare system event, so the cap is
+	 * generous relative to real volume.
+	 */
+	async listByKind(kind: string, limit = 500): Promise<EventRow[]> {
+		if (limit <= 0) return [];
+		return this.adapter.pickAll(
+			this.db
+				.select()
+				.from(this.events)
+				.where(eq(this.events.kind, kind))
+				.orderBy(desc(this.events.ts), desc(this.events.id))
+				.limit(limit),
+		);
+	}
+
 	async countByRun(runId: string): Promise<number> {
 		const row = await this.adapter.pickOne<{ n: number | string }>(
 			this.db
