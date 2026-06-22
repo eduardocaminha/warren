@@ -1,8 +1,8 @@
 {
 	"version": "6",
 	"dialect": "sqlite",
-	"id": "f4a1b2c3-d4e5-6789-abcd-ef0123456789",
-	"prevId": "e32dcaf8-cd53-47b5-89ed-20eb10274043",
+	"id": "a34df24d-9e44-40a8-8e3b-72b248238b35",
+	"prevId": "4ef43775-ee3d-4ee3-8547-21aad1417fc7",
 	"tables": {
 		"agents": {
 			"name": "agents",
@@ -419,6 +419,13 @@
 				},
 				"run_id": {
 					"name": "run_id",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": false,
+					"autoincrement": false
+				},
+				"execution_project_id": {
+					"name": "execution_project_id",
 					"type": "text",
 					"primaryKey": false,
 					"notNull": false,
@@ -1100,6 +1107,11 @@
 				"runs_mode_idx": {
 					"name": "runs_mode_idx",
 					"columns": ["mode"],
+					"isUnique": false
+				},
+				"runs_pr_url_idx": {
+					"name": "runs_pr_url_idx",
+					"columns": ["pr_url"],
 					"isUnique": false
 				}
 			},

@@ -220,10 +220,9 @@ export const runs = sqliteTable(
 		// keep the column tolerant of a since-deleted parent row.
 		parentRunId: text("parent_run_id"),
 		// Chain-kind discriminator (warren-e96f). Tells a `parent_run_id`
-		// back-link apart: `continue` (warren-4b11) seeds the workspace from
-		// the parent's pushed branch; `replicate` (warren-e96f) re-dispatches
-		// the parent's exact config against the project default base. Null for
-		// root runs (no parent). See `CLONE_KINDS` in columns.ts.
+		// back-link apart: `continue` (warren-4b11) seeds the workspace from the
+		// parent's pushed branch; `replicate` re-dispatches its exact config
+		// against the project default base. Null for root runs. See `CLONE_KINDS`.
 		cloneKind: text("clone_kind", { enum: CLONE_KINDS }),
 		resetsAt: text("resets_at"),
 	},
@@ -234,6 +233,7 @@ export const runs = sqliteTable(
 		index(INDEX_NAMES.runsWorkerState).on(t.workerId, t.state),
 		index(INDEX_NAMES.runsPlotId).on(t.plotId),
 		index(INDEX_NAMES.runsMode).on(t.mode),
+		index(INDEX_NAMES.runsPrUrl).on(t.prUrl),
 	],
 );
 
@@ -380,11 +380,12 @@ export const planRuns = sqliteTable(
 		dispatcherHandle: text("dispatcher_handle").notNull().default("operator"),
 		trigger: text("trigger").notNull().default("manual"),
 		// Optional back-link to the Plot this plan-run was dispatched against
-		// (warren-06dc / pl-7937 Phase 2; mirrors `runs.plot_id` from warren-a8c3).
-		// Gated on `hasPlot` at handler level. When set, the coordinator forwards
-		// it to every child spawn so PLOT_ID/PLOT_ACTOR injection lights up via the
-		// Phase 1 path, and auto-transitions the Plot to `done` on plan_succeeded.
-		// Nullable. Plain text, no FK — Plots live in the project workspace.
+		// (warren-06dc / pl-7937 Phase 2; mirrors `runs.plot_id`). Gated on the
+		// owning project's `hasPlot` flag at handler level. When set, the
+		// coordinator forwards it to every child run's spawn input (PLOT_ID/
+		// PLOT_ACTOR injection, per-child `run_dispatched`) and auto-transitions
+		// the bound Plot to `done` once every child is terminal. Nullable;
+		// plain text, no FK — Plots live in the project workspace.
 		plotId: text("plot_id"),
 		// Back-link to the parent run that created this plan-run via
 		// auto_plan_run (warren-d9a2). When set, the coordinator gates on
@@ -433,6 +434,9 @@ export const planRunChildren = sqliteTable(
 		seq: integer("seq").notNull(),
 		seedId: text("seed_id").notNull(),
 		runId: text("run_id").references(() => runs.id, { onDelete: "set null" }),
+		// Execution project the coordinator routed this child to (pl-fb43
+		// step 6 / warren-57f6). Nullable (pending/skipped + legacy rows).
+		executionProjectId: text("execution_project_id"),
 		state: text("state", { enum: PLAN_RUN_CHILD_STATES }).notNull(),
 		createdAt: text("created_at").notNull(),
 		updatedAt: text("updated_at").notNull(),

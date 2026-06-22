@@ -24,7 +24,18 @@
 #   # path when an SRE team operates warren state in their own Postgres
 #   # (e.g., Fly Postgres, RDS, Supabase) rather than a docker volume.
 #   #     fly secrets set WARREN_DB_URL=postgres://user:pw@host/db
+#   # Optional — error tracking (warren observability Phase 1). Unset =
+#   # no Sentry overhead; set the DSN to capture unhandled exceptions,
+#   # 500-path errors, and error-level log lines. SENTRY_ENVIRONMENT
+#   # (default "production") + SENTRY_RELEASE are optional.
+#   #     fly secrets set SENTRY_DSN=https://...@oXXXX.ingest.sentry.io/XXXX
 #   fly deploy
+#
+# Metrics: the `[[metrics]]` block below makes Fly's managed Prometheus
+# scrape warren's auth-exempt `GET /metrics` endpoint (run/cost/token
+# gauges + warn/error log-rate counters). Machine-level metrics (CPU,
+# mem, restarts) are scraped automatically with no config. Dashboards
+# live in Fly's hosted Grafana at https://fly-metrics.net.
 #
 # BURROW_API_TOKEN (read by `burrow serve`) and WARREN_BURROW_TOKEN
 # (read by warren's burrow-client) MUST be set to the same value —
@@ -58,10 +69,25 @@ primary_region = "sjc"
   # the happy path silently stalls and operators must hand-dispatch the
   # planner (which then never links back to the conversation).
   WARREN_MERGE_POLLER_ENABLED = "1"
+  # Run heartbeat watchdog (warren-285d): force-fail a `running` run that
+  # goes silent-but-busy past this budget (newest event / started_at
+  # older than the timeout), reaping it `failed` (timed_out) so the burrow
+  # workspace + runaway bwrap tree is torn down instead of pinning CPU
+  # forever. On by default in code (warren-b2dc) with a 45-min built-in
+  # budget; pinned explicitly here so the deploy-config layer is the
+  # source of truth. Opt out with WARREN_WATCHDOG_DISABLED=1.
+  WARREN_RUN_HEARTBEAT_TIMEOUT_MS = "2700000"
 
 [[mounts]]
   source = "warren_data"
   destination = "/data"
+
+# Fly's managed Prometheus scrapes this over the private network. The
+# endpoint is auth-exempt (aggregate counts + counters only, no secrets),
+# mirroring /healthz. Dashboards: https://fly-metrics.net.
+[[metrics]]
+  port = 8080
+  path = "/metrics"
 
 # Warren is single-instance: one Machine, one persistent volume. Deploys
 # bounce the supervisor (which restarts both children); the volume keeps

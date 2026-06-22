@@ -311,6 +311,11 @@ export const INDEX_NAMES = {
 	runsWorkerState: "runs_worker_state_idx",
 	runsPlotId: "runs_plot_id_idx",
 	runsMode: "runs_mode_idx",
+	// warren-0b75: the CI-fixer poller counts prior fixer attempts per PR by
+	// `runs.pr_url` (fixAttemptHistoryByPrUrl) and enumerates PR candidates by
+	// project. Index the column the poller filters on so the per-tick attempt
+	// count stays a covered lookup instead of a full-table scan.
+	runsPrUrl: "runs_pr_url_idx",
 	eventsRunSeq: "events_run_seq_idx",
 	eventsRunTs: "events_run_ts_idx",
 	triggersProject: "triggers_project_idx",

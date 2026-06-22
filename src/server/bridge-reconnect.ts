@@ -14,22 +14,28 @@ import type { Repos } from "../db/repos/index.ts";
 import type { EventRow, RunFailureReason, RunMode, RunState } from "../db/schema.ts";
 import type { PreviewLaunchConfig } from "../preview/launch/index.ts";
 import type { PreviewPortAllocator } from "../preview/port-allocator.ts";
-import type {
-	AutoOpenPrConfig,
-	BridgeLogger,
-	BridgeRunStreamInput,
-	BridgeRunStreamResult,
-	ReapRunInput,
-	ReapRunResult,
-	RunEventBroker,
+import {
+	type AutoOpenPrConfig,
+	type BoundBridgeLogger,
+	type BridgeLogger,
+	type BridgeRunStreamInput,
+	type BridgeRunStreamResult,
+	bindBridgeLogger,
+	type ReapRunInput,
+	type ReapRunResult,
+	type RunEventBroker,
 } from "../runs/index.ts";
+import {
+	type DestroyBurrowWorkspaceByIdInput,
+	destroyBurrowWorkspaceById,
+} from "../runs/reap/destroy.ts";
 import type { ConversationTurnHandler } from "../runs/stream/conversation-turn.ts";
 import type { SeedsCliDeps } from "../seeds-cli/index.ts";
 import type { WarrenConfigCache } from "../warren-config/index.ts";
 import {
 	resolveProjectPreviewConfig,
 	resolveProjectPrTemplate,
-} from "./bridge-reconnect-project-config.ts";
+} from "./bridge-reconnect-config.ts";
 
 export const TERMINAL_RUN_STATES: ReadonlySet<RunState> = new Set([
 	"succeeded",
@@ -87,10 +93,15 @@ export interface RunWithReconnectInput {
 export async function runWithReconnect(
 	input: RunWithReconnectInput,
 ): Promise<BridgeRunStreamResult> {
+	// warren-9f06: bind run_id + burrow_run_id once; downstream lines add `event`.
+	const log = bindBridgeLogger(input.logger, {
+		run_id: input.runId,
+		burrow_run_id: input.burrowRunId,
+	});
 	let totalWritten = 0;
 	let totalSkipped = 0;
 	let attempt = 0;
-	// warren-6376: track whether we've emitted `bridge_stalled` so the
+	// warren-6376: track whether we've emitted `bridge.stalled` so the
 	// event is one-shot per stall episode and we know to emit a matching
 	// `bridge_recovered` once fresh events stream again.
 	let stalled = false;
@@ -105,7 +116,7 @@ export async function runWithReconnect(
 			signal: input.signal,
 			...(input.mode !== undefined ? { mode: input.mode } : {}),
 			...(input.conversationTurn !== undefined ? { conversationTurn: input.conversationTurn } : {}),
-			...(input.logger !== undefined ? { logger: input.logger } : {}),
+			logger: log,
 		};
 		const result = await input.bridge(bridgeInput);
 		totalWritten += result.written;
@@ -122,10 +133,10 @@ export async function runWithReconnect(
 					broker: input.broker,
 					kind: "bridge_recovered",
 					payload: { burrowRunId: input.burrowRunId, totalWritten },
-					...(input.logger !== undefined ? { logger: input.logger } : {}),
+					logger: log,
 				});
-				input.logger?.info?.(
-					{ runId: input.runId, burrowRunId: input.burrowRunId },
+				log.info(
+					{ event: "bridge.recovered", totalWritten },
 					"bridge recovered: events streaming again after stall",
 				);
 				stalled = false;
@@ -144,7 +155,8 @@ export async function runWithReconnect(
 				burrowRunId: input.burrowRunId,
 				repos: input.repos,
 				broker: input.broker,
-				...(input.logger !== undefined ? { logger: input.logger } : {}),
+				burrowClientPool: input.burrowClientPool,
+				logger: log,
 			});
 			return { written: totalWritten, skipped: totalSkipped, errored: false };
 		}
@@ -157,11 +169,11 @@ export async function runWithReconnect(
 			// run rather than escaping back up the registry.
 			const previewConfig =
 				result.terminalDetected.outcome === "succeeded"
-					? await resolveProjectPreviewConfig(input)
+					? await resolveProjectPreviewConfig(input, log)
 					: undefined;
 			const prTemplate =
 				result.terminalDetected.outcome === "succeeded"
-					? await resolveProjectPrTemplate(input)
+					? await resolveProjectPrTemplate(input, log)
 					: undefined;
 			// warren-5249: if the bridge saw a rate_limit_event and the run
 			// ended failed, classify as rate_limited so the UI and plan-run
@@ -178,7 +190,7 @@ export async function runWithReconnect(
 					burrowClientPool: input.burrowClientPool,
 					broker: input.broker,
 					...rateLimitedOverride,
-					...(input.logger !== undefined ? { logger: input.logger } : {}),
+					logger: log,
 					...(input.autoOpenPr !== undefined ? { autoOpenPr: input.autoOpenPr } : {}),
 					...(previewConfig !== undefined ? { previewConfig } : {}),
 					...(input.portAllocator !== undefined ? { portAllocator: input.portAllocator } : {}),
@@ -189,10 +201,9 @@ export async function runWithReconnect(
 					...(input.seedsCli !== undefined ? { seedsCli: input.seedsCli } : {}),
 				});
 			} catch (err) {
-				input.logger?.error?.(
+				log.error(
 					{
-						runId: input.runId,
-						burrowRunId: input.burrowRunId,
+						event: "bridge.reap_threw",
 						err: err instanceof Error ? err.message : String(err),
 					},
 					"reap threw out of bridge terminal-detect path",
@@ -214,8 +225,8 @@ export async function runWithReconnect(
 		// back off and reconnect.
 		const row = await input.repos.runs.get(input.runId);
 		if (row === null || TERMINAL_RUN_STATES.has(row.state)) {
-			input.logger?.info?.(
-				{ runId: input.runId, burrowRunId: input.burrowRunId, state: row?.state ?? "unknown" },
+			log.info(
+				{ event: "bridge.reconnect_stopped", state: row?.state ?? "unknown" },
 				"bridge reconnect stopped: run is terminal",
 			);
 			return { written: totalWritten, skipped: totalSkipped, errored: true };
@@ -223,10 +234,9 @@ export async function runWithReconnect(
 
 		const delayMs = input.backoff[Math.min(attempt, input.backoff.length - 1)] ?? 0;
 		attempt += 1;
-		input.logger?.warn?.(
+		log.warn(
 			{
-				runId: input.runId,
-				burrowRunId: input.burrowRunId,
+				event: "bridge.reconnecting",
 				attempt,
 				delayMs,
 				totalWritten,
@@ -246,10 +256,10 @@ export async function runWithReconnect(
 				broker: input.broker,
 				kind: "bridge_stalled",
 				payload: { burrowRunId: input.burrowRunId, attempts: attempt },
-				...(input.logger !== undefined ? { logger: input.logger } : {}),
+				logger: log,
 			});
-			input.logger?.warn?.(
-				{ runId: input.runId, burrowRunId: input.burrowRunId, attempts: attempt },
+			log.warn(
+				{ event: "bridge.stalled", attempts: attempt },
 				"bridge stalled: burrow unreachable across consecutive reconnects",
 			);
 			stalled = true;
@@ -258,8 +268,8 @@ export async function runWithReconnect(
 		// burrow (socket probe times out ⇒ `burrowRunMissing:false`) reconnects
 		// forever and the run wedges in `running`; finalize `burrow_unreachable`.
 		if (attempt >= input.stallCeiling) {
-			input.logger?.error?.(
-				{ runId: input.runId, burrowRunId: input.burrowRunId, attempts: attempt },
+			log.error(
+				{ event: "bridge.giving_up", attempts: attempt },
 				"bridge giving up: burrow unreachable past stall ceiling; finalizing run as failed",
 			);
 			await reconcileLostBurrowRun({
@@ -267,8 +277,9 @@ export async function runWithReconnect(
 				burrowRunId: input.burrowRunId,
 				repos: input.repos,
 				broker: input.broker,
+				burrowClientPool: input.burrowClientPool,
 				failureReason: "burrow_unreachable",
-				...(input.logger !== undefined ? { logger: input.logger } : {}),
+				logger: log,
 			});
 			return { written: totalWritten, skipped: totalSkipped, errored: true };
 		}
@@ -290,7 +301,7 @@ interface EmitBridgeSystemEventInput {
 	readonly broker: RunEventBroker;
 	readonly kind: string;
 	readonly payload: Record<string, unknown>;
-	readonly logger?: BridgeLogger;
+	readonly logger: BoundBridgeLogger;
 }
 
 /**
@@ -312,9 +323,9 @@ async function emitBridgeSystemEvent(input: EmitBridgeSystemEventInput): Promise
 		});
 		input.broker.publish(input.runId, row);
 	} catch (err) {
-		input.logger?.error?.(
+		input.logger.error(
 			{
-				runId: input.runId,
+				event: "bridge.system_event_failed",
 				kind: input.kind,
 				err: err instanceof Error ? err.message : String(err),
 			},
@@ -328,7 +339,8 @@ interface ReconcileLostBurrowRunInput {
 	readonly burrowRunId: string;
 	readonly repos: Repos;
 	readonly broker: RunEventBroker;
-	readonly logger?: BridgeLogger;
+	/** warren-9f06: bound at the call site; the boot reconciler may omit it. */
+	readonly logger?: BoundBridgeLogger;
 	readonly now?: () => Date;
 	/**
 	 * warren-af76: failure reason for `runs.finalize` + `bridge_lost`.
@@ -336,6 +348,15 @@ interface ReconcileLostBurrowRunInput {
 	 * `'burrow_unreachable'`.
 	 */
 	readonly failureReason?: RunFailureReason;
+	/**
+	 * warren-4f01: pool used to tear down the burrow workspace after the run
+	 * is finalized, so a wedged run's bwrap/pi sandbox doesn't leak on the
+	 * host. Omitted by callers/tests that can't resolve a worker; teardown is
+	 * then skipped.
+	 */
+	readonly burrowClientPool?: BurrowClientPool;
+	/** Override the workspace-destroy seam (tests). */
+	readonly destroyWorkspace?: (input: DestroyBurrowWorkspaceByIdInput) => Promise<boolean>;
 }
 
 /**
@@ -352,15 +373,24 @@ interface ReconcileLostBurrowRunInput {
 export async function reconcileLostBurrowRun(input: ReconcileLostBurrowRunInput): Promise<void> {
 	const now = (input.now ?? (() => new Date()))();
 	const failureReason: RunFailureReason = input.failureReason ?? "burrow_run_lost";
+	// warren-9f06: bind here (callers may pass a bound logger or none).
+	const log = bindBridgeLogger(input.logger, {
+		run_id: input.runId,
+		burrow_run_id: input.burrowRunId,
+	});
 	let finalized = false;
+	let burrowToDestroy: { id: string; mode: RunMode } | null = null;
 	try {
 		const run = await input.repos.runs.get(input.runId);
 		if (run === null) {
 			return;
 		}
+		if (run.burrowId !== null) {
+			burrowToDestroy = { id: run.burrowId, mode: run.mode };
+		}
 		if (TERMINAL_RUN_STATES.has(run.state)) {
-			input.logger?.info?.(
-				{ runId: input.runId, state: run.state },
+			log.info(
+				{ event: "bridge.reconcile_skipped", state: run.state },
 				"reconcileLostBurrowRun: run already terminal; skipping finalize",
 			);
 		} else {
@@ -371,10 +401,9 @@ export async function reconcileLostBurrowRun(input: ReconcileLostBurrowRunInput)
 			finalized = true;
 		}
 	} catch (err) {
-		input.logger?.error?.(
+		log.error(
 			{
-				runId: input.runId,
-				burrowRunId: input.burrowRunId,
+				event: "bridge.reconcile_finalize_failed",
 				err: err instanceof Error ? err.message : String(err),
 			},
 			"reconcileLostBurrowRun: failed to finalize run",
@@ -396,16 +425,50 @@ export async function reconcileLostBurrowRun(input: ReconcileLostBurrowRunInput)
 		});
 		input.broker.publish(input.runId, row);
 	} catch (err) {
-		input.logger?.error?.(
+		log.error(
 			{
-				runId: input.runId,
+				event: "bridge.lost_event_failed",
 				err: err instanceof Error ? err.message : String(err),
 			},
 			"reconcileLostBurrowRun: failed to emit bridge_lost event",
 		);
 	}
-	input.logger?.warn?.(
-		{ runId: input.runId, burrowRunId: input.burrowRunId, finalized },
+	// warren-4f01: tear down the burrow workspace so its bwrap/pi sandbox
+	// doesn't leak on the host. The run is now terminal, which means a later
+	// `reapRun` short-circuits (`buildAlreadyTerminalResult`) without
+	// destroying the workspace — so the teardown must happen here. Best-effort
+	// and gated on a resolvable pool; conversation runs keep their workspace.
+	if (input.burrowClientPool !== undefined && burrowToDestroy !== null) {
+		const destroy = input.destroyWorkspace ?? destroyBurrowWorkspaceById;
+		try {
+			await destroy({
+				burrowId: burrowToDestroy.id,
+				mode: burrowToDestroy.mode,
+				burrowClientPool: input.burrowClientPool,
+				repos: input.repos,
+				emit: async (kind, payload) => {
+					await emitBridgeSystemEvent({
+						runId: input.runId,
+						repos: input.repos,
+						broker: input.broker,
+						kind,
+						payload: payload as Record<string, unknown>,
+						logger: log,
+					});
+				},
+			});
+		} catch (err) {
+			log.error(
+				{
+					event: "bridge.workspace_destroy_failed",
+					err: err instanceof Error ? err.message : String(err),
+				},
+				"reconcileLostBurrowRun: best-effort workspace destroy threw",
+			);
+		}
+	}
+	log.warn(
+		{ event: "bridge.reconciled", finalized },
 		"reconciled ghost run: burrow no longer knows this burrow_run_id",
 	);
 }

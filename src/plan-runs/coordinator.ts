@@ -25,6 +25,7 @@ import {
 	type PlanRunChildState,
 	type PlanRunRow,
 } from "../db/schema.ts";
+import { buildDispatchPrompt } from "../runs/dispatch-prompt.ts";
 import { SeedNotFoundError, type SeedShowResult } from "../seeds-cli/index.ts";
 import {
 	DEFAULT_RATE_LIMIT_BACKOFF_BASE_MS,
@@ -34,15 +35,14 @@ import {
 	type RateLimitConfig,
 } from "./config.ts";
 import {
-	type CoordinatorReopenPrFn,
-	checkParentRunMerged,
-	type HandleInFlightDecision,
-	handleSucceededChild,
-	isTerminalRun,
-} from "./merge-gate.ts";
+	defaultResolveExecution,
+	executionFields,
+	failChildAndPlan,
+	handleInFlight,
+} from "./in-flight.ts";
+import { type CoordinatorReopenPrFn, checkParentRunMerged } from "./merge-gate.ts";
 import type { AutoTransitionResult } from "./plot-transition.ts";
 import type { PrMergeChecker } from "./pr-merge.ts";
-import { pausePlanRunForRateLimit } from "./rate-limit-pause.ts";
 
 export type { CoordinatorReopenPrFn, HandleInFlightDecision } from "./merge-gate.ts";
 export {
@@ -55,10 +55,40 @@ export type CoordinatorRepos = Pick<Repos, "planRuns" | "runs" | "events">;
 
 export type CoordinatorShowSeedFn = (projectId: string, seedId: string) => Promise<SeedShowResult>;
 
+/**
+ * Per-child execution routing decision (pl-fb43 step 5 / warren-d9f3).
+ *
+ * `executionProjectId` is the project whose repo is cloned into the burrow
+ * workspace — where the child actually does its work. It is the coordination
+ * project (`planRun.projectId`) for an untagged child, or the project a
+ * child seed's `extensions.repo` resolved to. `repoRef` carries the raw
+ * `extensions.repo` string when the child was routed (null on fallback) so
+ * the emitted events and Plot mirror are self-describing.
+ */
+export interface ChildExecution {
+	readonly executionProjectId: string;
+	readonly repoRef: string | null;
+}
+
+/**
+ * Resolve a child's execution project from its seed `extensions.repo`
+ * (pl-fb43 step 5). Implemented in src/plan-runs/dispatch.ts on top of
+ * `resolveTargetProject`; throws `TargetProjectUnresolvedError` when a
+ * present repo tag matches no registered project, which the coordinator
+ * routes to the existing plan_failed path. Default (tests / unwired) maps
+ * every child to the coordination project.
+ */
+export type CoordinatorResolveExecutionFn = (
+	planRun: PlanRunRow,
+	seedExtensions: Record<string, unknown> | undefined,
+) => Promise<ChildExecution>;
+
 export interface CoordinatorSpawnInput {
 	readonly planRun: PlanRunRow;
 	readonly child: PlanRunChildRow;
 	readonly prompt: string;
+	/** Resolved execution routing for this child (pl-fb43 step 5). */
+	readonly execution?: ChildExecution;
 }
 
 export interface CoordinatorSpawnResult {
@@ -114,7 +144,9 @@ export interface AdvancePlanRunInput {
 	readonly checkPrMerged: PrMergeChecker;
 	readonly spawn: CoordinatorSpawnFn;
 	readonly emit: CoordinatorEmitFn;
-	/** warren-b290: plot auto-done hook on plan_succeeded. */
+	/** pl-fb43 step 5: per-child execution-repo resolver (default = coordination project). */
+	readonly resolveExecution?: CoordinatorResolveExecutionFn;
+	/** warren-b290: Plot auto-done hook fired on plan_succeeded when plotId is set. */
 	readonly transitionPlot?: CoordinatorTransitionPlotFn;
 	/** warren-3937: merge-wait budget (ms); 0 disables. Default: {@link DEFAULT_MERGE_TIMEOUT_MS}. */
 	readonly mergeTimeoutMs?: number;
@@ -141,6 +173,7 @@ export async function advancePlanRun(input: AdvancePlanRunInput): Promise<Advanc
 	const nowFn = input.now ?? (() => new Date());
 	const mergeTimeoutMs = input.mergeTimeoutMs ?? DEFAULT_MERGE_TIMEOUT_MS;
 	const rateLimitConfig = input.rateLimitConfig ?? DEFAULT_RATE_LIMIT_CONFIG;
+	const resolveExecution = input.resolveExecution ?? defaultResolveExecution;
 	let planRun = input.planRun;
 
 	// (a) Queued → running.
@@ -218,6 +251,8 @@ export async function advancePlanRun(input: AdvancePlanRunInput): Promise<Advanc
 				repos: input.repos,
 				checkPrMerged: input.checkPrMerged,
 				emit: input.emit,
+				showSeed: input.showSeed,
+				resolveExecution,
 				mergeTimeoutMs,
 				now: nowFn,
 				reopenPr: input.reopenPr,
@@ -270,8 +305,9 @@ export async function advancePlanRun(input: AdvancePlanRunInput): Promise<Advanc
 		// merged is in `merged` state (terminal) and never reaches pickNextPending.
 		// Skipping on seed-closed lets a rate-limit-reset pending child (whose
 		// seed was closed before the run failed) bypass the serial merge gate.
+		let seedShow: SeedShowResult;
 		try {
-			await input.showSeed(planRun.projectId, next.seedId);
+			seedShow = await input.showSeed(planRun.projectId, next.seedId);
 		} catch (err) {
 			if (err instanceof SeedNotFoundError) {
 				const reason = `child_seed_not_found:${next.seedId}`;
@@ -302,11 +338,34 @@ export async function advancePlanRun(input: AdvancePlanRunInput): Promise<Advanc
 			};
 		}
 
-		// Dispatch the next child.
-		const prompt = substituteSeedId(planRun.promptTemplate, next.seedId);
+		// pl-fb43 step 5: resolve the child's execution repo from its
+		// `extensions.repo` tag (fallback = the coordination project). A
+		// present-but-unresolvable tag fails this child + the plan via the
+		// existing plan_failed path with a typed `unresolved_repo:` reason.
+		let execution: ChildExecution;
+		try {
+			execution = await resolveExecution(planRun, seedShow.extensions);
+		} catch (err) {
+			const reason = `unresolved_repo:${formatError(err)}`;
+			return await failChildAndPlan({
+				repos: input.repos,
+				planRun,
+				seq: next.seq,
+				anchorRunId: mostRecentDispatchedRunId(children),
+				reason,
+				emit: input.emit,
+				now: nowFn,
+			});
+		}
+
+		// Dispatch the next child; seed text inlined via the shared builder.
+		const prompt = buildDispatchPrompt({
+			template: planRun.promptTemplate,
+			seed: { id: next.seedId, title: seedShow.title, body: seedShow.description },
+		});
 		let spawnResult: CoordinatorSpawnResult;
 		try {
-			spawnResult = await input.spawn({ planRun, child: next, prompt });
+			spawnResult = await input.spawn({ planRun, child: next, prompt, execution });
 		} catch (err) {
 			const reason = `dispatch_failed:${formatError(err)}`;
 			const endedAt = nowFn().toISOString();
@@ -336,15 +395,21 @@ export async function advancePlanRun(input: AdvancePlanRunInput): Promise<Advanc
 			seq: next.seq,
 			patch: {
 				runId: spawnResult.runId,
+				// pl-fb43 step 6 / warren-57f6: persist the resolved execution
+				// project so the detail API + UI can show which repo this child
+				// targeted without re-reading the seed's `extensions.repo`.
+				executionProjectId: execution.executionProjectId,
 				state: "dispatched",
 				startedAt: nowFn().toISOString(),
 			},
 			now: nowFn(),
 		});
+		const execFields = executionFields(execution);
 		await input.emit(spawnResult.runId, "plan_run.dispatched", {
 			planRunId: planRun.id,
 			seq: next.seq,
 			seedId: next.seedId,
+			...execFields,
 		});
 		// Emit resumed_rate_limited on the NEW run so observers see it paired with
 		// the dispatch event (child's old runId was cleared during pause — warren-e521).
@@ -359,6 +424,7 @@ export async function advancePlanRun(input: AdvancePlanRunInput): Promise<Advanc
 				planRunId: planRun.id,
 				mergedChildSeq,
 				dispatchedChildSeq: next.seq,
+				...execFields,
 			});
 			return {
 				kind: "advanced",
@@ -370,101 +436,7 @@ export async function advancePlanRun(input: AdvancePlanRunInput): Promise<Advanc
 	}
 }
 
-interface HandleInFlightInput {
-	readonly planRun: PlanRunRow;
-	readonly child: PlanRunChildRow;
-	readonly repos: CoordinatorRepos;
-	readonly checkPrMerged: PrMergeChecker;
-	readonly emit: CoordinatorEmitFn;
-	readonly mergeTimeoutMs: number;
-	readonly now: () => Date;
-	readonly reopenPr?: CoordinatorReopenPrFn; // warren-22de: (re)open PR before failing
-	readonly rateLimitConfig: RateLimitConfig; // warren-e521: backoff config for pause
-}
-
-async function handleInFlight(input: HandleInFlightInput): Promise<HandleInFlightDecision> {
-	const { planRun, child, repos, emit, now, rateLimitConfig } = input;
-	if (child.runId === null) {
-		return {
-			kind: "result",
-			result: { kind: "noop", reason: `in_flight_child_missing_run_id:${child.seq}` },
-		};
-	}
-	const run = await repos.runs.get(child.runId);
-	if (run === null) {
-		return {
-			kind: "result",
-			result: { kind: "noop", reason: `in_flight_child_run_not_found:${child.runId}` },
-		};
-	}
-
-	if (!isTerminalRun(run)) {
-		// Sync child.state with run.state so the UI sees `running` after
-		// burrow emits its first event. Idempotent — the repo's updateChild
-		// is a plain write.
-		if (run.state === "running" && child.state === "dispatched") {
-			await repos.planRuns.updateChild({
-				planRunId: planRun.id,
-				seq: child.seq,
-				patch: { state: "running" },
-				now: now(),
-			});
-		}
-		return { kind: "result", result: { kind: "waiting_for_run" } };
-	}
-
-	// warren-3797: pause instead of fail when the child hit the rate limit.
-	if (run.state === "failed" && run.failureReason === "rate_limited" && child.runId !== null) {
-		const { childSeq, resumeAt } = await pausePlanRunForRateLimit({
-			planRun,
-			child: { ...child, runId: child.runId },
-			run,
-			repos,
-			emit,
-			now,
-			rateLimitConfig,
-		});
-		return { kind: "result", result: { kind: "paused_rate_limited", childSeq, resumeAt } };
-	}
-
-	if (run.state === "failed" || run.state === "cancelled") {
-		const detail = run.failureReason ?? run.state;
-		const reason = `child_${detail}`;
-		const endedAt = now().toISOString();
-		await repos.planRuns.updateChild({
-			planRunId: planRun.id,
-			seq: child.seq,
-			patch: { state: "failed", endedAt, failureReason: reason },
-			now: now(),
-		});
-		await repos.planRuns.transitionTo(planRun.id, "failed", {
-			endedAt,
-			failureReason: reason,
-		});
-		await emit(child.runId, "plan_run.failed", {
-			planRunId: planRun.id,
-			failedSeq: child.seq,
-			reason,
-		});
-		return {
-			kind: "result",
-			result: { kind: "plan_failed", failedSeq: child.seq, reason },
-		};
-	}
-
-	// run.state === "succeeded": PR state machine extracted to merge-gate.ts (warren-e521).
-	return handleSucceededChild({
-		planRun,
-		child: child as typeof child & { runId: string },
-		run,
-		repos,
-		checkPrMerged: input.checkPrMerged,
-		emit,
-		mergeTimeoutMs: input.mergeTimeoutMs,
-		now,
-		reopenPr: input.reopenPr,
-	});
-}
+/* handleInFlight + execution helpers live in ./in-flight.ts (size budget). */
 
 function mostRecentDispatchedRunId(children: readonly PlanRunChildRow[]): string | null {
 	for (let i = children.length - 1; i >= 0; i -= 1) {
@@ -472,10 +444,6 @@ function mostRecentDispatchedRunId(children: readonly PlanRunChildRow[]): string
 		if (child !== undefined && child.runId !== null) return child.runId;
 	}
 	return null;
-}
-
-function substituteSeedId(template: string, seedId: string): string {
-	return template.replace(/\{seed_id\}/g, seedId);
 }
 
 function formatError(err: unknown): string {

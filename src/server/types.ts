@@ -409,6 +409,14 @@ export interface ServerDeps {
 	 * the header simply isn't deduped). See `src/server/idempotency.ts`.
 	 */
 	readonly idempotencyStore?: IdempotencyStore;
+	/**
+	 * In-process counter registry backing `GET /metrics` (warren
+	 * observability Phase 1). `bootServer` wires one and also threads it
+	 * into the root logger's sink hook so warn/error log rates are counted.
+	 * Undefined → the metrics endpoint omits counters (tests, or a
+	 * deployment that didn't wire it).
+	 */
+	readonly metricsRegistry?: import("../observability/metrics-registry.ts").MetricsRegistry;
 }
 
 /**

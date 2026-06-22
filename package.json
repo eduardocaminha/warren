@@ -1,6 +1,6 @@
 {
 	"name": "@os-eco/warren-cli",
-	"version": "0.9.3",
+	"version": "0.9.5",
 	"description": "Self-hostable control plane for ephemeral cloud agents — spawn sandboxed agents at your GitHub repos, watch them work live, steer them, get a branch back",
 	"type": "module",
 	"bin": {
@@ -79,6 +79,7 @@
 	"dependencies": {
 		"@os-eco/burrow-cli": "^0.3.12",
 		"@os-eco/plot-cli": "^0.4.0",
+		"@sentry/bun": "^10.59.0",
 		"commander": "^15.0.0",
 		"croner": "^10.0.1",
 		"drizzle-orm": "^0.45.2",

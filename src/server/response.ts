@@ -19,6 +19,13 @@ export function jsonResponse(status: number, body: unknown, init?: ResponseInit)
 	});
 }
 
+export function textResponse(status: number, body: string, contentType: string): Response {
+	return new Response(body, {
+		status,
+		headers: { "content-type": contentType },
+	});
+}
+
 export function ndjsonResponse(stream: ReadableStream<Uint8Array>, init?: ResponseInit): Response {
 	return new Response(stream, {
 		status: 200,
