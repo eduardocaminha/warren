@@ -210,6 +210,35 @@ describe("auto_plan_run (warren-a32a)", () => {
 		}
 	});
 
+	test("dispatches when agent replaces old plan with new plan (same set size, different id)", async () => {
+		const ctx = await setupAutoPlanRun();
+		try {
+			const oldPlan = '{"id":"pl-old","status":"approved","children":["warren-c1"]}\n';
+			const newPlan = '{"id":"pl-new","status":"approved","children":["warren-c2","warren-c3"]}\n';
+			const f = fakeFs({
+				"/data/projects/x/y/.seeds/issues.jsonl": "",
+				"/data/projects/x/y/.seeds/plans.jsonl": oldPlan,
+				"/data/burrow/ws/.seeds/plans.jsonl": newPlan,
+			});
+			const e = fakeExec({ stagedDelta: true });
+
+			const result = await reapRun({
+				runId: ctx.runId,
+				outcome: "succeeded",
+				repos: ctx.repos,
+				burrowClientPool: await makePool(fakeBurrowClient(makeBurrow()), ctx.repos),
+				fs: f.fs,
+				exec: e.exec,
+			});
+
+			expect(result.autoPlanRunCreated).toBe(true);
+			expect(result.autoPlanRunPlanId).toBe("pl-new");
+			expect(result.autoPlanRunId).not.toBeNull();
+		} finally {
+			await ctx.db.close();
+		}
+	});
+
 	test("does not dispatch when no new plans detected", async () => {
 		const ctx = await setupAutoPlanRun();
 		try {
