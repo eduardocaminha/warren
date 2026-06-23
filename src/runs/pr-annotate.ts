@@ -28,8 +28,8 @@
  */
 
 import { PREVIEW_FRAGMENT_END, PREVIEW_FRAGMENT_START } from "./pr.ts";
+import { buildHeaders, GITHUB_API_BASE, readJson, readText, truncate } from "./pr-checks.ts";
 
-const GITHUB_API_BASE = "https://api.github.com";
 const USER_AGENT = "warren-reap-pr-annotate";
 
 export interface AnnotatePrPreviewInput {
@@ -74,7 +74,7 @@ export async function annotatePrPreview(
 		};
 	}
 
-	const headers = buildHeaders(input.token);
+	const headers = buildHeaders(input.token, USER_AGENT);
 	const apiUrl = `${GITHUB_API_BASE}/repos/${parsed.owner}/${parsed.repo}/pulls/${parsed.number}`;
 
 	let getRes: Response;
@@ -195,34 +195,4 @@ export function replaceFragment(body: string, newFragment: string): string {
 	const trimmed = body.replace(/\s+$/, "");
 	const separator = trimmed === "" ? "" : "\n\n";
 	return `${trimmed}${separator}## Preview\n\n${newFragment}\n`;
-}
-
-function buildHeaders(token: string): Record<string, string> {
-	return {
-		accept: "application/vnd.github+json",
-		authorization: `Bearer ${token}`,
-		"content-type": "application/json",
-		"user-agent": USER_AGENT,
-		"x-github-api-version": "2022-11-28",
-	};
-}
-
-async function readJson(res: Response): Promise<unknown> {
-	try {
-		return await res.json();
-	} catch {
-		return null;
-	}
-}
-
-async function readText(res: Response): Promise<string> {
-	try {
-		return await res.text();
-	} catch {
-		return "";
-	}
-}
-
-function truncate(input: string, max: number): string {
-	return input.length <= max ? input : `${input.slice(0, max)}…`;
 }
