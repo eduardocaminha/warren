@@ -1,0 +1,2 @@
+{"type":"plot_created","actor":"user:operator","at":"2026-06-23T12:26:19.587Z","data":{"name":"Upstream Warden"}}
+{"type":"status_changed","actor":"user:operator","at":"2026-06-23T12:26:26.517Z","data":{"from":"drafting","to":"ready"}}
