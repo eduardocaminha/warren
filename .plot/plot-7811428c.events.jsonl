@@ -10,3 +10,6 @@
 {"type":"run_dispatched","actor":"user:operator","at":"2026-06-23T22:42:06.374Z","data":{"run_id":"run_b3htrqt092pb","agent":"claude-code","model":"claude-sonnet-4-6","project":"prj_74w0r1ytsqqc"}}
 {"type":"run_dispatched","actor":"user:operator","at":"2026-06-23T22:55:06.738Z","data":{"run_id":"run_3qj7es2rnkmf","agent":"claude-code","model":"claude-sonnet-4-6","project":"prj_74w0r1ytsqqc"}}
 {"type":"run_dispatched","actor":"user:operator","at":"2026-06-23T23:08:44.834Z","data":{"run_id":"run_se3awkw9ncnj","agent":"claude-code","model":"claude-sonnet-4-6","project":"prj_74w0r1ytsqqc"}}
+{"type":"status_changed","actor":"user:operator","at":"2026-06-23T23:42:17.622Z","data":{"from":"drafting","to":"ready"}}
+{"type":"status_changed","actor":"user:operator","at":"2026-06-23T23:42:21.184Z","data":{"from":"ready","to":"active"}}
+{"type":"status_changed","actor":"user:operator","at":"2026-06-23T23:42:25.024Z","data":{"from":"active","to":"done"}}
