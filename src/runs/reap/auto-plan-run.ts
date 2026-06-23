@@ -205,12 +205,7 @@ export async function dispatchAutoPlanRuns(
 	input: DispatchAutoPlanRunsInput,
 ): Promise<DispatchAutoPlanRunsResult> {
 	const { workspacePlanIds, baselinePlanIds, workspacePlansBody } = input;
-	if (
-		workspacePlanIds === null ||
-		baselinePlanIds === null ||
-		workspacePlansBody === null ||
-		workspacePlanIds.size <= baselinePlanIds.size
-	) {
+	if (workspacePlanIds === null || baselinePlanIds === null || workspacePlansBody === null) {
 		return { created: false, id: null, planId: null };
 	}
 	let created = false;

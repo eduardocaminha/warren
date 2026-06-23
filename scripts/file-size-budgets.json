@@ -10,6 +10,7 @@
 		"src/db/repos/runs.ts": 610,
 		"src/db/schema/sqlite.ts": 564,
 		"src/plots/aggregate.ts": 506,
+		"src/runs/reap/auto-plan-run.test.ts": 520,
 		"src/runs/pr.test.ts": 604,
 		"src/runs/pr.ts": 659,
 		"src/server/bridges.test.ts": 557,
