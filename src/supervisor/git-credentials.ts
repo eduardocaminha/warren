@@ -17,16 +17,10 @@
  * that never touches GitHub) shouldn't refuse to boot.
  */
 
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
+import { defaultGitRun, type GitRun } from "./git-runner.ts";
 import type { SupervisorLogger } from "./main.ts";
 
-const execFileAsync = promisify(execFile);
-
-export type GitCredentialsRun = (
-	cmd: string,
-	args: readonly string[],
-) => Promise<{ exitCode: number; stdout: string; stderr: string }>;
+export type GitCredentialsRun = GitRun;
 
 export interface GitCredentialsDeps {
 	readonly run: GitCredentialsRun;
@@ -81,17 +75,4 @@ export async function installGitCredentials(
 	return { installed: true };
 }
 
-export const defaultGitCredentialsRun: GitCredentialsRun = async (cmd, args) => {
-	try {
-		const { stdout, stderr } = await execFileAsync(cmd, [...args]);
-		return { exitCode: 0, stdout, stderr };
-	} catch (err) {
-		const e = err as { code?: number; stdout?: string; stderr?: string; message?: string };
-		const exitCode = typeof e.code === "number" ? e.code : 1;
-		return {
-			exitCode,
-			stdout: typeof e.stdout === "string" ? e.stdout : "",
-			stderr: typeof e.stderr === "string" ? e.stderr : (e.message ?? ""),
-		};
-	}
-};
+export const defaultGitCredentialsRun: GitCredentialsRun = defaultGitRun;

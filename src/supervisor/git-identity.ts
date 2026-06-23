@@ -29,16 +29,10 @@
  * so the contribution graph reflects agent-driven work.
  */
 
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
+import { defaultGitRun, type GitRun } from "./git-runner.ts";
 import type { SupervisorLogger } from "./main.ts";
 
-const execFileAsync = promisify(execFile);
-
-export type GitIdentityRun = (
-	cmd: string,
-	args: readonly string[],
-) => Promise<{ exitCode: number; stdout: string; stderr: string }>;
+export type GitIdentityRun = GitRun;
 
 export interface GitIdentityDeps {
 	readonly run: GitIdentityRun;
@@ -107,17 +101,4 @@ export async function installGitAuthor(
 	return { installed: true };
 }
 
-export const defaultGitIdentityRun: GitIdentityRun = async (cmd, args) => {
-	try {
-		const { stdout, stderr } = await execFileAsync(cmd, [...args]);
-		return { exitCode: 0, stdout, stderr };
-	} catch (err) {
-		const e = err as { code?: number; stdout?: string; stderr?: string; message?: string };
-		const exitCode = typeof e.code === "number" ? e.code : 1;
-		return {
-			exitCode,
-			stdout: typeof e.stdout === "string" ? e.stdout : "",
-			stderr: typeof e.stderr === "string" ? e.stderr : (e.message ?? ""),
-		};
-	}
-};
+export const defaultGitIdentityRun: GitIdentityRun = defaultGitRun;
