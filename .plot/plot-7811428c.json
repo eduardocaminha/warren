@@ -3,13 +3,28 @@
   "created_at": "2026-06-23T02:35:30.304Z",
   "id": "plot-7811428c",
   "intent": {
-    "constraints": [],
-    "goal": "",
-    "non_goals": [],
-    "success_criteria": []
+    "constraints": [
+      "extractClaudeIntentPatch é paralelo a extractIntentPatch; reusa normalizeIntentPatch + applyIntentPatch.",
+      "O nome do tool MCP chega namespaced (mcp__<server>__propose_intent) — casar por served-name/sufixo, não igualdade crua.",
+      "Wire no loop mode:\"conversation\" (bridge.ts:199-205), mesmo seam input.conversationTurn?.applyIntentPatch.",
+      "Registro do tool não pode exigir mudança no schema do Plot/eventos/EventStream.",
+      "Testes pi (extractIntentPatch, isPiAgentEnd, conversation-mode) passam sem mudança. bun run check:all verde (respeitando file-size budget etc.)."
+    ],
+    "goal": "O Leveret escrever os 4 campos do intent do Plot via propose_intent rodando em claude-code-chat (e claude-code), com a mesma semântica e o mesmo write-path host-side (applyIntentPatch → intent_edited) do pi-chat. Canal: tool propose_intent registrado via MCP, cujo tool_use o warren observa no stream e aplica block.input ao Plot ativo.",
+    "non_goals": [
+      "Não tocar .pi/extensions/propose_intent.ts nem o caminho pi (extractIntentPatch/tool_execution_end intactos).",
+      "Não mudar o prompt do Leveret, os 4 campos, nem o schema de intent/eventos do Plot.",
+      "Não mudar applyIntentPatch/normalizeIntentPatch/intent_edited.",
+      "Não resolver o gap de turn-boundary (item 3) neste escopo se a verificação mostrar que é separável."
+    ],
+    "success_criteria": [
+      "Sessão Leveret com runtime_override:\"claude-code-chat\" aplica ≥1 campo de intent ao Plot ativo (visível no IntentPane após a chamada), via tool_use observado.",
+      "Testes unitários de extractClaudeIntentPatch análogos aos de extractIntentPatch (nome namespaced; input mal-formado → null; os 4 campos).",
+      "Testes pi + conversation-mode atuais inalterados e verdes."
+    ]
   },
   "name": "Criar propose_intent para o claude-code-chat",
   "schema_version": 1,
   "status": "drafting",
-  "updated_at": "2026-06-23T02:35:30.304Z"
+  "updated_at": "2026-06-23T21:08:27.081Z"
 }
