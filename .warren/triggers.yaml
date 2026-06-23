@@ -31,7 +31,7 @@
 - id: nightwatch-patrol
   kind: cron
   cron: '0 2 * * *'
-  role: nightwatch
+  role: cam-nightwatch
   timezone: America/Los_Angeles
   prompt: |
     Scan this repo for quality issues. Follow your procedure exactly.
@@ -41,7 +41,7 @@
 - id: bugwatch-triage
   kind: cron
   cron: '0 5 * * 0,3'
-  role: bugwatch
+  role: cam-bugwatch
   timezone: America/Los_Angeles
   prompt: |
     Triage open bug seeds and plan fixes. Follow your procedure exactly.
@@ -56,7 +56,7 @@
 - id: gatewatch-patrol
   kind: cron
   cron: '10 3 * * *'
-  role: gatewatch
+  role: cam-gatewatch
   timezone: America/Los_Angeles
   prompt: |
     Audit the last 36 hours of merged history for gate-integrity
@@ -71,7 +71,7 @@
 - id: ratchetwatch-patrol
   kind: cron
   cron: '40 3 * * *'
-  role: ratchetwatch
+  role: cam-ratchetwatch
   timezone: America/Los_Angeles
   prompt: |
     Measure ratchet slack (coverage floors, grandfather lists, bundle
@@ -83,21 +83,10 @@
     — the existing 202 steering channel, no new endpoint or dispatch path.
     If everything is tight, report tight and exit.
 
-- id: warden-digest
-  kind: cron
-  cron: '0 5 * * 0'
-  role: warden-digest
-  timezone: America/Los_Angeles
-  prompt: |
-    Re-wake the Audit Warden conversation if its anchoring run has idled,
-    then post the weekly synthesis message so Leveret triages the week's
-    accumulated auditor findings and proposes plans. Follow your procedure
-    exactly. Today's date is {{date}}.
-
 - id: tastewatch-digest
   kind: cron
   cron: '0 4 * * 0'
-  role: tastewatch
+  role: cam-tastewatch
   timezone: America/Los_Angeles
   prompt: |
     Produce the weekly taste digest: stratified sample of the week's
