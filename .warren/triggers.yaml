@@ -108,3 +108,27 @@
     full merge. Produce the digest seed + the Sync Warden message, and
     propose an sd plan for the cherry-picks (do not dispatch it). If the
     fork is in sync, report in sync and exit.
+
+- id: contribwatch-suggest
+  kind: cron
+  cron: '0 7 * * *'
+  role: cam-contribwatch
+  timezone: America/Los_Angeles
+  prompt: |
+    Scout this fork for work worth contributing back to the jaymin upstream.
+    Follow your procedure exactly. Today's date is {{date}}. Read the upstream
+    CONTRIBUTING.md and draft suggestions (issue or PR) for the human to file;
+    never open anything on jaymin's repo yourself. Digest seed + Upstream
+    Warden message. If nothing, report nothing to contribute and exit.
+
+- id: securitywatch-scan
+  kind: cron
+  cron: '30 7 * * *'
+  role: cam-securitywatch
+  timezone: America/Los_Angeles
+  prompt: |
+    Scan code shared with the jaymin upstream for security concerns. Follow
+    your procedure exactly. Today's date is {{date}}. Follow the upstream
+    SECURITY.md: private disclosure only, never a public issue or seed. Draft
+    the advisory only to the Security Warden conversation. If nothing, say so
+    there and exit.
