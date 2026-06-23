@@ -1,13 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, ChevronRight, RefreshCw } from "lucide-react";
+import { ChevronDown, ChevronRight, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { agentsApi, projectsApi } from "@/api/client.ts";
-import type { AgentRow } from "@/api/types.ts";
+import type { AgentRow, AgentUpdateRequest } from "@/api/types.ts";
 import { Alert } from "@/components/ui/alert.tsx";
 import { Badge } from "@/components/ui/badge.tsx";
 import { Button } from "@/components/ui/button.tsx";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card.tsx";
 import { EmptyState } from "@/components/ui/empty-state.tsx";
+import { Input } from "@/components/ui/input.tsx";
 import { Label } from "@/components/ui/label.tsx";
 import { PageHeader } from "@/components/ui/page-header.tsx";
 import { responsiveFormControl } from "@/components/ui/responsive.ts";
@@ -20,6 +21,8 @@ import {
 	TableHeader,
 	TableRow,
 } from "@/components/ui/table.tsx";
+import { Textarea } from "@/components/ui/textarea.tsx";
+import { useToast } from "@/components/ui/toast.tsx";
 import {
 	compareStrings,
 	type Comparator,
@@ -361,6 +364,8 @@ function readTags(frontmatter: Record<string, unknown> | undefined): string[] {
 function AgentDefinitionPanel({ agent }: { agent: AgentRow }) {
 	const def = readRenderedAgent(agent.renderedJson);
 	const [showRaw, setShowRaw] = useState(false);
+	const [editing, setEditing] = useState(false);
+	const classified = classifyAgentSource(agent.source);
 	const provider = readStringField(def.frontmatter, "provider");
 	const model = readStringField(def.frontmatter, "model");
 	const tags = readTags(def.frontmatter);
@@ -368,6 +373,26 @@ function AgentDefinitionPanel({ agent }: { agent: AgentRow }) {
 	const resolvedFrom = (def.resolvedFrom ?? []).filter(
 		(s): s is string => typeof s === "string" && s.length > 0,
 	);
+
+	const canEdit = classified.tier === "project" && classified.projectId !== null;
+	const editDisabledReason =
+		classified.tier === "builtin"
+			? "Built-in agents are read-only"
+			: classified.tier === "library"
+				? "Library agents are read-only (edit in the canopy repo)"
+				: null;
+
+	if (editing && canEdit && classified.projectId !== null) {
+		return (
+			<AgentEditForm
+				agent={agent}
+				def={def}
+				projectId={classified.projectId}
+				onCancel={() => setEditing(false)}
+				onSaved={() => setEditing(false)}
+			/>
+		);
+	}
 
 	return (
 		<div className="space-y-4 break-words">
@@ -426,7 +451,7 @@ function AgentDefinitionPanel({ agent }: { agent: AgentRow }) {
 				</div>
 			)}
 
-			<div>
+			<div className="flex flex-wrap gap-2">
 				<Button
 					variant="outline"
 					size="sm"
@@ -435,11 +460,344 @@ function AgentDefinitionPanel({ agent }: { agent: AgentRow }) {
 				>
 					{showRaw ? "Hide raw JSON" : "View raw JSON"}
 				</Button>
-				{showRaw ? (
-					<pre className="mt-2 max-h-[420px] overflow-auto rounded-md bg-(--color-card) p-3 text-xs whitespace-pre-wrap break-words">
-						{JSON.stringify(agent.renderedJson, null, 2)}
-					</pre>
-				) : null}
+				<span title={editDisabledReason ?? undefined}>
+					<Button
+						variant="outline"
+						size="sm"
+						disabled={!canEdit}
+						onClick={() => setEditing(true)}
+						className="h-7 text-xs"
+					>
+						<Pencil className="h-3 w-3" />
+						Edit
+					</Button>
+				</span>
+			</div>
+			{showRaw ? (
+				<pre className="mt-2 max-h-[420px] overflow-auto rounded-md bg-(--color-card) p-3 text-xs whitespace-pre-wrap break-words">
+					{JSON.stringify(agent.renderedJson, null, 2)}
+				</pre>
+			) : null}
+		</div>
+	);
+}
+
+/** Draft state for one frontmatter entry (key + display value string). */
+interface FmDraft {
+	key: string;
+	value: string;
+	/** True for rows the user added; false for rows pre-loaded from the agent. */
+	isNew: boolean;
+}
+
+function serialiseFmValue(v: unknown): string {
+	return typeof v === "string" ? v : JSON.stringify(v);
+}
+
+function parseFmValue(s: string): unknown {
+	const trimmed = s.trim();
+	if (trimmed === "") return "";
+	try {
+		return JSON.parse(trimmed);
+	} catch {
+		return s;
+	}
+}
+
+function AgentEditForm({
+	agent,
+	def,
+	projectId,
+	onCancel,
+	onSaved,
+}: {
+	agent: AgentRow;
+	def: RenderedAgent;
+	projectId: string;
+	onCancel: () => void;
+	onSaved: () => void;
+}) {
+	const qc = useQueryClient();
+	const { toast } = useToast();
+
+	// Section drafts — editable body per section name.
+	const originalSections = Object.entries(def.sections ?? {});
+	const [sections, setSections] = useState<Array<{ name: string; body: string }>>(
+		() =>
+			originalSections.map(([name, body]) => ({
+				name,
+				body: typeof body === "string" ? body : JSON.stringify(body, null, 2),
+			})),
+	);
+
+	// Frontmatter drafts — key + string-serialised value.
+	const originalFm = def.frontmatter ?? {};
+	const [fmEntries, setFmEntries] = useState<FmDraft[]>(() =>
+		Object.entries(originalFm).map(([key, value]) => ({
+			key,
+			value: serialiseFmValue(value),
+			isNew: false,
+		})),
+	);
+	const [removedFmKeys, setRemovedFmKeys] = useState<Set<string>>(new Set());
+
+	const save = useMutation({
+		mutationFn: () => {
+			const req: AgentUpdateRequest = {};
+
+			// Sections: include only changed or newly added sections.
+			const changedSections = sections.filter(({ name, body }) => {
+				const orig = def.sections?.[name];
+				const origStr =
+					typeof orig === "string" ? orig : JSON.stringify(orig, null, 2);
+				return body !== origStr;
+			});
+			// New sections have no entry in def.sections.
+			const newSections = sections.filter(({ name }) => !(name in (def.sections ?? {})));
+			const sectionsToSend = [
+				...changedSections.filter(({ name }) => name in (def.sections ?? {})),
+				...newSections,
+			];
+			if (sectionsToSend.length > 0) {
+				req.sections = sectionsToSend;
+			}
+
+			// Frontmatter: include changed/new entries (skip removed).
+			const changedFm: Record<string, unknown> = {};
+			for (const { key, value, isNew } of fmEntries) {
+				if (removedFmKeys.has(key)) continue;
+				const parsed = parseFmValue(value);
+				const orig = originalFm[key];
+				if (isNew || serialiseFmValue(orig) !== value) {
+					changedFm[key] = parsed;
+				}
+			}
+			if (Object.keys(changedFm).length > 0) {
+				req.frontmatter = changedFm;
+			}
+
+			// Frontmatter keys to remove.
+			const toRemove = [...removedFmKeys].filter((k) => k in originalFm);
+			if (toRemove.length > 0) {
+				req.frontmatterRemove = toRemove;
+			}
+
+			return agentsApi.update(agent.name, req, { projectId });
+		},
+		onSuccess: () => {
+			toast({
+				title: "Agent updated",
+				description: `${agent.name} saved and committed to .canopy/.`,
+				variant: "success",
+			});
+			qc.invalidateQueries({ queryKey: ["agents"] });
+			onSaved();
+		},
+		onError: (err) => {
+			toast({
+				title: "Save failed",
+				description: formatError(err),
+				variant: "danger",
+			});
+		},
+	});
+
+	const nothingChanged =
+		sections.every(({ name, body }) => {
+			const orig = def.sections?.[name];
+			return body === (typeof orig === "string" ? orig : JSON.stringify(orig, null, 2));
+		}) &&
+		fmEntries.every(({ key, value, isNew }) => {
+			if (removedFmKeys.has(key)) return false;
+			if (isNew) return false;
+			return serialiseFmValue(originalFm[key]) === value;
+		}) &&
+		removedFmKeys.size === 0;
+
+	// Section helpers.
+	function updateSection(index: number, body: string) {
+		setSections((prev) => prev.map((s, i) => (i === index ? { ...s, body } : s)));
+	}
+
+	function addSection() {
+		setSections((prev) => [...prev, { name: "", body: "" }]);
+	}
+
+	function updateSectionName(index: number, name: string) {
+		setSections((prev) => prev.map((s, i) => (i === index ? { ...s, name } : s)));
+	}
+
+	function removeSection(index: number) {
+		setSections((prev) => prev.filter((_, i) => i !== index));
+	}
+
+	// Frontmatter helpers.
+	function updateFmValue(index: number, value: string) {
+		setFmEntries((prev) => prev.map((e, i) => (i === index ? { ...e, value } : e)));
+	}
+
+	function removeFmEntry(index: number) {
+		const entry = fmEntries[index];
+		if (!entry) return;
+		if (!entry.isNew) {
+			setRemovedFmKeys((prev) => new Set([...prev, entry.key]));
+		}
+		setFmEntries((prev) => prev.filter((_, i) => i !== index));
+	}
+
+	function addFmEntry() {
+		setFmEntries((prev) => [...prev, { key: "", value: "", isNew: true }]);
+	}
+
+	function updateFmKey(index: number, key: string) {
+		setFmEntries((prev) => prev.map((e, i) => (i === index ? { ...e, key } : e)));
+	}
+
+	return (
+		<div className="space-y-6 break-words">
+			{/* Sections editor */}
+			<div className="space-y-3">
+				<div className="flex items-center justify-between">
+					<h4 className="text-xs font-semibold uppercase tracking-wide text-(--color-muted-foreground)">
+						Sections
+					</h4>
+					<Button
+						variant="outline"
+						size="sm"
+						onClick={addSection}
+						className="h-6 gap-1 text-xs"
+						disabled={save.isPending}
+					>
+						<Plus className="h-3 w-3" />
+						Add section
+					</Button>
+				</div>
+				{sections.length === 0 ? (
+					<p className="text-xs text-(--color-muted-foreground)">No sections.</p>
+				) : (
+					<div className="space-y-3">
+						{sections.map((s, i) => {
+							const isOriginal = !s.name || s.name in (def.sections ?? {});
+							return (
+								<div
+									key={i}
+									className="rounded-md border border-(--color-border) bg-(--color-card)"
+								>
+									<div className="flex items-center gap-2 border-b border-(--color-border) px-3 py-2">
+										{isOriginal ? (
+											<span className="flex-1 text-xs font-medium">
+												{sectionLabel(s.name)}
+											</span>
+										) : (
+											<Input
+												value={s.name}
+												onChange={(e) => updateSectionName(i, e.target.value)}
+												placeholder="section-name"
+												disabled={save.isPending}
+												className="h-6 flex-1 font-mono text-xs"
+											/>
+										)}
+										<Button
+											variant="outline"
+											size="sm"
+											onClick={() => removeSection(i)}
+											disabled={save.isPending}
+											className="h-6 w-6 p-0 text-xs"
+											title="Remove section"
+										>
+											<Trash2 className="h-3 w-3" />
+										</Button>
+									</div>
+									<Textarea
+										value={s.body}
+										onChange={(e) => updateSection(i, e.target.value)}
+										disabled={save.isPending}
+										className="min-h-[120px] rounded-none rounded-b-md border-0 font-mono text-xs focus-visible:ring-0 focus-visible:ring-offset-0"
+										placeholder="Section body…"
+									/>
+								</div>
+							);
+						})}
+					</div>
+				)}
+			</div>
+
+			{/* Frontmatter editor */}
+			<div className="space-y-3">
+				<div className="flex items-center justify-between">
+					<h4 className="text-xs font-semibold uppercase tracking-wide text-(--color-muted-foreground)">
+						Frontmatter
+					</h4>
+					<Button
+						variant="outline"
+						size="sm"
+						onClick={addFmEntry}
+						className="h-6 gap-1 text-xs"
+						disabled={save.isPending}
+					>
+						<Plus className="h-3 w-3" />
+						Add key
+					</Button>
+				</div>
+				{fmEntries.length === 0 ? (
+					<p className="text-xs text-(--color-muted-foreground)">No frontmatter keys.</p>
+				) : (
+					<div className="space-y-2">
+						{fmEntries.map((entry, i) => (
+							<div key={i} className="flex items-center gap-2">
+								{entry.isNew ? (
+									<Input
+										value={entry.key}
+										onChange={(e) => updateFmKey(i, e.target.value)}
+										placeholder="key"
+										disabled={save.isPending}
+										className="h-7 w-32 font-mono text-xs"
+									/>
+								) : (
+									<span className="w-32 shrink-0 font-mono text-xs text-(--color-muted-foreground)">
+										{entry.key}
+									</span>
+								)}
+								<Input
+									value={entry.value}
+									onChange={(e) => updateFmValue(i, e.target.value)}
+									disabled={save.isPending}
+									placeholder="value (string or JSON)"
+									className="h-7 flex-1 font-mono text-xs"
+								/>
+								<Button
+									variant="outline"
+									size="sm"
+									onClick={() => removeFmEntry(i)}
+									disabled={save.isPending}
+									className="h-7 w-7 p-0"
+									title="Remove key"
+								>
+									<Trash2 className="h-3 w-3" />
+								</Button>
+							</div>
+						))}
+					</div>
+				)}
+			</div>
+
+			{/* Actions */}
+			<div className="flex gap-2">
+				<Button
+					size="sm"
+					onClick={() => save.mutate()}
+					disabled={save.isPending || nothingChanged}
+				>
+					{save.isPending ? "Saving…" : "Save"}
+				</Button>
+				<Button
+					variant="outline"
+					size="sm"
+					onClick={onCancel}
+					disabled={save.isPending}
+				>
+					Cancel
+				</Button>
 			</div>
 		</div>
 	);
