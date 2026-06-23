@@ -115,13 +115,11 @@
   role: cam-contribwatch
   timezone: America/Los_Angeles
   prompt: |
-    Contribute validated work from this fork back to the jaymin upstream. You
-    run last, after every other agent has verified the fork. Follow your
-    procedure exactly. Today's date is {{date}}. Open issues on jaymin's repo
-    ONLY for validated contributions (merged here with CI green, generic, and
-    absent upstream); dedupe against existing upstream issues; at most 3 per
-    run. Log what you opened in a digest seed + Upstream Warden message. If
-    nothing is validated, report nothing and exit.
+    Scout this fork for work worth contributing back to the jaymin upstream.
+    Follow your procedure exactly. Today's date is {{date}}. Read the upstream
+    CONTRIBUTING.md and draft suggestions (issue or PR) for the human to file;
+    never open anything on jaymin's repo yourself. Digest seed + Upstream
+    Warden message. If nothing, report nothing to contribute and exit.
 
 - id: securitywatch-scan
   kind: cron
