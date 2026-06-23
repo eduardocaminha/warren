@@ -17,6 +17,8 @@ tags:
     description: '`/burrows` routes.'
   - name: conversations
     description: '`/conversations` routes.'
+  - name: mcp
+    description: '`/mcp` routes.'
   - name: meta
     description: Liveness, readiness, and version.
   - name: metrics
@@ -231,6 +233,17 @@ paths:
       tags:
         - meta
       summary: GET /healthz
+      responses:
+        '200':
+          description: Successful response.
+        default:
+          description: Error response (see `src/core/errors.ts`).
+  /mcp:
+    post:
+      operationId: mcpHandler
+      tags:
+        - mcp
+      summary: POST /mcp
       responses:
         '200':
           description: Successful response.
