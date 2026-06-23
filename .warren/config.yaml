@@ -13,7 +13,6 @@
 defaultRole: pi
 defaultBranch: main
 defaultProvider: anthropic
-defaultModel: claude-opus-4-8
 
 # Override do runtime dos built-ins interativos. O planner e dispatchado
 # one-shot (send-off / conversation-merge-dispatch.ts), entao claude-code
