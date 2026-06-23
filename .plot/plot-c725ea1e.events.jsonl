@@ -1,0 +1,2 @@
+{"type":"plot_created","actor":"user:operator","at":"2026-06-23T12:27:05.570Z","data":{"name":"Security Warden"}}
+{"type":"status_changed","actor":"user:operator","at":"2026-06-23T12:27:09.025Z","data":{"from":"drafting","to":"ready"}}
