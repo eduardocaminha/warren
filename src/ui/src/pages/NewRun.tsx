@@ -118,6 +118,9 @@ export function NewRunPage() {
 	const defaultPrompt = warrenConfig.data?.defaults?.defaultPrompt;
 	const defaultProvider = warrenConfig.data?.defaults?.defaultProvider;
 	const defaultModel = warrenConfig.data?.defaults?.defaultModel;
+	// Name the actual config file these defaults came from (warren-5840) rather
+	// than hardcoding the legacy `.warren/defaults.json`.
+	const configSource = warrenConfig.data?.defaultsSource ?? ".warren/config.yaml";
 	const registeredAgents = agents.data?.agents ?? [];
 	const defaultRoleRegistered =
 		defaultRole !== undefined && registeredAgents.some((a) => a.name === defaultRole);
@@ -299,7 +302,7 @@ export function NewRunPage() {
 							{agentFromDefault ? (
 								<p className="text-xs text-(--color-muted-foreground)">
 									Defaulted from this project's{" "}
-									<code className="font-mono">.warren/defaults.json</code>.
+									<code className="font-mono">{configSource}</code>.
 								</p>
 							) : defaultRole !== undefined && !defaultRoleRegistered ? (
 								<p className="text-xs text-(--color-destructive)">
@@ -399,7 +402,7 @@ export function NewRunPage() {
 								{providerFromProjectDefault ? (
 									<p className="text-xs text-(--color-muted-foreground)">
 										Defaulted from this project's{" "}
-										<code className="font-mono">.warren/defaults.json</code>.
+										<code className="font-mono">{configSource}</code>.
 									</p>
 								) : !providerTouched && agentProvider.length > 0 ? (
 									<p className="text-xs text-(--color-muted-foreground)">
@@ -430,7 +433,7 @@ export function NewRunPage() {
 								{modelFromProjectDefault ? (
 									<p className="text-xs text-(--color-muted-foreground)">
 										Defaulted from this project's{" "}
-										<code className="font-mono">.warren/defaults.json</code>.
+										<code className="font-mono">{configSource}</code>.
 									</p>
 								) : !modelTouched && agentModel.length > 0 ? (
 									<p className="text-xs text-(--color-muted-foreground)">
@@ -457,7 +460,7 @@ export function NewRunPage() {
 							{promptFromDefault ? (
 								<p className="text-xs text-(--color-muted-foreground)">
 									Defaulted from this project's{" "}
-									<code className="font-mono">.warren/defaults.json</code>.
+									<code className="font-mono">{configSource}</code>.
 								</p>
 							) : null}
 						</div>

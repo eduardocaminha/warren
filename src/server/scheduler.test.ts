@@ -106,6 +106,7 @@ describe("bootScheduler", () => {
 					},
 				],
 				defaults: null,
+				defaultsSource: null,
 				prTemplate: null,
 				errors: [],
 				warnings: [],
@@ -169,6 +170,7 @@ describe("bootScheduler", () => {
 			load: async () => ({
 				triggers: null,
 				defaults: { defaultRole: "claude-code" },
+				defaultsSource: null,
 				prTemplate: null,
 				errors: [],
 				warnings: [],
@@ -270,6 +272,7 @@ describe("bootScheduler", () => {
 				load: async () => ({
 					triggers: null,
 					defaults: null,
+					defaultsSource: null,
 					prTemplate: null,
 					errors: [],
 					warnings: [],
@@ -300,6 +303,7 @@ describe("bootScheduler", () => {
 				load: async () => ({
 					triggers: null,
 					defaults: null,
+					defaultsSource: null,
 					prTemplate: null,
 					errors: [],
 					warnings: [],

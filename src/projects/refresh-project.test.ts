@@ -382,6 +382,7 @@ describe("refreshProject git-hooks knob (warren-8f4c)", () => {
 			get: async () => ({
 				triggers: null,
 				defaults: { agent: { pauseTimeoutMs: 1_800_000, skipGitHooks: true } },
+				defaultsSource: null,
 				prTemplate: null,
 				errors: [],
 				warnings: [],

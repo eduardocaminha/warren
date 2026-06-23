@@ -22,6 +22,7 @@ export function recordingCache(): RecordingCache {
 		get: async () => ({
 			triggers: null,
 			defaults: null,
+			defaultsSource: null,
 			prTemplate: null,
 			errors: [],
 			warnings: [],

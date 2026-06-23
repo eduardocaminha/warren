@@ -80,6 +80,7 @@ function tickSuite(dialect: "sqlite" | "postgres"): void {
 								},
 							}
 						: null,
+				defaultsSource: null,
 				prTemplate: null,
 				errors: [],
 				warnings: [],

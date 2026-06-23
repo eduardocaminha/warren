@@ -30,6 +30,7 @@ describe("startPreviewEvictionWorker", () => {
 			load: async () => ({
 				triggers: null,
 				defaults: null,
+				defaultsSource: null,
 				prTemplate: null,
 				errors: [],
 				warnings: [],
@@ -60,6 +61,7 @@ describe("startPreviewEvictionWorker", () => {
 				load: async () => ({
 					triggers: null,
 					defaults: null,
+					defaultsSource: null,
 					prTemplate: null,
 					errors: [],
 					warnings: [],

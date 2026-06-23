@@ -75,6 +75,7 @@ export function getProjectWarrenConfigHandler(deps: ServerDeps): RouteHandler {
 		return jsonResponse(200, {
 			triggers: loaded.triggers,
 			defaults: loaded.defaults,
+			defaultsSource: loaded.defaultsSource,
 			errors: loaded.errors,
 			warnings: loaded.warnings,
 		});
