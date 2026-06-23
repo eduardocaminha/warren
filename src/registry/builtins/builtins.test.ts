@@ -326,6 +326,28 @@ describe("LEVERET_BUILTIN", () => {
 		// Pure proposal carrier — it must not edit/write the workspace.
 		expect(parsed.body).not.toContain("writeFile");
 	});
+
+	test("ships the warren MCP server as a valid mcp_servers JSONL line (warren-b3e4)", () => {
+		// The mcp_servers section enables the propose_intent MCP tool for
+		// the claude-code-chat runtime. extractClaudeIntentPatch matches
+		// tool names by __propose_intent suffix (mcp__warren__propose_intent).
+		const section = LEVERET_BUILTIN.sections.mcp_servers ?? "";
+		expect(section.length).toBeGreaterThan(0);
+		const parsed = JSON.parse(section) as {
+			name: string;
+			url: string;
+			headers?: Record<string, string>;
+		};
+		expect(parsed.name).toBe("warren");
+		// URL references the already-injected WARREN_API_URL env var so the
+		// sandbox dials the correct warren loopback regardless of bind port.
+		// biome-ignore lint/suspicious/noTemplateCurlyInString: asserting the literal placeholder, not using JS template syntax
+		expect(parsed.url).toContain("${WARREN_API_URL}");
+		expect(parsed.url).toContain("/mcp");
+		// Auth header references WARREN_API_TOKEN (also injected by injectWarrenCallbackEnv).
+		// biome-ignore lint/suspicious/noTemplateCurlyInString: asserting the literal placeholder, not using JS template syntax
+		expect(parsed.headers?.Authorization).toContain("${WARREN_API_TOKEN}");
+	});
 });
 
 describe("seedBuiltinAgents", () => {

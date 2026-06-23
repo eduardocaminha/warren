@@ -1,6 +1,7 @@
 /**
  * Pure builder that turns an `AgentDefinition` into the `.canopy/`,
- * `.mulch/`, `.seeds/`, `.pi/` workspace drops (SPEC §4.3 step 3, §11.A).
+ * `.mulch/`, `.seeds/`, `.pi/`, `.mcp.json` workspace drops
+ * (SPEC §4.3 step 3, §11.A).
  *
  * Returns `HttpWorkspaceFile[]` with workspace-relative paths so the
  * caller can either thread the list into `HttpClient.burrows.up({ seed })`
@@ -8,7 +9,7 @@
  * `HttpClient.files.write`. No side effects — same validation errors as
  * the prior writer, but the disk writes themselves move to the caller.
  *
- * Five drops:
+ * Six drops:
  *
  *   `.canopy/agent.json` — the rendered AgentDefinition envelope. The
  *      harness (claude-code or sapling) reads whichever sections it
@@ -39,6 +40,14 @@
  *      pi_prompts but flat .ts modules (extensions default-export a
  *      `(pi) => {…}` registration function). INERT until burrow drops
  *      `--no-extensions` for pi-chat; seeding alone is a no-op.
+ *
+ *   `.mcp.json` — MCP server config assembled from `mcp_servers` JSONL
+ *      lines `{name, url, headers?}`. Each entry maps to an HTTP MCP
+ *      server entry in the `mcpServers` object (warren-b3e4). Used by
+ *      the claude-code runtime to connect to warren's `/mcp` endpoint;
+ *      the URL and headers support `${ENV_VAR}` substitution (e.g.
+ *      `${WARREN_API_URL}`, `${WARREN_API_TOKEN}`), which are already
+ *      injected into the sandbox by `injectWarrenCallbackEnv`.
  */
 
 import type { HttpWorkspaceFile } from "@os-eco/burrow-cli";
@@ -56,6 +65,8 @@ export interface BuildSeedFilesResult {
 	readonly piSkills: readonly string[];
 	readonly piPrompts: readonly string[];
 	readonly piExtensions: readonly string[];
+	readonly mcpServers: readonly string[];
+	readonly mcpPath: string | null;
 }
 
 export function buildSeedFiles(agent: AgentDefinition): BuildSeedFilesResult {
@@ -101,6 +112,9 @@ export function buildSeedFiles(agent: AgentDefinition): BuildSeedFilesResult {
 	);
 	files.push(...extensionFiles);
 
+	const { names: mcpServers, file: mcpFile } = buildMcpServerFiles(agent.sections.mcp_servers);
+	if (mcpFile !== null) files.push(mcpFile);
+
 	return {
 		files,
 		canopyPath,
@@ -109,6 +123,8 @@ export function buildSeedFiles(agent: AgentDefinition): BuildSeedFilesResult {
 		piSkills,
 		piPrompts,
 		piExtensions,
+		mcpServers,
+		mcpPath: mcpFile?.path ?? null,
 	};
 }
 
@@ -254,4 +270,86 @@ function isSafeArtifactName(name: string): boolean {
 
 function truncate(s: string, max: number): string {
 	return s.length <= max ? s : `${s.slice(0, max)}…`;
+}
+
+/**
+ * Build the `.mcp.json` workspace file from the `mcp_servers` agent section
+ * (warren-b3e4 / pl-141f step 3). Each JSONL line is `{name, url, headers?}`
+ * and maps to one HTTP MCP server entry in the output's `mcpServers` object.
+ *
+ * URL and header values may contain `${ENV_VAR}` references (e.g.
+ * `${WARREN_API_URL}`, `${WARREN_API_TOKEN}`). Claude-code expands these from
+ * the sandbox environment; `injectWarrenCallbackEnv` guarantees both vars are
+ * present for conversation/leveret dispatches.
+ */
+function buildMcpServerFiles(body: string | undefined): {
+	names: readonly string[];
+	file: HttpWorkspaceFile | null;
+} {
+	if (body === undefined || body.trim() === "") return { names: [], file: null };
+
+	const entries: Array<{ name: string; url: string; headers?: Record<string, string> }> = [];
+	const seen = new Set<string>();
+	const lines = body.split("\n");
+	for (let i = 0; i < lines.length; i++) {
+		const raw = lines[i];
+		if (raw === undefined) continue;
+		const line = raw.trim();
+		if (line === "") continue;
+		let parsed: unknown;
+		try {
+			parsed = JSON.parse(line);
+		} catch (err) {
+			throw new RunSpawnError(`mcp_servers line ${i + 1} is not valid JSON: ${formatError(err)}`, {
+				recoveryHint: "fix the canopy prompt's mcp_servers section",
+			});
+		}
+		if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+			throw new RunSpawnError(
+				`mcp_servers line ${i + 1} is not a JSON object: ${truncate(line, 80)}`,
+			);
+		}
+		const obj = parsed as { name?: unknown; url?: unknown; headers?: unknown };
+		if (typeof obj.name !== "string" || obj.name === "") {
+			throw new RunSpawnError(`mcp_servers line ${i + 1} is missing a non-empty "name" field`);
+		}
+		if (typeof obj.url !== "string" || obj.url === "") {
+			throw new RunSpawnError(`mcp_servers line ${i + 1} is missing a non-empty "url" field`);
+		}
+		if (seen.has(obj.name)) {
+			throw new RunSpawnError(
+				`mcp_servers line ${i + 1} duplicates name ${JSON.stringify(obj.name)}`,
+			);
+		}
+		let headers: Record<string, string> | undefined;
+		if (obj.headers !== undefined) {
+			if (typeof obj.headers !== "object" || Array.isArray(obj.headers)) {
+				throw new RunSpawnError(`mcp_servers line ${i + 1} "headers" must be an object`);
+			}
+			for (const [k, v] of Object.entries(obj.headers as Record<string, unknown>)) {
+				if (typeof v !== "string") {
+					throw new RunSpawnError(`mcp_servers line ${i + 1} headers["${k}"] must be a string`);
+				}
+			}
+			headers = obj.headers as Record<string, string>;
+		}
+		seen.add(obj.name);
+		entries.push({ name: obj.name, url: obj.url, headers });
+	}
+
+	if (entries.length === 0) return { names: [], file: null };
+
+	const mcpServers: Record<string, unknown> = {};
+	for (const entry of entries) {
+		const server: Record<string, unknown> = { type: "http", url: entry.url };
+		if (entry.headers !== undefined) server.headers = entry.headers;
+		mcpServers[entry.name] = server;
+	}
+
+	const file: HttpWorkspaceFile = {
+		path: ".mcp.json",
+		contents: `${JSON.stringify({ mcpServers }, null, 2)}\n`,
+	};
+	const names = entries.map((e) => e.name).sort();
+	return { names, file };
 }
