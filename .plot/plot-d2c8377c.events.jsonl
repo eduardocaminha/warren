@@ -1,3 +1,6 @@
 {"type":"plot_created","actor":"user:operator","at":"2026-06-23T12:25:20.446Z","data":{"name":"Audit Warden"}}
 {"type":"status_changed","actor":"user:operator","at":"2026-06-23T12:25:59.737Z","data":{"from":"drafting","to":"ready"}}
 {"type":"run_dispatched","actor":"user:operator","at":"2026-06-23T13:19:08.681Z","data":{"run_id":"run_xy3xyxa11w3m","agent":"leveret","model":"claude-opus-4-8","project":"prj_74w0r1ytsqqc"}}
+{"type":"plan_run_dispatched","actor":"user:operator","at":"2026-06-23T14:21:44.154Z","data":{"plan_run_id":"plnr_7scwne1jvsav","plan_id":"pl-bdd3","children_count":8}}
+{"type":"run_dispatched","actor":"user:operator","at":"2026-06-23T14:21:51.929Z","data":{"run_id":"run_g7ndfa74bwtq","agent":"claude-code","model":"claude-sonnet-4-6","project":"prj_74w0r1ytsqqc"}}
+{"type":"run_dispatched","actor":"user:operator","at":"2026-06-23T15:41:34.119Z","data":{"run_id":"run_xfgq9qs71w94","agent":"claude-code","model":"claude-sonnet-4-6","project":"prj_74w0r1ytsqqc"}}
