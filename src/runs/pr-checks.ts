@@ -29,12 +29,15 @@ export function readGhFetchOverride(): "merged" | null {
 	return v.trim() === "merged" ? "merged" : null;
 }
 
-export function buildHeaders(token: string): Record<string, string> {
+export function buildHeaders(
+	token: string,
+	userAgent: string = USER_AGENT,
+): Record<string, string> {
 	return {
 		accept: "application/vnd.github+json",
 		authorization: `Bearer ${token}`,
 		"content-type": "application/json",
-		"user-agent": USER_AGENT,
+		"user-agent": userAgent,
 		"x-github-api-version": "2022-11-28",
 	};
 }
