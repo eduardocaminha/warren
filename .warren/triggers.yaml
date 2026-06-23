@@ -30,7 +30,7 @@
 
 - id: nightwatch-patrol
   kind: cron
-  cron: '0 2 * * *'
+  cron: '0 1 * * *'
   role: cam-nightwatch
   timezone: America/Los_Angeles
   prompt: |
@@ -40,7 +40,7 @@
 
 - id: bugwatch-triage
   kind: cron
-  cron: '0 5 * * 0,3'
+  cron: '0 3 * * 0,3'
   role: cam-bugwatch
   timezone: America/Los_Angeles
   prompt: |
@@ -55,7 +55,7 @@
 
 - id: gatewatch-patrol
   kind: cron
-  cron: '10 3 * * *'
+  cron: '30 1 * * *'
   role: cam-gatewatch
   timezone: America/Los_Angeles
   prompt: |
@@ -70,7 +70,7 @@
 
 - id: ratchetwatch-patrol
   kind: cron
-  cron: '40 3 * * *'
+  cron: '0 2 * * *'
   role: cam-ratchetwatch
   timezone: America/Los_Angeles
   prompt: |
@@ -85,7 +85,7 @@
 
 - id: tastewatch-digest
   kind: cron
-  cron: '0 4 * * 0'
+  cron: '30 2 * * 0'
   role: cam-tastewatch
   timezone: America/Los_Angeles
   prompt: |
@@ -99,7 +99,7 @@
 
 - id: syncwatch-reconcile
   kind: cron
-  cron: '0 6 * * *'
+  cron: '0 4 * * *'
   role: cam-syncwatch
   timezone: America/Los_Angeles
   prompt: |
@@ -111,19 +111,21 @@
 
 - id: contribwatch-suggest
   kind: cron
-  cron: '0 7 * * *'
+  cron: '0 6 * * *'
   role: cam-contribwatch
   timezone: America/Los_Angeles
   prompt: |
-    Scout this fork for work worth contributing back to the jaymin upstream.
-    Follow your procedure exactly. Today's date is {{date}}. Read the upstream
-    CONTRIBUTING.md and draft suggestions (issue or PR) for the human to file;
-    never open anything on jaymin's repo yourself. Digest seed + Upstream
-    Warden message. If nothing, report nothing to contribute and exit.
+    Contribute validated work from this fork back to the jaymin upstream. You
+    run last, after every other agent has verified the fork. Follow your
+    procedure exactly. Today's date is {{date}}. Open issues on jaymin's repo
+    ONLY for validated contributions (merged here with CI green, generic, and
+    absent upstream); dedupe against existing upstream issues; at most 3 per
+    run. Log what you opened in a digest seed + Upstream Warden message. If
+    nothing is validated, report nothing and exit.
 
 - id: securitywatch-scan
   kind: cron
-  cron: '30 7 * * *'
+  cron: '0 5 * * *'
   role: cam-securitywatch
   timezone: America/Los_Angeles
   prompt: |
