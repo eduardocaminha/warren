@@ -29,9 +29,13 @@
 import { NotFoundError as BurrowNotFoundError, type DestroyBurrowResult } from "@os-eco/burrow-cli";
 import type { BurrowClient } from "../../burrow-client/client.ts";
 import { withTransportMapping } from "../../burrow-client/client.ts";
-import { ValidationError } from "../../core/errors.ts";
+import {
+	type EnvLike,
+	isTruthy,
+	parseEnvDuration,
+	parseEnvPositiveInt,
+} from "../../core/env-parse.ts";
 import type { BurrowRow, RunRow, RunState } from "../../db/schema.ts";
-import { parseDurationMs } from "../../preview/duration.ts";
 
 /** Non-terminal run states — a burrow with one of these is never GC'd. */
 export const GC_ACTIVE_RUN_STATES: readonly RunState[] = ["queued", "running", "paused"];
@@ -62,7 +66,7 @@ export interface WorkspaceGcConfig {
 	readonly disabled: boolean;
 }
 
-export type EnvLike = Readonly<Record<string, string | undefined>>;
+export type { EnvLike };
 
 /**
  * Resolve workspace-GC config from env. Defaults are conservative;
@@ -78,33 +82,6 @@ export function loadWorkspaceGcConfigFromEnv(env: EnvLike = process.env): Worksp
 	);
 	const disabled = isTruthy(env[WARREN_WORKSPACE_GC_DISABLED_ENV]);
 	return { ttlMs, tickMs, disabled };
-}
-
-function parseEnvDuration(env: EnvLike, name: string, fallback: number): number {
-	const raw = env[name];
-	if (raw === undefined || raw.trim() === "") return fallback;
-	try {
-		return parseDurationMs(raw);
-	} catch (err) {
-		const message = err instanceof ValidationError ? err.message : String(err);
-		throw new ValidationError(`${name}: ${message}`);
-	}
-}
-
-function parseEnvPositiveInt(env: EnvLike, name: string, fallback: number): number {
-	const raw = env[name];
-	if (raw === undefined || raw.trim() === "") return fallback;
-	const parsed = Number.parseInt(raw, 10);
-	if (!Number.isInteger(parsed) || parsed <= 0 || String(parsed) !== raw.trim()) {
-		throw new ValidationError(`${name} must be a positive integer (got ${JSON.stringify(raw)})`);
-	}
-	return parsed;
-}
-
-function isTruthy(raw: string | undefined): boolean {
-	if (raw === undefined) return false;
-	const lower = raw.trim().toLowerCase();
-	return lower === "1" || lower === "true" || lower === "yes" || lower === "on";
 }
 
 /* ----------------------------------------------------------------------- */
