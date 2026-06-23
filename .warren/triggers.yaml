@@ -96,3 +96,15 @@
     conversation (well-known title "Audit Warden") over
     POST /conversations/:id/messages — the existing 202 steering channel,
     report-only, no dispatch or new path. Today's date is {{date}}.
+
+- id: syncwatch-reconcile
+  kind: cron
+  cron: '0 6 * * *'
+  role: cam-syncwatch
+  timezone: America/Los_Angeles
+  prompt: |
+    Reconcile this repo against its jaymin upstream. Follow your procedure
+    exactly. Today's date is {{date}}. Cherry-pick candidates only, never a
+    full merge. Produce the digest seed + the Sync Warden message, and
+    propose an sd plan for the cherry-picks (do not dispatch it). If the
+    fork is in sync, report in sync and exit.
