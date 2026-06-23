@@ -14,7 +14,7 @@
 #   cron      5 or 6 whitespace-separated fields (croner-compatible)
 #   seed      seed id the agent reads + writes (e.g. warren-xxxx)
 #   role      registered agent name (kebab/snake-case)
-#   timezone  IANA tz name, e.g. America/Los_Angeles
+#   timezone  IANA tz name, e.g. America/Sao_Paulo
 #   prompt    pre-filled into the agent; multi-line ok via `|`
 #
 # Example (uncomment to enable):
@@ -24,15 +24,15 @@
 #   cron: '0 3 * * *'          # 03:00 daily
 #   seed: warren-housekeep
 #   role: claude-code
-#   timezone: America/Los_Angeles
+#   timezone: America/Sao_Paulo
 #   prompt: |
 #     Run the housekeeping checklist and file seeds for anything off.
 
 - id: nightwatch-patrol
   kind: cron
-  cron: '0 1 * * *'
+  cron: '0 0 * * *'
   role: cam-nightwatch
-  timezone: America/Los_Angeles
+  timezone: America/Sao_Paulo
   prompt: |
     Scan this repo for quality issues. Follow your procedure exactly.
     Today's date is {{date}}. If you find issues, file a plan. If the
@@ -40,9 +40,9 @@
 
 - id: bugwatch-triage
   kind: cron
-  cron: '0 3 * * 0,3'
+  cron: '0 4 * * 0,3'
   role: cam-bugwatch
-  timezone: America/Los_Angeles
+  timezone: America/Sao_Paulo
   prompt: |
     Triage open bug seeds and plan fixes. Follow your procedure exactly.
     Today's date is {{date}}. If no bugs qualify, report clean and exit.
@@ -55,9 +55,9 @@
 
 - id: gatewatch-patrol
   kind: cron
-  cron: '30 1 * * *'
+  cron: '0 1 * * *'
   role: cam-gatewatch
-  timezone: America/Los_Angeles
+  timezone: America/Sao_Paulo
   prompt: |
     Audit the last 36 hours of merged history for gate-integrity
     violations per docs/CONSTITUTION.md. Follow your procedure exactly.
@@ -72,7 +72,7 @@
   kind: cron
   cron: '0 2 * * *'
   role: cam-ratchetwatch
-  timezone: America/Los_Angeles
+  timezone: America/Sao_Paulo
   prompt: |
     Measure ratchet slack (coverage floors, grandfather lists, bundle
     creep, debt markers) per docs/CONSTITUTION.md Article II and plan
@@ -85,9 +85,9 @@
 
 - id: tastewatch-digest
   kind: cron
-  cron: '30 2 * * 0'
+  cron: '0 3 * * 0'
   role: cam-tastewatch
-  timezone: America/Los_Angeles
+  timezone: America/Sao_Paulo
   prompt: |
     Produce the weekly taste digest: stratified sample of the week's
     merged commits judged against docs/CONSTITUTION.md, auditor
@@ -99,9 +99,9 @@
 
 - id: syncwatch-reconcile
   kind: cron
-  cron: '0 4 * * *'
+  cron: '0 5 * * *'
   role: cam-syncwatch
-  timezone: America/Los_Angeles
+  timezone: America/Sao_Paulo
   prompt: |
     Reconcile this repo against its jaymin upstream. Follow your procedure
     exactly. Today's date is {{date}}. Cherry-pick candidates only, never a
@@ -111,9 +111,9 @@
 
 - id: contribwatch-suggest
   kind: cron
-  cron: '0 6 * * *'
+  cron: '0 7 * * *'
   role: cam-contribwatch
-  timezone: America/Los_Angeles
+  timezone: America/Sao_Paulo
   prompt: |
     Scout this fork for work worth contributing back to the jaymin upstream.
     Follow your procedure exactly. Today's date is {{date}}. Read the upstream
@@ -123,9 +123,9 @@
 
 - id: securitywatch-scan
   kind: cron
-  cron: '0 5 * * *'
+  cron: '0 6 * * *'
   role: cam-securitywatch
-  timezone: America/Los_Angeles
+  timezone: America/Sao_Paulo
   prompt: |
     Scan code shared with the jaymin upstream for security concerns. Follow
     your procedure exactly. Today's date is {{date}}. Follow the upstream
