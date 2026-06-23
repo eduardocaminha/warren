@@ -6,6 +6,7 @@ import type { EditPlotIntentRequest, PlotIntentEditor } from "../../plots/index.
 import {
 	createConversationTurnHandler,
 	extractAssistantText,
+	extractClaudeIntentPatch,
 	extractIntentPatch,
 	LEVERET_PLOT_ACTOR,
 } from "./conversation-turn.ts";
@@ -80,6 +81,84 @@ describe("extractIntentPatch", () => {
 
 	test("rejects arrays of mixed types", () => {
 		expect(extractIntentPatch(toolEnd({ intent_patch: { non_goals: ["ok", 3] } }))).toBeNull();
+	});
+});
+
+describe("extractClaudeIntentPatch", () => {
+	function toolUse(name: string, input: unknown): RunEvent {
+		return evt("r", 1, {
+			kind: "tool_use",
+			stream: "stdout",
+			payload: { name, input },
+		});
+	}
+
+	test("pulls all four intent fields from a namespaced __propose_intent tool_use", () => {
+		const patch = extractClaudeIntentPatch(
+			toolUse("mcp__warren__propose_intent", {
+				goal: "ship it",
+				non_goals: ["a"],
+				constraints: ["b"],
+				success_criteria: ["c"],
+			}),
+		);
+		expect(patch).toEqual({
+			goal: "ship it",
+			non_goals: ["a"],
+			constraints: ["b"],
+			success_criteria: ["c"],
+		});
+	});
+
+	test("matches the suffix only — bare 'propose_intent' without __ prefix returns null", () => {
+		expect(extractClaudeIntentPatch(toolUse("propose_intent", { goal: "x" }))).toBeNull();
+	});
+
+	test("returns null for an unrelated tool_use", () => {
+		expect(extractClaudeIntentPatch(toolUse("mcp__warren__bash", { command: "ls" }))).toBeNull();
+	});
+
+	test("returns null when input has no recognized intent fields", () => {
+		expect(extractClaudeIntentPatch(toolUse("mcp__warren__propose_intent", {}))).toBeNull();
+	});
+
+	test("returns null when input is not an object", () => {
+		expect(extractClaudeIntentPatch(toolUse("mcp__warren__propose_intent", null))).toBeNull();
+		expect(extractClaudeIntentPatch(toolUse("mcp__warren__propose_intent", "str"))).toBeNull();
+		expect(extractClaudeIntentPatch(toolUse("mcp__warren__propose_intent", []))).toBeNull();
+	});
+
+	test("returns null for non-tool_use events and wrong streams", () => {
+		expect(
+			extractClaudeIntentPatch(
+				evt("r", 1, {
+					kind: "state_change",
+					stream: "stdout",
+					payload: { name: "mcp__warren__propose_intent", input: { goal: "x" } },
+				}),
+			),
+		).toBeNull();
+		expect(
+			extractClaudeIntentPatch(
+				evt("r", 1, {
+					kind: "tool_use",
+					stream: "system",
+					payload: { name: "mcp__warren__propose_intent", input: { goal: "x" } },
+				}),
+			),
+		).toBeNull();
+	});
+
+	test("keeps only the fields present (partial patch)", () => {
+		expect(extractClaudeIntentPatch(toolUse("mcp__warren__propose_intent", { goal: "g" }))).toEqual(
+			{ goal: "g" },
+		);
+	});
+
+	test("rejects mixed-type arrays in intent fields", () => {
+		expect(
+			extractClaudeIntentPatch(toolUse("mcp__warren__propose_intent", { non_goals: ["ok", 3] })),
+		).toBeNull();
 	});
 });
 
