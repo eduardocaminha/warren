@@ -19,6 +19,7 @@
  * 50–60 of extensions.ts.
  */
 
+import { formatError } from "../core/errors.ts";
 import { SeedNotFoundError, SeedsCliError } from "./errors.ts";
 import type { SeedsCliDeps } from "./extensions.ts";
 import {
@@ -183,9 +184,4 @@ function truncate(raw: string, limit = 500): string {
 	const trimmed = raw.trim();
 	if (trimmed.length <= limit) return trimmed;
 	return `${trimmed.slice(0, limit)}… [truncated]`;
-}
-
-function formatError(err: unknown): string {
-	if (err instanceof Error) return err.message;
-	return String(err);
 }
