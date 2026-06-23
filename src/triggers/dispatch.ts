@@ -27,11 +27,11 @@
  * tear down the scheduler.
  */
 
+import { formatError } from "../core/errors.ts";
 import type { Repos } from "../db/repos/index.ts";
 import type { ScheduledSeed } from "../seeds-cli/index.ts";
 import type { CronTrigger, DefaultsConfig } from "../warren-config/index.ts";
 import { parseCron } from "./cron.ts";
-import { TriggerDispatchError } from "./errors.ts";
 
 export interface DispatchSpawnInput {
 	readonly agentName: string;
@@ -271,10 +271,4 @@ function resolveScheduledPrompt(
 	}
 	const titleSuffix = seed.title ? ` (${seed.title})` : "";
 	return `Work on seed ${seed.id}${titleSuffix}.`;
-}
-
-function formatError(err: unknown): string {
-	if (err instanceof Error) return err.message;
-	if (err instanceof TriggerDispatchError) return err.message;
-	return String(err);
 }

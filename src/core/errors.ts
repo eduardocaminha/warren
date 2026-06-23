@@ -30,3 +30,8 @@ export class ValidationError extends WarrenError {
 export class StateTransitionError extends WarrenError {
 	readonly code = "state_transition_error";
 }
+
+export function formatError(err: unknown): string {
+	if (err instanceof Error) return err.message;
+	return String(err);
+}

@@ -1,2 +1,3 @@
 {"type":"plot_created","actor":"user:operator","at":"2026-06-23T12:26:19.587Z","data":{"name":"Upstream Warden"}}
 {"type":"status_changed","actor":"user:operator","at":"2026-06-23T12:26:26.517Z","data":{"from":"drafting","to":"ready"}}
+{"type":"run_dispatched","actor":"user:operator","at":"2026-06-23T13:18:47.969Z","data":{"run_id":"run_aw1315ya8fdq","agent":"leveret","model":"claude-opus-4-8","project":"prj_74w0r1ytsqqc"}}
