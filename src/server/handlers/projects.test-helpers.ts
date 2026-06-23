@@ -2,7 +2,12 @@ import { BurrowClient, BurrowClientPool } from "../../burrow-client/index.ts";
 import type { Repos } from "../../db/repos/index.ts";
 import { RunEventBroker } from "../../runs/index.ts";
 import { createBridgeRegistry } from "../bridges.ts";
-import type { BridgeRegistry, ServeHandle, ServerDeps } from "../types.ts";
+import type { BridgeRegistry, ServerDeps } from "../types.ts";
+import { silentLogger, stubFetch, tcpUrl } from "./handler-test-utils.ts";
+
+export { silentLogger, tcpUrl };
+/** Cast for fetch — re-exported as `stub` for backward compatibility with existing test imports. */
+export const stub = stubFetch;
 
 /**
  * Build a single-worker `BurrowClientPool` from a stubbed `BurrowClient`
@@ -18,18 +23,6 @@ export async function poolFor(repos: Repos, client: BurrowClient): Promise<Burro
 	return pool;
 }
 
-export const silentLogger = {
-	info() {},
-	warn() {},
-	error() {},
-};
-
-export function stub(
-	impl: (input: URL | RequestInfo, init?: RequestInit) => Promise<Response>,
-): typeof fetch {
-	return impl as unknown as typeof fetch;
-}
-
 export interface BurrowFixture {
 	burrowId: string;
 	burrowRunId: string;
@@ -42,7 +35,7 @@ export function makeBurrowClient(
 ): BurrowClient {
 	return new BurrowClient({
 		config: { transport: { kind: "unix", path: "/tmp/x.sock" } },
-		fetch: stub(async (input, init) => {
+		fetch: stubFetch(async (input, init) => {
 			const url = new URL(String(input), "http://localhost");
 			const path = url.pathname;
 			const method = init?.method ?? "GET";
@@ -141,9 +134,4 @@ export async function depsFor(
 		},
 		...(extras?.plotResolver !== undefined ? { plotResolver: extras.plotResolver } : {}),
 	};
-}
-
-export function tcpUrl(handle: ServeHandle): string {
-	if (handle.transport.kind !== "tcp") throw new Error("expected tcp transport");
-	return `http://${handle.transport.hostname}:${handle.transport.port}`;
 }
