@@ -1,0 +1,15 @@
+{
+  "attachments": [],
+  "created_at": "2026-06-23T12:25:20.446Z",
+  "id": "plot-d2c8377c",
+  "intent": {
+    "constraints": [],
+    "goal": "",
+    "non_goals": [],
+    "success_criteria": []
+  },
+  "name": "Audit Warden",
+  "schema_version": 1,
+  "status": "drafting",
+  "updated_at": "2026-06-23T12:25:20.446Z"
+}

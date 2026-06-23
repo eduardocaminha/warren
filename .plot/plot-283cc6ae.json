@@ -1,0 +1,15 @@
+{
+  "attachments": [],
+  "created_at": "2026-06-23T12:25:41.123Z",
+  "id": "plot-283cc6ae",
+  "intent": {
+    "constraints": [],
+    "goal": "",
+    "non_goals": [],
+    "success_criteria": []
+  },
+  "name": "Sync Warden",
+  "schema_version": 1,
+  "status": "ready",
+  "updated_at": "2026-06-23T12:25:54.403Z"
+}
