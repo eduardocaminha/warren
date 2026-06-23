@@ -1,1 +1,2 @@
 {"type":"plot_created","actor":"user:operator","at":"2026-06-23T12:25:20.446Z","data":{"name":"Audit Warden"}}
+{"type":"status_changed","actor":"user:operator","at":"2026-06-23T12:25:59.737Z","data":{"from":"drafting","to":"ready"}}
