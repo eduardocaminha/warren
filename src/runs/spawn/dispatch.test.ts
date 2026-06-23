@@ -8,7 +8,7 @@ import { NotFoundError, ValidationError } from "../../core/errors.ts";
 import { isId } from "../../core/ids.ts";
 import type { WarrenDb } from "../../db/client.ts";
 import type { Repos } from "../../db/repos/index.ts";
-import { composeDispatchPrompt, spawnRun } from "./index.ts";
+import { spawnRun } from "./index.ts";
 import { makeAgentJson, makeBurrowClient, makePool, setupRepos, stub } from "./test-helpers.ts";
 
 describe("spawnRun: validation", () => {
@@ -314,6 +314,7 @@ describe("spawnRun: burrow_config + runtime + metadata", () => {
 				get: async () => ({
 					triggers: null,
 					defaults: { defaultProvider: "anthropic", defaultModel: "claude-opus-4-7" },
+					defaultsSource: null,
 					prTemplate: null,
 					errors: [],
 					warnings: [],
@@ -478,23 +479,5 @@ describe("spawnRun: rollback", () => {
 		expect(rows).toHaveLength(1);
 		expect(rows[0]?.state).toBe("failed");
 		expect(rows[0]?.burrowId).toBeNull();
-	});
-});
-
-describe("composeDispatchPrompt", () => {
-	test("prepends the system body with a horizontal-rule delimiter", () => {
-		expect(composeDispatchPrompt("be a refactor agent", "fix it")).toBe(
-			"be a refactor agent\n\n---\n\nfix it",
-		);
-	});
-
-	test("trims trailing whitespace on the system body before joining", () => {
-		expect(composeDispatchPrompt("system\n\n\n", "task")).toBe("system\n\n---\n\ntask");
-	});
-
-	test("returns the user prompt verbatim when system is empty or whitespace", () => {
-		expect(composeDispatchPrompt("", "task")).toBe("task");
-		expect(composeDispatchPrompt("   \n\t", "task")).toBe("task");
-		expect(composeDispatchPrompt(undefined, "task")).toBe("task");
 	});
 });

@@ -117,6 +117,7 @@ describe("createPlanRunSpawn", () => {
 				load: async () => ({
 					triggers: null,
 					defaults: null,
+					defaultsSource: null,
 					prTemplate: null,
 					errors: [],
 					warnings: [],
@@ -184,6 +185,7 @@ describe("createPlanRunSpawn", () => {
 				load: async () => ({
 					triggers: null,
 					defaults: null,
+					defaultsSource: null,
 					prTemplate: null,
 					errors: [],
 					warnings: [],
@@ -254,6 +256,7 @@ describe("createPlanRunSpawn", () => {
 				load: async () => ({
 					triggers: null,
 					defaults: null,
+					defaultsSource: null,
 					prTemplate: null,
 					errors: [],
 					warnings: [],

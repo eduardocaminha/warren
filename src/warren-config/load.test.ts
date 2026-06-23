@@ -51,6 +51,7 @@ describe("loadWarrenConfig", () => {
 		});
 		expect(result.triggers).toBeNull();
 		expect(result.defaults).toBeNull();
+		expect(result.defaultsSource).toBeNull();
 		expect(result.errors).toEqual([]);
 		expect(result.warnings).toEqual([]);
 	});
@@ -62,6 +63,7 @@ describe("loadWarrenConfig", () => {
 		});
 		expect(result.triggers).toBeNull();
 		expect(result.defaults).toBeNull();
+		expect(result.defaultsSource).toBeNull();
 		expect(result.errors).toEqual([]);
 		expect(result.warnings).toEqual([]);
 	});
@@ -90,6 +92,7 @@ defaultPrompt: Read the issue, plan, execute.
 		expect(result.triggers?.[0]?.id).toBe("nightly-refactor");
 		expect(result.defaults?.defaultRole).toBe("claude-code");
 		expect(result.defaults?.defaultBranch).toBe("main");
+		expect(result.defaultsSource).toBe(`${WARREN_CONFIG_DIR}/${WARREN_CONFIG_FILES.config}`);
 	});
 
 	test("legacy defaults.json with no config.yaml → parsed, emits deprecation warning", async () => {
@@ -101,6 +104,7 @@ defaultPrompt: Read the issue, plan, execute.
 		});
 		expect(result.errors).toEqual([]);
 		expect(result.defaults?.defaultRole).toBe("claude-code");
+		expect(result.defaultsSource).toBe(`${WARREN_CONFIG_DIR}/${WARREN_CONFIG_FILES.defaults}`);
 		expect(result.warnings).toHaveLength(1);
 		const warning = result.warnings[0];
 		expect(warning?.code).toBe(WARREN_CONFIG_FILE_ERROR_CODES.deprecated);
@@ -118,6 +122,7 @@ defaultPrompt: Read the issue, plan, execute.
 		});
 		expect(result.errors).toEqual([]);
 		expect(result.defaults?.defaultRole).toBe("from-yaml");
+		expect(result.defaultsSource).toBe(`${WARREN_CONFIG_DIR}/${WARREN_CONFIG_FILES.config}`);
 		expect(result.defaults?.defaultBranch).toBeUndefined();
 		expect(result.warnings).toHaveLength(1);
 		expect(result.warnings[0]?.code).toBe(WARREN_CONFIG_FILE_ERROR_CODES.deprecated);

@@ -210,6 +210,7 @@ describe("provider/model override resolution (warren-618b / warren-f8c0)", () =>
 				get: async () => ({
 					triggers: null,
 					defaults: { defaultProvider: "anthropic", defaultModel: "claude-opus-4-7" },
+					defaultsSource: null,
 					prTemplate: null,
 					errors: [],
 					warnings: [],
@@ -251,6 +252,7 @@ describe("provider/model override resolution (warren-618b / warren-f8c0)", () =>
 				get: async () => ({
 					triggers: null,
 					defaults: { defaultProvider: "anthropic", defaultModel: "claude-opus-4-7" },
+					defaultsSource: null,
 					prTemplate: null,
 					errors: [],
 					warnings: [],

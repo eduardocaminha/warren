@@ -66,6 +66,13 @@ export interface LoadedWarrenConfig {
 	 */
 	readonly defaults: DefaultsConfig | null;
 	/**
+	 * Relative path of the file `defaults` was loaded from —
+	 * `.warren/config.yaml` (canonical) or legacy `.warren/defaults.json`,
+	 * or `null` when neither exists. Lets the UI name the config source
+	 * dynamically instead of hardcoding the legacy filename (warren-5840).
+	 */
+	readonly defaultsSource: string | null;
+	/**
 	 * Per-fragment overrides parsed from `.warren/pr-template.md`
 	 * (warren-bd49). `null` when the file is absent or its read failed;
 	 * an empty object means the file exists but had no recognized
@@ -115,16 +122,29 @@ export async function loadWarrenConfig(input: LoadWarrenConfigInput): Promise<Lo
 	if (!exists(dirPath)) {
 		// No `.warren/` at all is the bootstrap shape — existing projects keep
 		// working unchanged. All fields null, no errors or warnings.
-		return { triggers: null, defaults: null, prTemplate: null, errors, warnings };
+		return {
+			triggers: null,
+			defaults: null,
+			defaultsSource: null,
+			prTemplate: null,
+			errors,
+			warnings,
+		};
 	}
 
 	const triggers = await loadTriggers({ projectPath, exists, read, errors });
-	const defaults = await loadDefaults({ projectPath, exists, read, errors, warnings });
+	const { value: defaults, source: defaultsSource } = await loadDefaults({
+		projectPath,
+		exists,
+		read,
+		errors,
+		warnings,
+	});
 	const previewOverride = await loadPreviewFile({ projectPath, exists, read, errors });
 	const prTemplate = await loadPrTemplate({ projectPath, exists, read, errors });
 
 	const merged = mergePreviewOverride(defaults, previewOverride);
-	return { triggers, defaults: merged, prTemplate, errors, warnings };
+	return { triggers, defaults: merged, defaultsSource, prTemplate, errors, warnings };
 }
 
 interface LoadOneInput {
@@ -169,7 +189,9 @@ async function loadTriggers(input: LoadOneInput): Promise<TriggersConfig | null>
  * roll over to the other tier — we want operators to see the parse / schema
  * failure rather than have it masked by a silent fallback.
  */
-async function loadDefaults(input: LoadDefaultsInput): Promise<DefaultsConfig | null> {
+async function loadDefaults(
+	input: LoadDefaultsInput,
+): Promise<{ value: DefaultsConfig | null; source: string | null }> {
 	const configAbs = join(input.projectPath, WARREN_CONFIG_DIR, WARREN_CONFIG_FILES.config);
 	const defaultsAbs = join(input.projectPath, WARREN_CONFIG_DIR, WARREN_CONFIG_FILES.defaults);
 	const configExists = input.exists(configAbs);
@@ -186,12 +208,18 @@ async function loadDefaults(input: LoadDefaultsInput): Promise<DefaultsConfig | 
 	}
 
 	if (configExists) {
-		return loadConfigYaml(input, configAbs);
+		return {
+			value: await loadConfigYaml(input, configAbs),
+			source: warrenConfigRelativePath("config"),
+		};
 	}
 	if (defaultsExists) {
-		return loadLegacyDefaultsJson(input, defaultsAbs);
+		return {
+			value: await loadLegacyDefaultsJson(input, defaultsAbs),
+			source: warrenConfigRelativePath("defaults"),
+		};
 	}
-	return null;
+	return { value: null, source: null };
 }
 
 async function loadConfigYaml(

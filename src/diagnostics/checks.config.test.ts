@@ -12,6 +12,7 @@ describe("checkWarrenConfig", () => {
 	const empty: LoadedWarrenConfig = {
 		triggers: null,
 		defaults: null,
+		defaultsSource: null,
 		prTemplate: null,
 		errors: [],
 		warnings: [],
@@ -19,6 +20,7 @@ describe("checkWarrenConfig", () => {
 	const valid: LoadedWarrenConfig = {
 		triggers: [],
 		defaults: { defaultBranch: "main" },
+		defaultsSource: null,
 		prTemplate: null,
 		errors: [],
 		warnings: [],
@@ -52,6 +54,7 @@ describe("checkWarrenConfig", () => {
 		const malformed: LoadedWarrenConfig = {
 			triggers: null,
 			defaults: { defaultBranch: "main" },
+			defaultsSource: null,
 			prTemplate: null,
 			errors: [
 				{
@@ -91,6 +94,7 @@ describe("checkWarrenConfig", () => {
 		const malformed: LoadedWarrenConfig = {
 			triggers: null,
 			defaults: null,
+			defaultsSource: null,
 			prTemplate: null,
 			errors: [
 				{
@@ -138,6 +142,7 @@ describe("checkWarrenConfig", () => {
 		const withWarning: LoadedWarrenConfig = {
 			triggers: null,
 			defaults: { defaultBranch: "main" },
+			defaultsSource: null,
 			prTemplate: null,
 			errors: [],
 			warnings: [
@@ -160,6 +165,7 @@ describe("checkWarrenConfigDeprecations", () => {
 	const clean: LoadedWarrenConfig = {
 		triggers: null,
 		defaults: null,
+		defaultsSource: null,
 		prTemplate: null,
 		errors: [],
 		warnings: [],
@@ -167,6 +173,7 @@ describe("checkWarrenConfigDeprecations", () => {
 	const deprecated: LoadedWarrenConfig = {
 		triggers: null,
 		defaults: { defaultBranch: "main" },
+		defaultsSource: null,
 		prTemplate: null,
 		errors: [],
 		warnings: [
