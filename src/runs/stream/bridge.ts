@@ -30,7 +30,11 @@ import {
 	type SessionStatsAccumulator,
 } from "../usage-aggregate.ts";
 import { type CancelBurrowRunFn, enforceBudgetCap } from "./budget.ts";
-import { extractAssistantText, extractIntentPatch } from "./conversation-turn.ts";
+import {
+	extractAssistantText,
+	extractClaudeIntentPatch,
+	extractIntentPatch,
+} from "./conversation-turn.ts";
 import { defaultRunStateProbe, runStatePoller } from "./run-state-poller.ts";
 import { persistInStreamUsage, persistPiStatsDelta, snapshotStats } from "./stats.ts";
 import { detectRuntimeTerminal, isPiAgentEnd } from "./terminal-detect.ts";
@@ -199,7 +203,7 @@ export async function bridgeRunStream(input: BridgeRunStreamInput): Promise<Brid
 			if (input.mode === "conversation") {
 				const assistantText = extractAssistantText(event);
 				if (assistantText !== null) conversationTurnText += assistantText;
-				const intentPatch = extractIntentPatch(event);
+				const intentPatch = extractIntentPatch(event) ?? extractClaudeIntentPatch(event);
 				if (intentPatch !== null) {
 					await input.conversationTurn?.applyIntentPatch({ runId, patch: intentPatch });
 				}

@@ -15,11 +15,15 @@
  *      `tool_execution_end` event's `result.details.intent_patch` and writes
  *      nothing itself. The bridge reads that off the stream and applies it
  *      to the active Plot here, as an `intent_edited` write so the
- *      IntentPane (polling `/plots/:id`) fills in.
+ *      IntentPane (polling `/plots/:id`) fills in. When the runtime is
+ *      `claude-code-chat`, the same tool arrives via MCP as a `tool_use`
+ *      event (warren-efe6); `extractClaudeIntentPatch` handles that path,
+ *      symmetric to the pi `extractIntentPatch`.
  *
  * Both methods are best-effort: a failure is logged and swallowed so the
  * bridge keeps couriering events. The pure `extractAssistantText` /
- * `extractIntentPatch` parsers are exported for unit-test reuse.
+ * `extractIntentPatch` / `extractClaudeIntentPatch` parsers are exported for
+ * unit-test reuse.
  */
 
 import { join } from "node:path";
@@ -167,4 +171,25 @@ function stringArray(value: unknown): string[] | null {
 	if (!Array.isArray(value)) return null;
 	const out = value.filter((v): v is string => typeof v === "string");
 	return out.length === value.length ? out : null;
+}
+
+/**
+ * Pull a claude-code-chat intent patch off a `tool_use` event. Burrow's
+ * jsonl-claude parser maps MCP tool calls to `kind:'tool_use'`,
+ * `stream:'stdout'` with the tool name in `payload.name` and the intent
+ * fields in `payload.input`. Matches any name that ends with the suffix
+ * `__propose_intent` (e.g. `mcp__warren__propose_intent`). Returns a
+ * normalized patch, or null when the shape does not match or no intent
+ * fields are present. Symmetric to `extractIntentPatch` for the pi path.
+ */
+export function extractClaudeIntentPatch(event: RunEvent): EditPlotIntentPatch | null {
+	if (event.kind !== "tool_use" || event.stream !== "stdout") return null;
+	const payload = event.payload;
+	if (payload === null || typeof payload !== "object") return null;
+	const env = payload as Record<string, unknown>;
+	const name = env.name;
+	if (typeof name !== "string" || !name.endsWith("__propose_intent")) return null;
+	const input = env.input;
+	if (input === null || typeof input !== "object" || Array.isArray(input)) return null;
+	return normalizeIntentPatch(input as Record<string, unknown>);
 }
