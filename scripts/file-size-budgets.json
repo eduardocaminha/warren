@@ -17,7 +17,6 @@
 		"src/server/handlers/conversations.test.ts": 548,
 		"src/server/main/index.ts": 548,
 		"src/server/integration.multi-worker.test.ts": 553,
-		"src/registry/canopy.test.ts": 510,
 		"src/server/server.test.ts": 536
 	}
 }

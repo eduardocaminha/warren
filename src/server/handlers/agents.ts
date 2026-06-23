@@ -10,23 +10,16 @@
 
 import { NotFoundError, ValidationError } from "../../core/errors.ts";
 import type { AgentRow } from "../../db/schema.ts";
-import {
-	type AgentSource,
-	isProjectAgentSource,
-	makeProjectAgentSource,
-	readAgentSource,
-	stampAgentSource,
-} from "../../registry/builtins/index.ts";
-import { type AgentUpdateOptions, CanopyClient } from "../../registry/canopy.ts";
+import { type AgentSource, readAgentSource } from "../../registry/builtins/index.ts";
+import { CanopyClient } from "../../registry/canopy.ts";
 import {
 	type RefreshProjectResult,
 	refreshAgentRegistry,
 	refreshProjectAgents,
 } from "../../registry/refresh.ts";
-import { parseRenderedAgent } from "../../registry/schema.ts";
 import { jsonResponse } from "../response.ts";
 import type { RouteContext, RouteHandler, ServerDeps } from "../types.ts";
-import { defaultSpawn, readJsonBody, requireParam } from "./index.ts";
+import { defaultSpawn, requireParam } from "./index.ts";
 
 /**
  * Decorate an `AgentRow` with the `source` provenance so `GET /agents`
@@ -194,130 +187,6 @@ export function refreshProjectAgentsHandler(deps: ServerDeps): RouteHandler {
 		});
 		return jsonResponse(200, decorateRefreshResult(result));
 	};
-}
-
-/**
- * PATCH /agents/:name — update a project-tier agent in place.
- *
- * Accepts a diff-style body (`sections`, `frontmatter`, `frontmatterRemove`)
- * forwarded to `cn update`, then calls `cn sync` and re-renders the agent
- * so the DB row reflects the new version. Only project-tier agents (source:
- * `project:<projectId>`) are editable; built-in and library-tier agents are
- * read-only (plan pl-dec4 step 2, warren-81a3).
- *
- * `?projectId=` is required — it identifies which project's `.canopy/` to
- * invoke `cn update` against and which agents-table tier to refresh.
- */
-export function patchAgentHandler(deps: ServerDeps): RouteHandler {
-	return async (ctx) => {
-		const name = requireParam(ctx, "name");
-		const projectId = parseProjectIdQuery(ctx);
-		if (projectId === undefined) {
-			throw new ValidationError(
-				"?projectId is required for PATCH /agents/:name — only project-tier agents are editable",
-				{
-					recoveryHint:
-						"add ?projectId=<id> to address the project-tier agent; built-in and library agents are read-only",
-				},
-			);
-		}
-
-		const row = await deps.repos.agents.get(name, { projectId });
-		if (!row) {
-			throw new NotFoundError(`agent not found: ${name} in project ${projectId}`, {
-				recoveryHint: `POST /projects/${projectId}/agents/refresh to register agents from .canopy/`,
-			});
-		}
-
-		const source = readAgentSource(row.renderedJson);
-		if (!isProjectAgentSource(source)) {
-			throw new ValidationError(
-				`agent '${name}' is a ${source === "builtin" ? "built-in" : "library"} agent and cannot be updated; only project-tier agents are editable`,
-				{
-					recoveryHint:
-						"project-tier agents live in <projectPath>/.canopy/; built-in and library agents are read-only",
-				},
-			);
-		}
-
-		const body = await readJsonBody(ctx);
-		const updateOpts = parseAgentUpdateBody(body);
-
-		const project = await deps.repos.projects.require(projectId);
-		const client = projectCanopyClient(deps, project.localPath);
-
-		await client.updateAgent(name, updateOpts);
-		await client.syncCanopy();
-
-		const rendered = await client.renderAgent(name);
-		const definition = parseRenderedAgent(rendered, name);
-		const stamped = stampAgentSource(definition, makeProjectAgentSource(projectId));
-		const updated = await deps.repos.agents.upsert({
-			name: stamped.name,
-			projectId,
-			renderedJson: stamped,
-		});
-
-		return jsonResponse(200, withAgentSource(updated));
-	};
-}
-
-function parseAgentUpdateBody(body: Record<string, unknown>): AgentUpdateOptions {
-	return {
-		sections: parseSections(body),
-		frontmatter: parseFrontmatter(body),
-		frontmatterRemove: parseFrontmatterRemove(body),
-	};
-}
-
-function parseSections(
-	body: Record<string, unknown>,
-): ReadonlyArray<{ readonly name: string; readonly body: string }> | undefined {
-	const raw = body.sections;
-	if (raw === undefined || raw === null) return undefined;
-	if (!Array.isArray(raw)) {
-		throw new ValidationError("field 'sections' must be an array");
-	}
-	return raw.map((item: unknown, i: number) => {
-		if (typeof item !== "object" || item === null || Array.isArray(item)) {
-			throw new ValidationError(`sections[${i}] must be an object with 'name' and 'body'`);
-		}
-		const obj = item as Record<string, unknown>;
-		const sectionName = obj.name;
-		const sectionBody = obj.body;
-		if (typeof sectionName !== "string" || sectionName.length === 0) {
-			throw new ValidationError(`sections[${i}].name must be a non-empty string`);
-		}
-		if (typeof sectionBody !== "string") {
-			throw new ValidationError(`sections[${i}].body must be a string`);
-		}
-		return { name: sectionName, body: sectionBody };
-	});
-}
-
-function parseFrontmatter(
-	body: Record<string, unknown>,
-): Readonly<Record<string, unknown>> | undefined {
-	const raw = body.frontmatter;
-	if (raw === undefined || raw === null) return undefined;
-	if (typeof raw !== "object" || Array.isArray(raw)) {
-		throw new ValidationError("field 'frontmatter' must be an object");
-	}
-	return raw as Record<string, unknown>;
-}
-
-function parseFrontmatterRemove(body: Record<string, unknown>): ReadonlyArray<string> | undefined {
-	const raw = body.frontmatterRemove;
-	if (raw === undefined || raw === null) return undefined;
-	if (!Array.isArray(raw)) {
-		throw new ValidationError("field 'frontmatterRemove' must be an array of strings");
-	}
-	return raw.map((item: unknown, i: number) => {
-		if (typeof item !== "string" || item.length === 0) {
-			throw new ValidationError(`frontmatterRemove[${i}] must be a non-empty string`);
-		}
-		return item;
-	});
 }
 
 /**

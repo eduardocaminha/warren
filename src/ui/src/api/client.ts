@@ -5,7 +5,6 @@
 
 import type {
 	AgentRow,
-	AgentUpdateRequest,
 	ApiErrorEnvelope,
 	CancelPlanRunResponse,
 	CancelRunResponse,
@@ -67,13 +66,7 @@ import type {
 	RunAnalyticsTokensSection,
 } from "./types.ts";
 
-export type {
-	AgentUpdateRequest,
-	TokenBreakdown,
-	DimensionTokenSeries,
-	TokenDayBucket,
-	RunAnalyticsTokensSection,
-} from "./types.ts";
+export type { TokenBreakdown, DimensionTokenSeries, TokenDayBucket, RunAnalyticsTokensSection } from "./types.ts";
 
 const TOKEN_KEY = "warren.apiToken";
 
@@ -198,16 +191,6 @@ export const agentsApi = {
 		request<RefreshProjectAgentsResponse>(
 			`/projects/${encodeURIComponent(projectId)}/agents/refresh`,
 			{ method: "POST", body: {} },
-		),
-	/**
-	 * Update a project-tier agent in place (pl-dec4 step 4, warren-91d0).
-	 * `?projectId=` is required by the server — only project-tier agents are
-	 * editable; passing built-in or library agents will return 400.
-	 */
-	update: (name: string, body: AgentUpdateRequest, filter: AgentsFilter) =>
-		request<AgentRow>(
-			`/agents/${encodeURIComponent(name)}${agentsQuery(filter)}`,
-			{ method: "PATCH", body },
 		),
 };
 

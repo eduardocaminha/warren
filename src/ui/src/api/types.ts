@@ -41,21 +41,6 @@ export interface AgentRow {
 	source?: "builtin" | "library" | `project:${string}`;
 }
 
-/**
- * Body for PATCH /agents/:name (pl-dec4 step 4, warren-91d0).
- * Diff-style update: `sections` replaces/adds named sections, `frontmatter`
- * sets keys, `frontmatterRemove` deletes keys. All fields are optional;
- * send only what you want to change.
- */
-export interface AgentUpdateRequest {
-	/** Sections to upsert — each entry replaces the whole named section body. */
-	sections?: Array<{ name: string; body: string }>;
-	/** Frontmatter keys to set/overwrite. */
-	frontmatter?: Record<string, unknown>;
-	/** Frontmatter keys to delete. */
-	frontmatterRemove?: string[];
-}
-
 export interface ProjectRow {
 	id: string;
 	gitUrl: string;
