@@ -14,3 +14,4 @@
 {"type":"run_dispatched","actor":"user:operator","at":"2026-06-22T23:56:07.860Z","data":{"run_id":"run_y7ra3zngd9s9","agent":"claude-code","model":"claude-opus-4-8","project":"prj_74w0r1ytsqqc"}}
 {"type":"status_changed","actor":"user:operator","at":"2026-06-23T02:34:29.660Z","data":{"from":"drafting","to":"ready"}}
 {"type":"run_dispatched","actor":"user:operator","at":"2026-06-23T09:14:26.858Z","data":{"run_id":"run_yzb6nczce9dz","agent":"claude-code","model":"claude-opus-4-8","project":"prj_74w0r1ytsqqc"}}
+{"type":"status_changed","actor":"user:operator","at":"2026-06-23T10:19:14.189Z","data":{"from":"ready","to":"archived"}}
