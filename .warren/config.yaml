@@ -10,7 +10,7 @@
 # ── Active defaults ─────────────────────────────────────────────────────
 # These were migrated from .warren/defaults.json. Edit freely.
 
-defaultRole: pi
+defaultRole: claude-code
 defaultBranch: main
 defaultProvider: anthropic
 
