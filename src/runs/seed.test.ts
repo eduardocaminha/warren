@@ -87,6 +87,8 @@ describe("buildSeedFiles", () => {
 		expect(result.piSkills).toEqual([]);
 		expect(result.piPrompts).toEqual([]);
 		expect(result.piExtensions).toEqual([]);
+		expect(result.mcpServers).toEqual([]);
+		expect(result.mcpPath).toBeNull();
 		// Only the canopy envelope drops when no optional sections are present.
 		expect(result.files.map((f) => f.path)).toEqual([".canopy/agent.json"]);
 	});
@@ -249,17 +251,130 @@ describe("buildSeedFiles", () => {
 		).toThrow(RunSpawnError);
 	});
 
+	test("emits mcp_servers JSONL lines as .mcp.json with mcpServers map", () => {
+		// biome-ignore lint/suspicious/noTemplateCurlyInString: literal placeholders for claude-code env-var expansion
+		const url = "${WARREN_API_URL}/mcp";
+		// biome-ignore lint/suspicious/noTemplateCurlyInString: literal placeholders for claude-code env-var expansion
+		const authHeader = "Bearer ${WARREN_API_TOKEN}";
+		const section = JSON.stringify({ name: "warren", url, headers: { Authorization: authHeader } });
+		const result = buildSeedFiles(makeAgent({ sections: { system: "s", mcp_servers: section } }));
+		const map = byPath(result.files);
+
+		expect(result.mcpServers).toEqual(["warren"]);
+		expect(result.mcpPath).toBe(".mcp.json");
+		const contents = map.get(".mcp.json")?.contents ?? "";
+		const parsed = JSON.parse(contents) as {
+			mcpServers: Record<string, { type: string; url: string; headers?: Record<string, string> }>;
+		};
+		expect(parsed.mcpServers.warren).toEqual({
+			type: "http",
+			url,
+			headers: { Authorization: authHeader },
+		});
+	});
+
+	test("emits multiple mcp_servers entries in declaration order", () => {
+		const section = [
+			JSON.stringify({ name: "a-server", url: "http://a/mcp" }),
+			JSON.stringify({ name: "b-server", url: "http://b/mcp" }),
+		].join("\n");
+		const result = buildSeedFiles(makeAgent({ sections: { system: "s", mcp_servers: section } }));
+		expect(result.mcpServers).toEqual(["a-server", "b-server"]);
+		const contents = result.files.find((f) => f.path === ".mcp.json")?.contents ?? "";
+		const parsed = JSON.parse(contents) as { mcpServers: Record<string, unknown> };
+		expect(Object.keys(parsed.mcpServers)).toEqual(["a-server", "b-server"]);
+	});
+
+	test("omits headers key when mcp_servers entry has no headers", () => {
+		const section = JSON.stringify({ name: "plain", url: "http://plain/mcp" });
+		const result = buildSeedFiles(makeAgent({ sections: { system: "s", mcp_servers: section } }));
+		const contents = result.files.find((f) => f.path === ".mcp.json")?.contents ?? "";
+		const parsed = JSON.parse(contents) as {
+			mcpServers: Record<string, { type: string; url: string; headers?: unknown }>;
+		};
+		expect(parsed.mcpServers.plain).toEqual({ type: "http", url: "http://plain/mcp" });
+		expect(parsed.mcpServers.plain?.headers).toBeUndefined();
+	});
+
+	test("rejects malformed mcp_servers lines with RunSpawnError", () => {
+		expect(() =>
+			buildSeedFiles(makeAgent({ sections: { system: "s", mcp_servers: "not json" } })),
+		).toThrow(RunSpawnError);
+	});
+
+	test("rejects mcp_servers lines without a non-empty name", () => {
+		expect(() =>
+			buildSeedFiles(
+				makeAgent({
+					sections: { system: "s", mcp_servers: JSON.stringify({ url: "http://x/mcp" }) },
+				}),
+			),
+		).toThrow(RunSpawnError);
+	});
+
+	test("rejects mcp_servers lines without a non-empty url", () => {
+		expect(() =>
+			buildSeedFiles(
+				makeAgent({
+					sections: { system: "s", mcp_servers: JSON.stringify({ name: "x" }) },
+				}),
+			),
+		).toThrow(RunSpawnError);
+	});
+
+	test("rejects mcp_servers lines with non-object headers", () => {
+		expect(() =>
+			buildSeedFiles(
+				makeAgent({
+					sections: {
+						system: "s",
+						mcp_servers: JSON.stringify({ name: "x", url: "http://x/mcp", headers: "bad" }),
+					},
+				}),
+			),
+		).toThrow(RunSpawnError);
+	});
+
+	test("rejects mcp_servers lines with non-string header values", () => {
+		expect(() =>
+			buildSeedFiles(
+				makeAgent({
+					sections: {
+						system: "s",
+						mcp_servers: JSON.stringify({
+							name: "x",
+							url: "http://x/mcp",
+							headers: { Authorization: 42 },
+						}),
+					},
+				}),
+			),
+		).toThrow(RunSpawnError);
+	});
+
+	test("rejects duplicate mcp_servers names", () => {
+		const dup = [
+			JSON.stringify({ name: "x", url: "http://x/mcp" }),
+			JSON.stringify({ name: "x", url: "http://x2/mcp" }),
+		].join("\n");
+		expect(() =>
+			buildSeedFiles(makeAgent({ sections: { system: "s", mcp_servers: dup } })),
+		).toThrow(RunSpawnError);
+	});
+
 	test("all emitted paths are workspace-relative (no leading slash)", () => {
-		const section = JSON.stringify({ name: "x", body: "y" });
+		const piSection = JSON.stringify({ name: "x", body: "y" });
+		const mcpSection = JSON.stringify({ name: "srv", url: "http://srv/mcp" });
 		const result = buildSeedFiles(
 			makeAgent({
 				sections: {
 					system: "s",
 					workflow: "wf",
 					expertise_seed: '{"type":"convention","domain":"d","content":"c"}',
-					pi_skills: section,
-					pi_prompts: section,
-					pi_extensions: section,
+					pi_skills: piSection,
+					pi_prompts: piSection,
+					pi_extensions: piSection,
+					mcp_servers: mcpSection,
 				},
 			}),
 		);

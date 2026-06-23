@@ -143,6 +143,27 @@ export default function (pi: ExtensionAPI) {
 }
 `;
 
+/**
+ * MCP server config seeded into `.mcp.json` when leveret runs on the
+ * `claude-code-chat` runtime (warren-b3e4 / pl-141f step 3).
+ *
+ * Points claude-code at warren's `/mcp` endpoint so the `propose_intent`
+ * MCP tool is available in the sandbox. `${WARREN_API_URL}` and
+ * `${WARREN_API_TOKEN}` are injected by `injectWarrenCallbackEnv` and
+ * expanded by claude-code from the sandbox environment. The resulting
+ * MCP tool name is `mcp__warren__propose_intent`, which
+ * `extractClaudeIntentPatch` matches by the `__propose_intent` suffix.
+ */
+// biome-ignore lint/suspicious/noTemplateCurlyInString: literal placeholder for claude-code env-var expansion
+const WARREN_MCP_URL = "${WARREN_API_URL}/mcp";
+// biome-ignore lint/suspicious/noTemplateCurlyInString: literal placeholder for claude-code env-var expansion
+const WARREN_MCP_AUTH = "Bearer ${WARREN_API_TOKEN}";
+const MCP_SERVERS_SECTION = JSON.stringify({
+	name: "warren",
+	url: WARREN_MCP_URL,
+	headers: { Authorization: WARREN_MCP_AUTH },
+});
+
 export const LEVERET_BUILTIN: AgentDefinition = {
 	name: "leveret",
 	version: 1,
@@ -150,6 +171,7 @@ export const LEVERET_BUILTIN: AgentDefinition = {
 		system: SYSTEM_BODY,
 		burrow_config: '[sandbox]\nnetwork = "open"\n',
 		pi_extensions: JSON.stringify({ name: "propose_intent", body: PROPOSE_INTENT_EXTENSION }),
+		mcp_servers: MCP_SERVERS_SECTION,
 	},
 	resolvedFrom: ["builtin:leveret"],
 	frontmatter: {
