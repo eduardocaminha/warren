@@ -50,6 +50,7 @@ import {
 	sendOffConversationHandler,
 } from "./conversations.ts";
 import { readyzHandler } from "./diagnostics.ts";
+import { mcpHandler } from "./mcp.ts";
 import { healthzHandler, previewConfigHandler, versionHandler } from "./meta.ts";
 import { metricsHandler } from "./metrics.ts";
 import {
@@ -257,6 +258,8 @@ const ROUTE_TABLE: readonly RouteEntry[] = [
 	{ method: "GET", pattern: "/version", build: () => versionHandler() },
 	{ method: "GET", pattern: "/metrics", build: metricsHandler },
 
+	{ method: "POST", pattern: "/mcp", build: () => mcpHandler() },
+
 	{ method: "GET", pattern: "/agents", build: listAgentsHandler },
 	{ method: "POST", pattern: "/agents/refresh", build: refreshAgentsHandler },
 	{ method: "GET", pattern: "/agents/:name", build: getAgentHandler },
@@ -395,6 +398,7 @@ export const API_PREFIXES: readonly string[] = [
 	"/analytics",
 	"/burrows",
 	"/conversations",
+	"/mcp",
 	"/projects",
 	"/runs",
 	"/workers",
