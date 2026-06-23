@@ -46,6 +46,7 @@ import {
 } from "./errors.ts";
 import {
 	type DefaultsConfig,
+	type ParseResult,
 	parseConfigFile,
 	parseDefaultsConfig,
 	parsePreviewFile,
@@ -145,40 +146,13 @@ async function loadTriggers(input: LoadOneInput): Promise<TriggersConfig | null>
 		return null;
 	}
 
-	let raw: string;
-	try {
-		raw = await input.read(absPath);
-	} catch (err) {
-		input.errors.push({
-			file: relPath,
-			code: WARREN_CONFIG_FILE_ERROR_CODES.parseError,
-			message: `failed to read file: ${formatError(err)}`,
-		});
-		return null;
-	}
-
-	let document: unknown;
-	try {
-		document = yaml.load(raw, { filename: relPath });
-	} catch (err) {
-		input.errors.push({
-			file: relPath,
-			code: WARREN_CONFIG_FILE_ERROR_CODES.parseError,
-			message: `YAML parse error: ${formatError(err)}`,
-		});
-		return null;
-	}
-
-	const result = parseTriggersConfig(document);
-	if (!result.ok) {
-		input.errors.push({
-			file: relPath,
-			code: WARREN_CONFIG_FILE_ERROR_CODES.schemaError,
-			message: result.message,
-		});
-		return null;
-	}
-	return result.value;
+	return readYamlValidate({
+		relPath,
+		absPath,
+		errors: input.errors,
+		read: input.read,
+		parse: parseTriggersConfig,
+	});
 }
 
 /**
@@ -224,46 +198,13 @@ async function loadConfigYaml(
 	input: LoadDefaultsInput,
 	absPath: string,
 ): Promise<DefaultsConfig | null> {
-	const relPath = warrenConfigRelativePath("config");
-	let raw: string;
-	try {
-		raw = await input.read(absPath);
-	} catch (err) {
-		input.errors.push({
-			file: relPath,
-			code: WARREN_CONFIG_FILE_ERROR_CODES.parseError,
-			message: `failed to read file: ${formatError(err)}`,
-		});
-		return null;
-	}
-
-	const trimmed = raw.trim();
-	let document: unknown;
-	if (trimmed === "") {
-		document = undefined;
-	} else {
-		try {
-			document = yaml.load(raw, { filename: relPath });
-		} catch (err) {
-			input.errors.push({
-				file: relPath,
-				code: WARREN_CONFIG_FILE_ERROR_CODES.parseError,
-				message: `YAML parse error: ${formatError(err)}`,
-			});
-			return null;
-		}
-	}
-
-	const result = parseConfigFile(document);
-	if (!result.ok) {
-		input.errors.push({
-			file: relPath,
-			code: WARREN_CONFIG_FILE_ERROR_CODES.schemaError,
-			message: result.message,
-		});
-		return null;
-	}
-	return result.value;
+	return readYamlValidate({
+		relPath: warrenConfigRelativePath("config"),
+		absPath,
+		errors: input.errors,
+		read: input.read,
+		parse: parseConfigFile,
+	});
 }
 
 async function loadLegacyDefaultsJson(
@@ -328,45 +269,13 @@ async function loadPreviewFile(input: LoadOneInput): Promise<DefaultsConfig["pre
 		return null;
 	}
 
-	let raw: string;
-	try {
-		raw = await input.read(absPath);
-	} catch (err) {
-		input.errors.push({
-			file: relPath,
-			code: WARREN_CONFIG_FILE_ERROR_CODES.parseError,
-			message: `failed to read file: ${formatError(err)}`,
-		});
-		return null;
-	}
-
-	const trimmed = raw.trim();
-	let document: unknown;
-	if (trimmed === "") {
-		document = undefined;
-	} else {
-		try {
-			document = yaml.load(raw, { filename: relPath });
-		} catch (err) {
-			input.errors.push({
-				file: relPath,
-				code: WARREN_CONFIG_FILE_ERROR_CODES.parseError,
-				message: `YAML parse error: ${formatError(err)}`,
-			});
-			return null;
-		}
-	}
-
-	const result = parsePreviewFile(document);
-	if (!result.ok) {
-		input.errors.push({
-			file: relPath,
-			code: WARREN_CONFIG_FILE_ERROR_CODES.schemaError,
-			message: result.message,
-		});
-		return null;
-	}
-	return result.value;
+	return readYamlValidate({
+		relPath,
+		absPath,
+		errors: input.errors,
+		read: input.read,
+		parse: parsePreviewFile,
+	});
 }
 
 /**
@@ -418,6 +327,57 @@ async function loadPrTemplate(input: LoadOneInput): Promise<PrTemplateOverrides 
 		});
 	}
 	return parsed.overrides;
+}
+
+interface ReadYamlValidateInput<T> {
+	readonly relPath: string;
+	readonly absPath: string;
+	readonly errors: WarrenConfigFileError[];
+	readonly read: ReadFileFn;
+	readonly parse: (doc: unknown) => ParseResult<T>;
+}
+
+async function readYamlValidate<T>(input: ReadYamlValidateInput<T>): Promise<T | null> {
+	const { relPath, absPath, errors, read, parse } = input;
+
+	let raw: string;
+	try {
+		raw = await read(absPath);
+	} catch (err) {
+		errors.push({
+			file: relPath,
+			code: WARREN_CONFIG_FILE_ERROR_CODES.parseError,
+			message: `failed to read file: ${formatError(err)}`,
+		});
+		return null;
+	}
+
+	let document: unknown;
+	if (raw.trim() === "") {
+		document = undefined;
+	} else {
+		try {
+			document = yaml.load(raw, { filename: relPath });
+		} catch (err) {
+			errors.push({
+				file: relPath,
+				code: WARREN_CONFIG_FILE_ERROR_CODES.parseError,
+				message: `YAML parse error: ${formatError(err)}`,
+			});
+			return null;
+		}
+	}
+
+	const result = parse(document);
+	if (!result.ok) {
+		errors.push({
+			file: relPath,
+			code: WARREN_CONFIG_FILE_ERROR_CODES.schemaError,
+			message: result.message,
+		});
+		return null;
+	}
+	return result.value;
 }
 
 function defaultReadFile(path: string): Promise<string> {
