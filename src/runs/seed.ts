@@ -9,7 +9,7 @@
  * `HttpClient.files.write`. No side effects — same validation errors as
  * the prior writer, but the disk writes themselves move to the caller.
  *
- * Six drops:
+ * Seven drops:
  *
  *   `.canopy/agent.json` — the rendered AgentDefinition envelope. The
  *      harness (claude-code or sapling) reads whichever sections it
