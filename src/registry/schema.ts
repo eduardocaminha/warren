@@ -272,6 +272,52 @@ export function readRuntimeId(agent: AgentDefinition, configOverride?: string): 
 }
 
 /**
+ * Spawn-per-turn runtime ids (warren-61fa / pl-e118 step 2). Runtimes in
+ * this set exit after each agent turn instead of holding a long-lived
+ * process. The conversation message handler branches on this: spawn-per-turn
+ * runtimes get a fresh resume-run per message (--resume <session_id>), while
+ * long-lived runtimes like pi-chat get a steerRun inbox message.
+ */
+const SPAWN_PER_TURN_RUNTIME_IDS: ReadonlySet<string> = new Set(["claude-code-chat"]);
+
+export function isSpawnPerTurnRuntime(runtimeId: string): boolean {
+	return SPAWN_PER_TURN_RUNTIME_IDS.has(runtimeId);
+}
+
+/**
+ * Annotate the agent snapshot with the resolved runtime id (warren-61fa /
+ * pl-e118 step 2). Stored as `_effectiveRuntimeId` at the TOP LEVEL — NOT in
+ * `frontmatter` — so `composeBurrowMetadata`'s `{ frontmatter }` payload to
+ * burrow is unaffected. Called by `spawnRun` before freezing `renderedAgentJson`
+ * when the effective runtime differs from the agent's own `frontmatter.runtime`.
+ */
+export function withEffectiveRuntimeAnnotation(
+	agent: AgentDefinition,
+	effectiveRuntimeId: string,
+): AgentDefinition & { _effectiveRuntimeId: string } {
+	return { ...agent, _effectiveRuntimeId: effectiveRuntimeId };
+}
+
+/**
+ * Read the effective runtime id from a run's frozen `renderedAgentJson`.
+ * Falls back to `frontmatter.runtime` → `DEFAULT_RUNTIME_ID` for rows written
+ * before the `_effectiveRuntimeId` annotation was added (warren-61fa).
+ */
+export function readEffectiveRuntimeId(renderedAgentJson: unknown): string {
+	if (renderedAgentJson !== null && typeof renderedAgentJson === "object") {
+		const j = renderedAgentJson as Record<string, unknown>;
+		const baked = j._effectiveRuntimeId;
+		if (typeof baked === "string" && baked.length > 0) return baked;
+		const fm = j.frontmatter;
+		if (fm !== null && typeof fm === "object") {
+			const r = (fm as Record<string, unknown>).runtime;
+			if (typeof r === "string" && r.length > 0) return r;
+		}
+	}
+	return DEFAULT_RUNTIME_ID;
+}
+
+/**
  * Return a new AgentDefinition with the operator's provider/model overrides
  * folded into `frontmatter` (taking precedence over the agent's own values).
  * Empty / whitespace-only overrides are ignored — they're treated the same
