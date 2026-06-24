@@ -123,21 +123,31 @@ export function accumulatePiUsage(acc: SessionStatsAccumulator, event: UsageEven
 
 /**
  * Extract claude-code's run-level usage from its single terminal `result`
- * envelope (warren-87f9). Shape (see burrow `src/runtime/parsers/jsonl-claude.ts`):
- *   {"type":"result", "subtype":"success", "total_cost_usd": N,
- *    "usage":{ "input_tokens":N, "output_tokens":N,
- *              "cache_read_input_tokens":N, "cache_creation_input_tokens":N }}
- * Single-shot: claude-code emits cumulative totals once at end, so we
- * assign (not add) to the accumulator. Pi's `turn_end` shape is
- * disjoint (different `type` + nested `message.usage.cost.total`), so
- * shape-sniffing here can't collide with `accumulatePiUsage`.
+ * envelope (warren-87f9, warren-8b7c). Two carrier shapes are recognised:
+ *
+ *   - claude-code (batch, jsonl-claude.ts): kind="state_change", stream="system",
+ *     payload.type="result". Shape:
+ *       {"type":"result", "total_cost_usd": N,
+ *        "usage":{ "input_tokens":N, "output_tokens":N,
+ *                  "cache_read_input_tokens":N, "cache_creation_input_tokens":N }}
+ *   - claude-code-chat (spawn-per-turn, jsonl-claude-chat.ts): kind="agent_end",
+ *     stream="system", payload.type="result". The chat parser remaps `result` to
+ *     `agent_end` so the session_id travels in the payload, but the usage fields
+ *     are identical to the batch shape.
+ *
+ * Single-shot in both cases: claude-code emits cumulative totals once at end, so
+ * we assign (not add) to the accumulator. Pi's `turn_end` shape is disjoint
+ * (different `type` + nested `message.usage.cost.total`), so shape-sniffing
+ * here can't collide with `accumulatePiUsage`.
  *
  * Defensive: unknown shapes leave the accumulator untouched. A future
  * claude-code that adds fields can't crash the bridge — worst case we
  * miss this run's cost.
  */
 export function extractClaudeUsage(acc: SessionStatsAccumulator, event: UsageEventInput): void {
-	if (event.kind !== "state_change") return;
+	// Accept both the batch (state_change) and spawn-per-turn (agent_end) carrier.
+	const validKind = event.kind === "state_change" || event.kind === "agent_end";
+	if (!validKind) return;
 	if (event.stream !== "system") return;
 	const payload = event.payload;
 	if (payload === null || typeof payload !== "object") return;

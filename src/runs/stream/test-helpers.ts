@@ -117,6 +117,44 @@ export function piTurnEnd(
 }
 
 /**
+ * Claude-code-chat `agent_end` envelope (warren-8b7c). The jsonl-claude-chat
+ * parser maps the `result` line to kind="agent_end" (NOT state_change) so the
+ * session_id travels in the payload to the next turn's --resume. Carries the
+ * same usage fields as `claudeResult` plus `session_id`.
+ */
+export function claudeAgentEnd(
+	burrowRunId: string,
+	seq: number,
+	usage: {
+		inputTokens: number;
+		outputTokens: number;
+		cacheReadInputTokens?: number;
+		cacheCreationInputTokens?: number;
+		totalCostUsd: number;
+		isError?: boolean;
+		sessionId?: string;
+	},
+): RunEvent {
+	return evt(burrowRunId, seq, {
+		kind: "agent_end",
+		stream: "system",
+		payload: {
+			type: "result",
+			subtype: "success",
+			is_error: usage.isError ?? false,
+			total_cost_usd: usage.totalCostUsd,
+			usage: {
+				input_tokens: usage.inputTokens,
+				output_tokens: usage.outputTokens,
+				cache_read_input_tokens: usage.cacheReadInputTokens ?? 0,
+				cache_creation_input_tokens: usage.cacheCreationInputTokens ?? 0,
+			},
+			session_id: usage.sessionId ?? "sess_abc123",
+		},
+	});
+}
+
+/**
  * Claude-code single-shot `result` envelope (warren-87f9). Burrow's
  * jsonl-claude parser maps it to state_change/system; the bridge
  * sniffs the payload shape to extract cost.

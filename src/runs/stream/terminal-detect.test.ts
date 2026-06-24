@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { RunEvent } from "@os-eco/burrow-cli";
-import { detectRuntimeTerminal, isPiAgentEnd } from "./terminal-detect.ts";
+import { detectRuntimeTerminal, isClaudeAgentEnd, isPiAgentEnd } from "./terminal-detect.ts";
 
 /**
  * warren-6fcc / pl-5516 step 2: focused unit coverage for
@@ -68,7 +68,7 @@ describe("detectRuntimeTerminal — pi agent_end", () => {
 		expect(detectRuntimeTerminal({ ...ev, stream: "stdout" })).toBeNull();
 	});
 
-	test("non-state_change kind is ignored", () => {
+	test("non-state_change, non-agent_end kind is ignored", () => {
 		const ev = envelope({ type: "agent_end", stopReason: "error", errorMessage: "x" });
 		expect(detectRuntimeTerminal({ ...ev, kind: "text" })).toBeNull();
 	});
@@ -92,6 +92,97 @@ describe("detectRuntimeTerminal — claude-code result", () => {
 	test("result without is_error is succeeded", () => {
 		expect(detectRuntimeTerminal(envelope({ type: "result", is_error: false }))).toBe("succeeded");
 		expect(detectRuntimeTerminal(envelope({ type: "result" }))).toBe("succeeded");
+	});
+});
+
+describe("detectRuntimeTerminal — claude-code-chat agent_end (warren-8b7c)", () => {
+	function chatAgentEnd(payload: Record<string, unknown>): RunEvent {
+		return {
+			id: 0,
+			burrowId: "bur_x",
+			runId: "run_x",
+			seq: 1,
+			kind: "agent_end",
+			stream: "system",
+			payload,
+			ts: new Date(2026, 4, 27, 12, 0, 0),
+		};
+	}
+
+	test("agent_end with is_error=false maps to succeeded", () => {
+		expect(
+			detectRuntimeTerminal(
+				chatAgentEnd({ type: "result", subtype: "success", is_error: false, session_id: "s1" }),
+			),
+		).toBe("succeeded");
+	});
+
+	test("agent_end with is_error=true maps to failed", () => {
+		expect(
+			detectRuntimeTerminal(chatAgentEnd({ type: "result", is_error: true, session_id: "s1" })),
+		).toBe("failed");
+	});
+
+	test("agent_end without is_error maps to succeeded", () => {
+		expect(detectRuntimeTerminal(chatAgentEnd({ type: "result", session_id: "s1" }))).toBe(
+			"succeeded",
+		);
+	});
+
+	test("agent_end with payload.type !== result returns null (not the chat shape)", () => {
+		expect(detectRuntimeTerminal(chatAgentEnd({ type: "agent_end" }))).toBeNull();
+		expect(detectRuntimeTerminal(chatAgentEnd({ type: "other" }))).toBeNull();
+	});
+
+	test("agent_end on non-system stream returns null", () => {
+		expect(
+			detectRuntimeTerminal({ ...chatAgentEnd({ type: "result" }), stream: "stdout" }),
+		).toBeNull();
+	});
+
+	test("pi state_change/agent_end path is unchanged", () => {
+		expect(detectRuntimeTerminal(envelope({ type: "agent_end", messages: [] }))).toBe("succeeded");
+		expect(
+			detectRuntimeTerminal(
+				envelope({ type: "agent_end", stopReason: "error", errorMessage: "x" }),
+			),
+		).toBe("failed");
+	});
+});
+
+describe("isClaudeAgentEnd (warren-8b7c)", () => {
+	function chatAgentEnd(overrides: Partial<RunEvent> = {}): RunEvent {
+		return {
+			id: 0,
+			burrowId: "bur_x",
+			runId: "run_x",
+			seq: 1,
+			kind: "agent_end",
+			stream: "system",
+			payload: { type: "result", is_error: false, session_id: "s1" },
+			ts: new Date(2026, 4, 27, 12, 0, 0),
+			...overrides,
+		};
+	}
+
+	test("matches claude-code-chat agent_end on system stream", () => {
+		expect(isClaudeAgentEnd(chatAgentEnd())).toBe(true);
+	});
+
+	test("rejects non-system stream", () => {
+		expect(isClaudeAgentEnd(chatAgentEnd({ stream: "stdout" }))).toBe(false);
+	});
+
+	test("rejects state_change kind (pi's shape)", () => {
+		expect(isClaudeAgentEnd(chatAgentEnd({ kind: "state_change" }))).toBe(false);
+	});
+
+	test("rejects text kind", () => {
+		expect(isClaudeAgentEnd(chatAgentEnd({ kind: "text" }))).toBe(false);
+	});
+
+	test("pi state_change/agent_end envelope does NOT match isClaudeAgentEnd", () => {
+		expect(isClaudeAgentEnd(envelope({ type: "agent_end", messages: [] }))).toBe(false);
 	});
 });
 

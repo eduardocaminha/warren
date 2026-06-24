@@ -37,7 +37,7 @@ import {
 } from "./conversation-turn.ts";
 import { defaultRunStateProbe, runStatePoller } from "./run-state-poller.ts";
 import { persistInStreamUsage, persistPiStatsDelta, snapshotStats } from "./stats.ts";
-import { detectRuntimeTerminal, isPiAgentEnd } from "./terminal-detect.ts";
+import { detectRuntimeTerminal, isClaudeAgentEnd, isPiAgentEnd } from "./terminal-detect.ts";
 import {
 	type BridgeLogger,
 	type BridgeRunStreamInput,
@@ -226,6 +226,21 @@ export async function bridgeRunStream(input: BridgeRunStreamInput): Promise<Brid
 						"conversation run: agent_end treated as turn-end; keeping run alive",
 					);
 					continue;
+				}
+				// warren-8b7c: claude-code-chat (spawn-per-turn). Each turn is its own
+				// run so agent_end is both the turn boundary AND the run terminal. Flush
+				// the turn's accumulated assistant text here; fall through to
+				// detectRuntimeTerminal below so the loop breaks and reap fires.
+				if (isClaudeAgentEnd(event)) {
+					const turnText = conversationTurnText.trim();
+					if (turnText.length > 0) {
+						await input.conversationTurn?.persistAssistantTurn({ runId, text: turnText });
+					}
+					conversationTurnText = "";
+					input.logger?.info?.(
+						{ runId, burrowRunId, seq: event.seq },
+						"conversation run (spawn-per-turn): agent_end turn flushed; falling through to terminal break",
+					);
 				}
 			}
 
