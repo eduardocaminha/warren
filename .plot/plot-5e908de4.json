@@ -1,5 +1,14 @@
 {
-  "attachments": [],
+  "attachments": [
+    {
+      "added_at": "2026-06-24T03:49:13.726Z",
+      "added_by": "user:operator",
+      "id": "att-001",
+      "ref": "pl-b5f1",
+      "role": "tracks",
+      "type": "seeds_issue"
+    }
+  ],
   "created_at": "2026-06-23T13:45:54.826Z",
   "id": "plot-5e908de4",
   "intent": {
@@ -33,5 +42,5 @@
   "name": "PRs de reap não pegam CI/auto-merge",
   "schema_version": 1,
   "status": "drafting",
-  "updated_at": "2026-06-24T03:39:45.515Z"
+  "updated_at": "2026-06-24T03:49:13.726Z"
 }
