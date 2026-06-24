@@ -4,7 +4,15 @@ import { openDatabase, type WarrenDb } from "../../db/client.ts";
 import { createRepos, type Repos } from "../../db/repos/index.ts";
 import { RunEventBroker } from "../events.ts";
 import { bridgeRunStream } from "./bridge.ts";
-import { claudeAgentEnd, evt, makePool, seedBridgeRun, source } from "./test-helpers.ts";
+import {
+	claudeAgentEnd,
+	claudeResult,
+	evt,
+	makePool,
+	piTurnEnd,
+	seedBridgeRun,
+	source,
+} from "./test-helpers.ts";
 
 describe("bridgeRunStream — in-stream terminal detection", () => {
 	let db: WarrenDb;
@@ -187,6 +195,52 @@ describe("bridgeRunStream — in-stream terminal detection", () => {
 			]),
 		});
 		expect(result.terminalDetected).toEqual({ outcome: "failed" });
+	});
+
+	test("warren-b342: piTurnEnd usage persisted when detectRuntimeTerminal fires without prior agent_end", async () => {
+		// Regression for warren-9735: persistInStreamUsage calls in the
+		// detectRuntimeTerminal branch were missing `await`, causing costUsd to
+		// stay null for runs that terminate via a runtime-terminal event that is
+		// NOT preceded by a pi agent_end (e.g. pi turn_end usage accumulates but
+		// termination arrives via a claude-code result envelope).
+		const events = [
+			piTurnEnd(burrowRunId, 1, { input: 100, output: 50, costTotal: 0.005 }),
+			claudeResult(burrowRunId, 2, { inputTokens: 0, outputTokens: 0, totalCostUsd: 0 }),
+		];
+		const result = await bridgeRunStream({
+			runId,
+			burrowRunId,
+			repos,
+			broker,
+			burrowId: "bur_aaaaaaaaaaaa",
+			burrowClientPool: await makePool(repos),
+			source: source(events),
+		});
+		expect(result.terminalDetected).toEqual({ outcome: "succeeded" });
+		const run = await repos.runs.require(runId);
+		expect(run.costUsd).not.toBeNull();
+		expect(run.costUsd).toBeCloseTo(0.005);
+	});
+
+	test("warren-b342: claude-code-only usage persisted on runtime-terminal path (no pi turn_end)", async () => {
+		// The detectRuntimeTerminal branch also handles the claude-only case:
+		// when piUsage.seen is false, persistInStreamUsage falls back to claudeUsage.
+		const events = [
+			claudeResult(burrowRunId, 1, { inputTokens: 10, outputTokens: 5, totalCostUsd: 0.002 }),
+		];
+		const result = await bridgeRunStream({
+			runId,
+			burrowRunId,
+			repos,
+			broker,
+			burrowId: "bur_aaaaaaaaaaaa",
+			burrowClientPool: await makePool(repos),
+			source: source(events),
+		});
+		expect(result.terminalDetected).toEqual({ outcome: "succeeded" });
+		const run = await repos.runs.require(runId);
+		expect(run.costUsd).not.toBeNull();
+		expect(run.costUsd).toBeCloseTo(0.002);
 	});
 
 	test("warren-b1a9: non-404 throw still sets errored=true (reconnect path)", async () => {
