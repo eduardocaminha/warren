@@ -29,9 +29,10 @@
 import { Client, type DispatchSpawnFn, loadAgentConfig } from "@os-eco/burrow-cli";
 import { runServeCommand } from "@os-eco/burrow-cli/src/cli/commands/serve.ts";
 import { parseJsonlClaude } from "@os-eco/burrow-cli/src/runtime/parsers/jsonl-claude.ts";
+import { createJsonlClaudeChatParser } from "@os-eco/burrow-cli/src/runtime/parsers/jsonl-claude-chat.ts";
 import { parsePiEvents } from "@os-eco/burrow-cli/src/runtime/parsers/pi.ts";
 import { piEnvPassthrough } from "@os-eco/burrow-cli/src/runtime/pi.ts";
-import type { AgentRuntime } from "@os-eco/burrow-cli/src/runtime/runtime.ts";
+import type { AgentRuntime, ParseContext } from "@os-eco/burrow-cli/src/runtime/runtime.ts";
 
 interface ParsedArgs {
 	socket?: string;
@@ -214,6 +215,47 @@ function buildClaudeAcceptanceRuntime(): AgentRuntime {
 	};
 }
 
+// Claude-code-chat stub (warren-c985 / pl-e118 step 4). The built-in
+// `claude-code-chat` runtime spawns the real `claude` CLI with `-p` and
+// `--output-format stream-json`, which requires an Anthropic API key.
+// We override it with a stub script that emits the same envelope shape
+// so acceptance scenarios can drive spawn-per-turn conversations without
+// a key. The per-spawn stateful parser is created fresh for each parseEvents
+// call via `createJsonlClaudeChatParser()`.
+const CLAUDE_CHAT_AGENT_CONFIG = {
+	id: "claude-code-chat",
+	displayName: "Claude Code Chat (acceptance stub)",
+	command: "bash",
+	args: ["./tools/claude-code-chat-stub-agent.sh", "{{prompt}}"],
+	promptDelivery: "arg" as const,
+	outputFormat: "raw-text" as const,
+	supportsResume: true,
+	inboxDelivery: "none" as const,
+};
+
+function buildClaudeChatAcceptanceRuntime(): AgentRuntime {
+	const base = loadAgentConfig(CLAUDE_CHAT_AGENT_CONFIG);
+	// Each run gets its own stateful parser closure so session_id never
+	// leaks across turns (matches the production per-spawn contract).
+	const perRunParsers = new Map<string, ReturnType<typeof createJsonlClaudeChatParser>>();
+	return {
+		...base,
+		parseEvents(line: string, ctx: ParseContext) {
+			let parser = perRunParsers.get(ctx.run.id);
+			if (parser === undefined) {
+				parser = createJsonlClaudeChatParser();
+				perRunParsers.set(ctx.run.id, parser);
+			}
+			const events = parser(line);
+			// Clean up parser after the run's agent_end event.
+			for (const ev of events) {
+				if (ev.kind === "agent_end") perRunParsers.delete(ctx.run.id);
+			}
+			return events;
+		},
+	};
+}
+
 async function main(): Promise<number> {
 	const args = parseArgs(process.argv.slice(2));
 
@@ -235,6 +277,9 @@ async function main(): Promise<number> {
 		// acceptance scenarios can dispatch agent='claude-code' without an
 		// Anthropic API key (warren-87f9).
 		client.agents.register(buildClaudeAcceptanceRuntime());
+		// Override claude-code-chat with a stub so spawn-per-turn conversation
+		// scenarios can run without an Anthropic API key (warren-c985).
+		client.agents.register(buildClaudeChatAcceptanceRuntime());
 
 		const serveOpts: Parameters<typeof runServeCommand>[0]["options"] = {};
 		if (args.socket !== undefined) serveOpts.socket = args.socket;
