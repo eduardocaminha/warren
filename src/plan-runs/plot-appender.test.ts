@@ -37,12 +37,14 @@ function makeLogger(captured: CapturedLog[]): Logger {
 function makeAppender(opts: {
 	calls?: AppendPlanRunDispatchedInput[];
 	throws?: Error;
+	activated?: boolean;
 }): PlanRunPlotAppender {
 	const calls = opts.calls ?? [];
 	return {
 		async appendPlanRunDispatched(input) {
 			calls.push(input);
 			if (opts.throws) throw opts.throws;
+			return { activated: opts.activated ?? false };
 		},
 	};
 }
@@ -113,5 +115,40 @@ describe("emitPlanRunDispatchedToPlot", () => {
 		const failure = captured.find((c) => c.msg === "plan_run.plot_append_failed");
 		expect(failure).toBeDefined();
 		expect((failure?.obj as { err?: string }).err).toBe("stringy failure");
+	});
+
+	test("logs plan_run.plot_activated at info when appender returns activated:true (warren-15cc)", async () => {
+		const captured: CapturedLog[] = [];
+		await emitPlanRunDispatchedToPlot({
+			appender: makeAppender({ activated: true }),
+			logger: makeLogger(captured),
+			plotDir: "/tmp/p/.plot",
+			plotId: "plot_z",
+			handle: "bob",
+			planRunId: "plr_3",
+			planId: "pl-z",
+			childrenCount: 2,
+		});
+		const info = captured.find((c) => c.msg === "plan_run.plot_activated");
+		expect(info).toBeDefined();
+		expect(info?.level).toBe("info");
+		const obj = info?.obj as { planRunId?: string; plotId?: string };
+		expect(obj.planRunId).toBe("plr_3");
+		expect(obj.plotId).toBe("plot_z");
+	});
+
+	test("does not log plan_run.plot_activated when appender returns activated:false", async () => {
+		const captured: CapturedLog[] = [];
+		await emitPlanRunDispatchedToPlot({
+			appender: makeAppender({ activated: false }),
+			logger: makeLogger(captured),
+			plotDir: "/tmp/p/.plot",
+			plotId: "plot_z",
+			handle: "bob",
+			planRunId: "plr_4",
+			planId: "pl-z",
+			childrenCount: 1,
+		});
+		expect(captured.filter((c) => c.msg === "plan_run.plot_activated")).toHaveLength(0);
 	});
 });

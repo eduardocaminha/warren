@@ -121,6 +121,7 @@ describe("POST /plot-plan-runs", () => {
 			planRunPlotAppender: {
 				async appendPlanRunDispatched(input) {
 					appendCalls.push(input);
+					return { activated: false };
 				},
 			},
 		});
