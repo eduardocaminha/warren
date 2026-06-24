@@ -1,0 +1,4 @@
+{"type":"plot_created","actor":"user:operator","at":"2026-06-24T00:33:53.155Z","data":{"name":"Teste mcp"}}
+{"type":"run_dispatched","actor":"user:operator","at":"2026-06-24T00:33:54.448Z","data":{"run_id":"run_ttvh3xym2ht4","agent":"leveret","model":"claude-opus-4-8","project":"prj_74w0r1ytsqqc"}}
+{"type":"intent_edited","actor":"user:leveret","at":"2026-06-24T00:34:06.435Z","data":{"field":"goal","value":"Validar o canal MCP do propose_intent, confirmando que a ferramenta entrega corretamente os campos de intent ao Plot via MCP."}}
+{"type":"status_changed","actor":"user:operator","at":"2026-06-24T00:34:46.764Z","data":{"from":"drafting","to":"archived"}}
