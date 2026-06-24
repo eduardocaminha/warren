@@ -27,7 +27,7 @@
  * tear down the scheduler.
  */
 
-import { formatError } from "../core/errors.ts";
+import { formatError, NotFoundError } from "../core/errors.ts";
 import type { Repos } from "../db/repos/index.ts";
 import type { ScheduledSeed } from "../seeds-cli/index.ts";
 import type { CronTrigger, DefaultsConfig } from "../warren-config/index.ts";
@@ -155,6 +155,18 @@ export async function dispatchCronTrigger(input: DispatchCronInput): Promise<Dis
 		// Per pl-2f15 risk #5 we keep dispatch failures per-trigger; surface
 		// the reason for the tick log without touching the row. Next tick
 		// will recompute prev > last and retry.
+		//
+		// Exception: permanent configuration errors (NotFoundError = unknown
+		// agent) stamp lastFiredAt so the scheduler advances past this slot
+		// and doesn't retry every 60s until the cron expression fires again.
+		if (err instanceof NotFoundError) {
+			await input.repos.triggers.upsert({
+				projectId: input.projectId,
+				triggerId: input.trigger.id,
+				lastFiredAt: input.now.toISOString(),
+				nextFireAt: nextFireAt?.toISOString() ?? null,
+			});
+		}
 		return { kind: "error", reason: `spawnRun failed: ${formatError(err)}` };
 	}
 
