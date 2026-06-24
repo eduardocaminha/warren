@@ -13,3 +13,4 @@
 {"type":"status_changed","actor":"user:operator","at":"2026-06-23T23:42:17.622Z","data":{"from":"drafting","to":"ready"}}
 {"type":"status_changed","actor":"user:operator","at":"2026-06-23T23:42:21.184Z","data":{"from":"ready","to":"active"}}
 {"type":"status_changed","actor":"user:operator","at":"2026-06-23T23:42:25.024Z","data":{"from":"active","to":"done"}}
+{"type":"status_changed","actor":"user:operator","at":"2026-06-24T03:00:31.444Z","data":{"from":"done","to":"archived"}}
