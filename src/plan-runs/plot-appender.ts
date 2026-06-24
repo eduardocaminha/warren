@@ -14,6 +14,10 @@
  * `events` is keyed by `run_id`, and at PlanRun creation no child run
  * exists yet. Logger-level surfacing is consistent with the existing
  * `plan_run.cancel_child_failed` posture in handlers/plan-runs.ts.
+ *
+ * Fix warren-15cc: after the append succeeds, if the Plot is currently
+ * `ready`, transition it to `active` so the auto-done hook in
+ * plot-transition.ts can fire when the plan-run completes.
  */
 
 import { UserPlotClient } from "../plot-client/index.ts";
@@ -28,16 +32,24 @@ export interface AppendPlanRunDispatchedInput {
 	readonly childrenCount: number;
 }
 
+export interface AppendPlanRunDispatchedResult {
+	/** Whether the Plot was promoted from `ready` to `active` (warren-15cc). */
+	readonly activated: boolean;
+}
+
 export interface PlanRunPlotAppender {
-	appendPlanRunDispatched(input: AppendPlanRunDispatchedInput): Promise<void>;
+	appendPlanRunDispatched(
+		input: AppendPlanRunDispatchedInput,
+	): Promise<AppendPlanRunDispatchedResult>;
 }
 
 /**
  * Default appender — opens a `UserPlotClient` against the project's `.plot/`,
- * appends `plan_run_dispatched`, and closes. On first-attempt failure
- * (typical case: missing `.plot/.index.db` on the project's first ever
- * PlanRun-to-Plot append), `rebuildIndex` is called best-effort and the
- * append is retried once before the original error propagates.
+ * appends `plan_run_dispatched`, then promotes `ready → active` if the Plot
+ * is currently at `ready` (warren-15cc: ensures the auto-done hook has an
+ * active Plot to act on at plan-run completion). Retries the append once
+ * after `rebuildIndex` on first-attempt failure (typical: missing index on
+ * the project's first PlanRun-to-Plot append).
  */
 export const defaultPlanRunPlotAppender: PlanRunPlotAppender = {
 	async appendPlanRunDispatched(input) {
@@ -67,6 +79,15 @@ export const defaultPlanRunPlotAppender: PlanRunPlotAppender = {
 					throw err;
 				}
 			}
+			// Promote ready → active so the auto-done hook fires on completion
+			// (warren-15cc). Any other status is left untouched — the operator
+			// may have manually advanced the Plot or it may already be active.
+			const snapshot = await plot.read();
+			if (snapshot.status === "ready") {
+				await plot.setStatus("active");
+				return { activated: true };
+			}
+			return { activated: false };
 		} finally {
 			client.close();
 		}
@@ -85,17 +106,18 @@ export interface EmitPlanRunDispatchedInput {
 }
 
 /**
- * Best-effort wrapper: append the `plan_run_dispatched` event and log
- * `plan_run.plot_append_failed` on failure. The POST /plan-runs handler
- * calls this AFTER `repos.planRuns.create` returns, so a Plot-write
- * failure never produces a half-row state — the PlanRun is durably
- * persisted before we touch the Plot.
+ * Best-effort wrapper: append the `plan_run_dispatched` event (and activate
+ * the Plot when it's `ready`) and log `plan_run.plot_append_failed` on
+ * failure. The POST /plan-runs handler calls this AFTER
+ * `repos.planRuns.create` returns, so a Plot-write failure never produces a
+ * half-row state — the PlanRun is durably persisted before we touch the Plot.
  */
 export async function emitPlanRunDispatchedToPlot(
 	input: EmitPlanRunDispatchedInput,
 ): Promise<void> {
+	let result: AppendPlanRunDispatchedResult;
 	try {
-		await input.appender.appendPlanRunDispatched({
+		result = await input.appender.appendPlanRunDispatched({
 			plotDir: input.plotDir,
 			plotId: input.plotId,
 			handle: input.handle,
@@ -111,6 +133,13 @@ export async function emitPlanRunDispatchedToPlot(
 				err: err instanceof Error ? err.message : String(err),
 			},
 			"plan_run.plot_append_failed",
+		);
+		return;
+	}
+	if (result.activated) {
+		input.logger.info(
+			{ planRunId: input.planRunId, plotId: input.plotId },
+			"plan_run.plot_activated",
 		);
 	}
 }

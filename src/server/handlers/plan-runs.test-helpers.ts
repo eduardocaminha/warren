@@ -63,6 +63,7 @@ export function makePlanRunAppender(
 		async appendPlanRunDispatched(input) {
 			calls.push(input);
 			if (opts.throws) throw opts.throws;
+			return { activated: false };
 		},
 	};
 }
