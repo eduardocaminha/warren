@@ -4,7 +4,7 @@ import { openDatabase, type WarrenDb } from "../../db/client.ts";
 import { createRepos, type Repos } from "../../db/repos/index.ts";
 import { RunEventBroker } from "../events.ts";
 import { bridgeRunStream } from "./bridge.ts";
-import { evt, makePool, seedBridgeRun, source } from "./test-helpers.ts";
+import { claudeAgentEnd, evt, makePool, seedBridgeRun, source } from "./test-helpers.ts";
 
 describe("bridgeRunStream — in-stream terminal detection", () => {
 	let db: WarrenDb;
@@ -146,6 +146,49 @@ describe("bridgeRunStream — in-stream terminal detection", () => {
 		expect(result.terminalDetected).toBeUndefined();
 	});
 
+	test("warren-8b7c: claude-code-chat agent_end sets terminalDetected and breaks the loop", async () => {
+		const agentEndEvt = claudeAgentEnd(burrowRunId, 1, {
+			inputTokens: 10,
+			outputTokens: 5,
+			totalCostUsd: 0.001,
+			isError: false,
+			sessionId: "sess_abc",
+		});
+		const trailing = evt(burrowRunId, 2, { kind: "text", payload: { text: "post-terminal" } });
+		const result = await bridgeRunStream({
+			runId,
+			burrowRunId,
+			repos,
+			broker,
+			burrowId: "bur_aaaaaaaaaaaa",
+			burrowClientPool: await makePool(repos),
+			source: source([agentEndEvt, trailing]),
+		});
+		expect(result.terminalDetected).toEqual({ outcome: "succeeded" });
+		const seqs = (await repos.events.listByRun(runId)).map((e) => e.burrowEventSeq);
+		expect(seqs).toEqual([1]);
+	});
+
+	test("warren-8b7c: claude-code-chat agent_end with is_error=true maps to failed", async () => {
+		const result = await bridgeRunStream({
+			runId,
+			burrowRunId,
+			repos,
+			broker,
+			burrowId: "bur_aaaaaaaaaaaa",
+			burrowClientPool: await makePool(repos),
+			source: source([
+				claudeAgentEnd(burrowRunId, 1, {
+					inputTokens: 0,
+					outputTokens: 0,
+					totalCostUsd: 0,
+					isError: true,
+				}),
+			]),
+		});
+		expect(result.terminalDetected).toEqual({ outcome: "failed" });
+	});
+
 	test("warren-b1a9: non-404 throw still sets errored=true (reconnect path)", async () => {
 		const transportSource = (): AsyncIterable<RunEvent> => ({
 			[Symbol.asyncIterator](): AsyncIterator<RunEvent> {
@@ -272,5 +315,121 @@ describe("bridgeRunStream — conversation keep-alive (warren-df71)", () => {
 		});
 		expect(result.terminalDetected).toEqual({ outcome: "succeeded" });
 		expect(stub.assistantTurns).toEqual([]);
+	});
+});
+
+describe("bridgeRunStream — conversation keep-alive spawn-per-turn (warren-8b7c)", () => {
+	let db: WarrenDb;
+	let repos: Repos;
+	let broker: RunEventBroker;
+	let runId: string;
+	let burrowRunId: string;
+
+	beforeEach(async () => {
+		db = await openDatabase({ path: ":memory:" });
+		repos = createRepos(db);
+		const ids = await seedBridgeRun(repos);
+		runId = ids.runId;
+		burrowRunId = ids.burrowRunId;
+		broker = new RunEventBroker();
+	});
+
+	afterEach(async () => {
+		await db.close();
+	});
+
+	function makeStubTurnHandler() {
+		const assistantTurns: { runId: string; text: string }[] = [];
+		return {
+			handler: {
+				async persistAssistantTurn(input: { runId: string; text: string }) {
+					assistantTurns.push(input);
+				},
+				async applyIntentPatch(_input: { runId: string; patch: unknown }) {},
+			},
+			assistantTurns,
+		};
+	}
+
+	test("claude-code-chat agent_end flushes assistant text and sets terminalDetected", async () => {
+		const stub = makeStubTurnHandler();
+		const events: RunEvent[] = [
+			evt(burrowRunId, 1, { kind: "text", stream: "stdout", payload: { text: "Hello " } }),
+			evt(burrowRunId, 2, { kind: "text", stream: "stdout", payload: { text: "world" } }),
+			claudeAgentEnd(burrowRunId, 3, {
+				inputTokens: 10,
+				outputTokens: 5,
+				totalCostUsd: 0.001,
+				sessionId: "sess_abc",
+			}),
+		];
+		const result = await bridgeRunStream({
+			runId,
+			burrowRunId,
+			repos,
+			broker,
+			burrowId: "bur_aaaaaaaaaaaa",
+			burrowClientPool: await makePool(repos),
+			mode: "conversation",
+			conversationTurn: stub.handler,
+			source: source(events),
+		});
+
+		expect(result.terminalDetected).toEqual({ outcome: "succeeded" });
+		// All three events written.
+		const seqs = (await repos.events.listByRun(runId)).map((e) => e.burrowEventSeq);
+		expect(seqs).toEqual([1, 2, 3]);
+		// Assistant text flushed at the agent_end turn boundary.
+		expect(stub.assistantTurns).toEqual([{ runId, text: "Hello world" }]);
+	});
+
+	test("empty turn text is not persisted", async () => {
+		const stub = makeStubTurnHandler();
+		const result = await bridgeRunStream({
+			runId,
+			burrowRunId,
+			repos,
+			broker,
+			burrowId: "bur_aaaaaaaaaaaa",
+			burrowClientPool: await makePool(repos),
+			mode: "conversation",
+			conversationTurn: stub.handler,
+			source: source([
+				claudeAgentEnd(burrowRunId, 1, { inputTokens: 0, outputTokens: 0, totalCostUsd: 0 }),
+			]),
+		});
+		expect(result.terminalDetected).toEqual({ outcome: "succeeded" });
+		expect(stub.assistantTurns).toEqual([]);
+	});
+
+	test("pi conversation path (state_change agent_end) is unchanged: continues, no terminalDetected", async () => {
+		const stub = makeStubTurnHandler();
+		const events: RunEvent[] = [
+			evt(burrowRunId, 1, { kind: "text", stream: "stdout", payload: { text: "pi reply" } }),
+			evt(burrowRunId, 2, {
+				kind: "state_change",
+				stream: "system",
+				payload: { type: "agent_end", messages: [] },
+			}),
+			evt(burrowRunId, 3, { kind: "text", stream: "stdout", payload: { text: "next turn" } }),
+		];
+		const result = await bridgeRunStream({
+			runId,
+			burrowRunId,
+			repos,
+			broker,
+			burrowId: "bur_aaaaaaaaaaaa",
+			burrowClientPool: await makePool(repos),
+			mode: "conversation",
+			conversationTurn: stub.handler,
+			source: source(events),
+		});
+		// Pi path: no terminalDetected (run kept alive).
+		expect(result.terminalDetected).toBeUndefined();
+		// All three events written.
+		const seqs = (await repos.events.listByRun(runId)).map((e) => e.burrowEventSeq);
+		expect(seqs).toEqual([1, 2, 3]);
+		// Pi turn text flushed.
+		expect(stub.assistantTurns).toEqual([{ runId, text: "pi reply" }]);
 	});
 });
