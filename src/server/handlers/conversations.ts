@@ -32,6 +32,7 @@ import { assertRunTransition } from "../../db/repos/runs.ts";
 import type { ConversationRow, ConversationState } from "../../db/schema.ts";
 import { ProjectLacksPlotError } from "../../plan-runs/errors.ts";
 import { defaultPlotCreator, defaultPlotSyncer } from "../../plots/index.ts";
+import { isSpawnPerTurnRuntime, readEffectiveRuntimeId } from "../../registry/schema.ts";
 import { rewakeConversation } from "../../runs/conversation-rewake.ts";
 import { resolveDispatcherHandle, spawnRun, steerRun } from "../../runs/index.ts";
 import { loadWarrenConfig } from "../../warren-config/index.ts";
@@ -205,14 +206,26 @@ export function getConversationHandler(deps: ServerDeps): RouteHandler {
 /**
  * `POST /conversations/:id/messages` — deliver an operator turn.
  *
- * Persists the turn to the transcript, then forwards it over the steering
- * channel to the anchoring run's burrow so the live pi session reads it on
- * its next turn. 202 Accepted: the leveret reply lands asynchronously on the
- * stream (and is persisted by the conversation bridge, warren-ce65).
+ * Persists the turn to the transcript, then delivers it to the anchoring run.
+ * Delivery branches on the anchoring run's runtime (warren-61fa / pl-e118 step 2):
+ *
+ *   - **pi / pi-chat (long-lived)**: forward over the steering channel
+ *     (`steerRun` → burrow inbox) so the live pi session reads it on its
+ *     next turn. Returns `steerMessageId`.
+ *   - **spawn-per-turn (e.g. `claude-code-chat`)**: spawn a fresh
+ *     `mode:conversation` run that resumes the prior anchoring run's claude
+ *     session via `resumeOfRunId`, rotate `anchoring_run_id` to the new run,
+ *     and start the bridge. Returns `resumedRunId`. Token cost is native
+ *     `--resume` (cheap); transcript replay (re-wake) stays only as the
+ *     run-died recovery fallback.
+ *
+ * 202 Accepted: the agent reply lands asynchronously on the stream (and is
+ * persisted by the conversation bridge, warren-ce65 / warren-8b7c).
  *
  * Errors: 400 if the conversation is closed or has no live anchoring run;
- * 404 if the conversation is unknown. A terminal anchoring run surfaces the
- * `steerRun` validation error (re-wake is warren-6ccf, out of scope here).
+ * 404 if the conversation is unknown. A terminal anchoring run on a pi
+ * conversation surfaces the `steerRun` validation error (re-wake is
+ * warren-6ccf). Spawn-per-turn always succeeds as long as the project exists.
  */
 export function postConversationMessageHandler(deps: ServerDeps): RouteHandler {
 	return async (ctx) => {
@@ -243,6 +256,24 @@ export function postConversationMessageHandler(deps: ServerDeps): RouteHandler {
 		});
 		await deps.repos.conversations.touch(id, now);
 
+		// Branch: read the anchoring run's effective runtime to choose the delivery path.
+		const anchoringRun = await deps.repos.runs.require(conversation.anchoringRunId);
+		const runtimeId = readEffectiveRuntimeId(anchoringRun.renderedAgentJson);
+
+		if (isSpawnPerTurnRuntime(runtimeId)) {
+			return spawnPerTurnMessage(deps, {
+				conversationId: id,
+				conversation,
+				anchoringRun,
+				runtimeId,
+				message,
+				fromActor,
+				persisted,
+				now,
+			});
+		}
+
+		// Pi / pi-chat path (long-lived session): steer the running process.
 		const result = await steerRun({
 			runId: conversation.anchoringRunId,
 			body: message,
@@ -259,6 +290,82 @@ export function postConversationMessageHandler(deps: ServerDeps): RouteHandler {
 			steerMessageId: result.message.id,
 		});
 	};
+}
+
+/**
+ * Deliver an operator turn on a spawn-per-turn conversation (e.g. claude-code-chat).
+ *
+ * Spawns a fresh `mode:conversation` run that resumes the prior anchoring
+ * run's claude session via `resumeOfRunId`, starts the bridge, and rotates
+ * `anchoring_run_id` to the new run. The rotation happens AFTER the bridge
+ * starts so the bridge is tracking the right run before the anchor pointer
+ * moves.
+ */
+async function spawnPerTurnMessage(
+	deps: ServerDeps,
+	input: {
+		conversationId: string;
+		conversation: ConversationRow;
+		anchoringRun: import("../../db/schema.ts").RunRow;
+		runtimeId: string;
+		message: string;
+		fromActor: string | undefined;
+		persisted: { id: string; seq: number; role: string };
+		now: Date;
+	},
+): Promise<Response> {
+	const {
+		conversationId,
+		conversation,
+		anchoringRun,
+		runtimeId,
+		message,
+		fromActor,
+		persisted,
+		now,
+	} = input;
+	if (conversation.projectId === null) {
+		throw new ValidationError(
+			`conversation ${conversationId} has no project (project was deleted); cannot spawn resume-run`,
+		);
+	}
+
+	const spawnResult = await spawnRun({
+		repos: deps.repos,
+		burrowClientPool: deps.burrowClientPool,
+		agentName: anchoringRun.agentName,
+		projectId: conversation.projectId,
+		prompt: message,
+		mode: "conversation",
+		trigger: "conversation",
+		...(anchoringRun.plotId !== null && anchoringRun.plotId !== ""
+			? { plotId: anchoringRun.plotId }
+			: {}),
+		resumeOfRunId: anchoringRun.id,
+		runtimeOverride: runtimeId,
+		projectsConfig: deps.projectsConfig,
+		projectSpawn: deps.spawn ?? defaultSpawn,
+		warrenConfigs: deps.warrenConfigs,
+		runBranchPrefixDefault: deps.runBranchPrefixDefault,
+		seedsCli: deps.seedsCli,
+		...(fromActor !== undefined ? { dispatcherHandle: fromActor } : {}),
+		...(deps.now !== undefined ? { now: deps.now } : {}),
+	});
+
+	deps.bridges.start(
+		spawnResult.run.id,
+		spawnResult.burrowRun.id,
+		spawnResult.burrow.id,
+		"conversation",
+	);
+
+	await deps.repos.conversations.rotateAnchor(conversationId, spawnResult.run.id, now);
+
+	return jsonResponse(202, {
+		conversationId,
+		message: { id: persisted.id, seq: persisted.seq, role: persisted.role },
+		resumedRunId: spawnResult.run.id,
+	});
 }
 
 /**

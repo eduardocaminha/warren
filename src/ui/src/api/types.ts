@@ -1192,11 +1192,20 @@ export interface GetConversationResponse {
 	messages: MessageRow[];
 }
 
-/** `POST /conversations/:id/messages` — 202 Accepted envelope. */
+/**
+ * `POST /conversations/:id/messages` — 202 Accepted envelope.
+ *
+ * Long-lived (pi/pi-chat) runtimes return `steerMessageId` (inbox message).
+ * Spawn-per-turn runtimes (e.g. claude-code-chat) return `resumedRunId`
+ * (the newly spawned resume-run).
+ */
 export interface PostConversationMessageResponse {
 	conversationId: string;
 	message: { id: string; seq: number; role: MessageRole };
-	steerMessageId: string;
+	/** Set for long-lived pi/pi-chat runtimes. */
+	steerMessageId?: string;
+	/** Set for spawn-per-turn runtimes (e.g. claude-code-chat). */
+	resumedRunId?: string;
 }
 
 export interface CreateConversationInput {

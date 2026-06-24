@@ -175,6 +175,10 @@ export async function spawnRun(input: SpawnRunInput): Promise<SpawnRunResult> {
 		input.maxCostUsdOverride,
 	);
 
+	const runtimeOverride =
+		input.runtimeOverride ?? interactiveRuntimeOverride(agent.name, projectDefaults);
+	const agentForRun = { ...agent, _effectiveRuntimeId: readRuntimeId(agent, runtimeOverride) };
+
 	// Build the seed payload BEFORE creating the warren row so a malformed
 	// expertise_seed / pi_skills / pi_prompts section surfaces as a clean
 	// `RunSpawnError` with no half-spawned row to garbage-collect. Anything
@@ -194,7 +198,7 @@ export async function spawnRun(input: SpawnRunInput): Promise<SpawnRunResult> {
 		agentName: agent.name,
 		projectId: projectAfterRefresh.id,
 		prompt: input.prompt,
-		renderedAgentJson: agent,
+		renderedAgentJson: agentForRun,
 		trigger: input.trigger ?? "manual",
 		workerId: placement.workerName,
 		...(input.seedId !== undefined ? { seedId: input.seedId } : {}),
@@ -233,10 +237,6 @@ export async function spawnRun(input: SpawnRunInput): Promise<SpawnRunResult> {
 		projectDefaults?.qualityGate,
 		input.serverEnv,
 	);
-
-	// warren-b802: resolve per-project runtime override; warren-fe84 per-run override wins.
-	const runtimeOverride =
-		input.runtimeOverride ?? interactiveRuntimeOverride(agent.name, projectDefaults);
 
 	const log = bindRunLogger(input.logger, run.id);
 	let burrow: Burrow | null = null;
