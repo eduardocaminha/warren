@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { NotFoundError } from "../core/errors.ts";
 import { openDatabase, type WarrenDb } from "../db/client.ts";
 import { createRepos, type Repos } from "../db/repos/index.ts";
 import { agents } from "../db/schema.ts";
@@ -263,6 +264,33 @@ describe("dispatchCronTrigger", () => {
 
 		const row = await repos.triggers.require({ projectId, triggerId: TRIGGER_ID });
 		expect(row.lastFiredAt).toBe("2026-05-10T12:00:00.000Z");
+		expect(row.lastRunId).toBeNull();
+	});
+
+	test("NotFoundError stamps lastFiredAt to prevent retry storm", async () => {
+		await repos.triggers.upsert({
+			projectId,
+			triggerId: TRIGGER_ID,
+			lastFiredAt: "2026-05-10T12:00:00.000Z",
+		});
+		const now = new Date("2026-05-11T00:05:00.000Z");
+		const result = await dispatchCronTrigger({
+			projectId,
+			trigger: cronTrigger({ role: "cam-nightwatch" }),
+			now,
+			repos,
+			spawn: async () => {
+				throw new NotFoundError("agent not found: cam-nightwatch");
+			},
+		});
+		expect(result.kind).toBe("error");
+		if (result.kind !== "error") return;
+		expect(result.reason).toContain("agent not found: cam-nightwatch");
+
+		// The row must be advanced so the next 60s tick sees prev <= lastFiredAt
+		// and skips cleanly — not a retry storm on a permanent config error.
+		const row = await repos.triggers.require({ projectId, triggerId: TRIGGER_ID });
+		expect(row.lastFiredAt).toBe(now.toISOString());
 		expect(row.lastRunId).toBeNull();
 	});
 
