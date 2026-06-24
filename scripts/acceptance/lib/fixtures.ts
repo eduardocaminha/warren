@@ -211,6 +211,18 @@ async function buildSampleProject(repoPath: string): Promise<void> {
 	const targetClaudeScript = join(repoPath, "tools", "claude-code-stub-agent.sh");
 	await copyFile(harnessClaudeScript, targetClaudeScript);
 
+	// Claude-code-chat stub agent (warren-c985 / pl-e118 step 4) — emits
+	// jsonl-claude-chat format with `type=result` (→ agent_end) so the
+	// bridge flushes assistant text and detects terminal. Registered as
+	// the `claude-code-chat` runtime in burrow-with-stub.ts with the
+	// stateful `createJsonlClaudeChatParser`.
+	const harnessClaudeChatScript = new URL(
+		"./stub-agent/claude-code-chat-agent.sh",
+		import.meta.url,
+	);
+	const targetClaudeChatScript = join(repoPath, "tools", "claude-code-chat-stub-agent.sh");
+	await copyFile(harnessClaudeChatScript, targetClaudeChatScript);
+
 	// Seed the project's .seeds/issues.jsonl with one open seed the stub
 	// agent will close — gives reap's seeds-close-mirror sub-step
 	// something to mirror.
@@ -237,6 +249,7 @@ async function buildSampleProject(repoPath: string): Promise<void> {
 	await runIn(repoPath, ["chmod", "+x", "tools/stub-agent.sh"], env);
 	await runIn(repoPath, ["chmod", "+x", "tools/pi-stub-agent.sh"], env);
 	await runIn(repoPath, ["chmod", "+x", "tools/claude-code-stub-agent.sh"], env);
+	await runIn(repoPath, ["chmod", "+x", "tools/claude-code-chat-stub-agent.sh"], env);
 	await runIn(repoPath, ["git", "add", "."], env);
 	await runIn(repoPath, ["git", "commit", "-m", "init: sample project fixture"], env);
 }
