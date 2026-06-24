@@ -267,6 +267,8 @@ export async function spawnRun(input: SpawnRunInput): Promise<SpawnRunResult> {
 		// warren-ebca / warren-16f8: dispatch onto the burrow runtime id
 		// (`readRuntimeId`: frontmatter.runtime pin, else the pi default),
 		// not the canopy agent name.
+		// warren-c7a7 / pl-e118 step 1: resolve prior burrow run id for resume.
+		const priorBurrowRunId = await resolvePriorBurrowRunId(input);
 		const dispatchStart = Date.now();
 		const burrowRun = await dispatchRun(
 			placement.client,
@@ -274,6 +276,7 @@ export async function spawnRun(input: SpawnRunInput): Promise<SpawnRunResult> {
 			readRuntimeId(agent, runtimeOverride),
 			composeDispatchPrompt(agent.sections.system, input.prompt),
 			composeBurrowMetadata(input.metadata, agent.frontmatter),
+			priorBurrowRunId,
 		);
 		const updated = await input.repos.runs.attachBurrow(run.id, { burrowRunId: burrowRun.id });
 		logDispatched(log, burrow.id, burrowRun.id, dispatchStart);
@@ -447,6 +450,7 @@ async function dispatchRun(
 	agentId: string,
 	prompt: string,
 	metadata: unknown,
+	resumeOfRunId?: string,
 ): Promise<BurrowRun> {
 	return withTransportMapping(client.config, () =>
 		client.http.runs.create({
@@ -454,8 +458,28 @@ async function dispatchRun(
 			agentId,
 			prompt,
 			...(metadata !== undefined ? { metadata } : {}),
+			...(resumeOfRunId !== undefined ? { resumeOfRunId } : {}),
 		}),
 	);
+}
+
+/**
+ * Resolve the burrow run ID of the prior run so burrow's dispatcher can
+ * activate `buildResumeCommand` (warren-c7a7 / pl-e118 step 1).
+ *
+ * Input is a warren run ID (`input.resumeOfRunId`). Output is the
+ * corresponding burrow run ID, which is what burrow's `resumeOfRunId`
+ * column stores. Returns `undefined` when:
+ *   - no `resumeOfRunId` was requested
+ *   - the prior run row is missing
+ *   - the prior run was never dispatched to burrow (`burrowRunId` is null)
+ * All three cases fall back to a fresh spawn — burrow's own eligibility
+ * checks cover any remaining edge cases on its side.
+ */
+async function resolvePriorBurrowRunId(input: SpawnRunInput): Promise<string | undefined> {
+	if (input.resumeOfRunId === undefined || input.resumeOfRunId === "") return undefined;
+	const priorRun = await input.repos.runs.get(input.resumeOfRunId);
+	return priorRun?.burrowRunId ?? undefined;
 }
 
 /**

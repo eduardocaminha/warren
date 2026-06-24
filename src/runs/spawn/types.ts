@@ -216,6 +216,18 @@ export interface SpawnRunInput {
 	 */
 	readonly seedsCli?: SeedsCliDeps;
 	/**
+	 * Warren run ID of the prior run to resume (warren-c7a7 / pl-e118 step 1).
+	 * When set, spawnRun resolves the prior run's `burrowRunId` and forwards it
+	 * to burrow's `POST /burrows/:id/runs` as `resumeOfRunId` so burrow's
+	 * dispatcher uses `buildResumeCommand` (native `--resume <session_id>`)
+	 * instead of a fresh `buildSpawnCommand`. Only effective when the prior run
+	 * was actually dispatched to burrow and the runtime implements
+	 * `buildResumeCommand` (e.g. `claude-code-chat`). When the prior run has no
+	 * `burrowRunId` (never reached dispatch), the field is silently dropped and
+	 * the new run spawns fresh — matching burrow's own eligibility-check fallback.
+	 */
+	readonly resumeOfRunId?: string;
+	/**
 	 * Handle of the user dispatching the run (warren-e848 / pl-2047 step 5).
 	 * Used as the actor for the `run_dispatched` event appended to the
 	 * originating Plot — Plot's SPEC §6 ACL allows both `user:*` and
