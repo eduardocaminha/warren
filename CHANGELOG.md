@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.6] — 2026-06-24
+
+### Fixed
+
+- **`fix(triggers)`** — cron triggers that fail with a permanent
+  `NotFoundError` (agent not found in registry) now stamp `lastFiredAt` to
+  `now` before returning, so the scheduler does not retry the trigger on the
+  very next tick and produce an unbounded dispatch storm (warren-c36a /
+  warren-6bc2).
+
 ## [0.9.5] — 2026-06-22
 
 ### Added
