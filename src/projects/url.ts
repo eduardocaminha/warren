@@ -76,7 +76,7 @@ function extractOwnerName(url: string): { owner: string; name: string } | undefi
 	return { owner: parts[0] as string, name: parts.slice(1).join("/") };
 }
 
-function stripGitSuffix(segment: string): string {
+export function stripGitSuffix(segment: string): string {
 	return segment.endsWith(".git") ? segment.slice(0, -4) : segment;
 }
 
