@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.7] — 2026-06-25
+
+### Changed
+
+- **`refactor(seeds-cli)`** — consolidated duplicated `truncate` helper and
+  `DEFAULT_SD_TIMEOUT_MS` constant into a new `src/seeds-cli/util.ts` module;
+  `extensions.ts`, `list.ts`, and `show.ts` now import from the shared
+  location (PR #111 / warren-b6b3).
+- **`refactor(projects)`** — `stripGitSuffix` is now exported from
+  `src/projects/url.ts` and removed from `src/projects/resolve-target.ts`,
+  eliminating a second copy of the same function (PR #112 / warren-eed9).
+- **`refactor(preview)`** — `helpers.ts` in `preview/launch/` renames the
+  existing truncate helper to `tailTruncate` and adds a symmetric
+  `headTruncate`; callers in `orchestrate.ts` and `setup.ts` updated
+  accordingly (PR #113 / warren-63a3).
+
 ## [0.9.6] — 2026-06-24
 
 ### Fixed
