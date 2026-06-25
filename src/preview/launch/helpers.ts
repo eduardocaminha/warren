@@ -40,7 +40,7 @@ export async function captureFailureTail(
 			tailBytes: PREVIEW_FAILURE_TAIL_BYTES,
 		});
 		const tail = logs.stderr.trim() !== "" ? logs.stderr : logs.stdout;
-		return truncate(tail, PREVIEW_FAILURE_TAIL_BYTES);
+		return tailTruncate(tail, PREVIEW_FAILURE_TAIL_BYTES);
 	} catch {
 		return "";
 	}
@@ -63,9 +63,14 @@ export function composeFailureMessage(headline: string, tail: string): string {
 	return `${headline}\n\n${tail}`;
 }
 
-export function truncate(input: string, max: number): string {
+export function tailTruncate(input: string, max: number): string {
 	if (input.length <= max) return input;
-	return `${input.slice(input.length - max)}`;
+	return input.slice(input.length - max);
+}
+
+export function headTruncate(input: string, max: number): string {
+	if (input.length <= max) return input;
+	return `${input.slice(0, max)}…`;
 }
 
 export function defaultSleep(ms: number): Promise<void> {

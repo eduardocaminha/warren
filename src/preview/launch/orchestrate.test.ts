@@ -201,6 +201,30 @@ describe("launchPreview", () => {
 		expect(row.previewFailureMessage).toContain("sandbox spawn refused");
 	});
 
+	test("truncates long sidecar create error from the head, not the tail", async () => {
+		const prefix = "IMPORTANT_START ";
+		const suffix = "_SHOULD_NOT_APPEAR";
+		const longMessage = prefix + "x".repeat(5000) + suffix;
+		const sidecars = fakeSidecars();
+		sidecars.createImpl = async () => {
+			throw new Error(longMessage);
+		};
+		await launchPreview({
+			runId,
+			burrowId,
+			previewConfig: PREVIEW_CONFIG,
+			repos,
+			allocator,
+			sidecars: sidecars.client,
+			fetch: (async () => new Response("never", { status: 200 })) as unknown as typeof fetch,
+			sleep: async () => {},
+		});
+		const row = await repos.runs.require(runId);
+		expect(row.previewFailureMessage).toContain("IMPORTANT_START");
+		expect(row.previewFailureMessage).toEndWith("…");
+		expect(row.previewFailureMessage).not.toContain("_SHOULD_NOT_APPEAR");
+	});
+
 	test("returns readiness_timeout, captures stderr tail, deletes the sidecar", async () => {
 		const sidecars = fakeSidecars({ stdout: "compiling…\n", stderr: "TypeError: cannot read X\n" });
 		// Step the clock so we can fire the timeout deterministically.
