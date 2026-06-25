@@ -19,8 +19,7 @@ import { formatError } from "../core/errors.ts";
 import { SeedsCliError } from "./errors.ts";
 import type { SeedsCliDeps } from "./extensions.ts";
 import { SeedsListEnvelopeSchema } from "./schema.ts";
-
-const DEFAULT_SD_TIMEOUT_MS = 30_000;
+import { DEFAULT_SD_TIMEOUT_MS, truncateSdOutput } from "./util.ts";
 
 /**
  * Resolve a `seedId → status` map for every issue in a project via
@@ -37,7 +36,7 @@ export async function listSeedStatuses(
 	});
 	if (result.exitCode !== 0) {
 		throw new SeedsCliError(
-			`sd list exited ${result.exitCode}: ${truncate(result.stderr || result.stdout)}`,
+			`sd list exited ${result.exitCode}: ${truncateSdOutput(result.stderr || result.stdout)}`,
 			{
 				recoveryHint: `run \`${deps.sdBinary} doctor\` in ${projectPath} to diagnose`,
 			},
@@ -67,10 +66,4 @@ export async function listSeedStatuses(
 		statuses.set(row.id, row.status);
 	}
 	return statuses;
-}
-
-function truncate(raw: string, limit = 500): string {
-	const trimmed = raw.trim();
-	if (trimmed.length <= limit) return trimmed;
-	return `${trimmed.slice(0, limit)}… [truncated]`;
 }

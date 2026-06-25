@@ -30,8 +30,7 @@ import {
 	SeedShowEnvelopeSchema,
 	type SeedShowIssue,
 } from "./schema.ts";
-
-const DEFAULT_SD_TIMEOUT_MS = 30_000;
+import { DEFAULT_SD_TIMEOUT_MS, truncateSdOutput } from "./util.ts";
 
 export type PlanShowResult = PlanShowPlan;
 export type SeedShowResult = SeedShowIssue;
@@ -53,7 +52,7 @@ export async function listPlans(
 	});
 	if (result.exitCode !== 0) {
 		throw new SeedsCliError(
-			`sd plan list exited ${result.exitCode}: ${truncate(result.stderr || result.stdout)}`,
+			`sd plan list exited ${result.exitCode}: ${truncateSdOutput(result.stderr || result.stdout)}`,
 			{ recoveryHint: `run \`${deps.sdBinary} plan list\` in ${projectPath} to diagnose` },
 		);
 	}
@@ -99,7 +98,7 @@ export async function showPlan(
 		timeoutMs: deps.timeoutMs ?? DEFAULT_SD_TIMEOUT_MS,
 	});
 	if (result.exitCode !== 0) {
-		const detail = truncate(result.stderr || result.stdout);
+		const detail = truncateSdOutput(result.stderr || result.stdout);
 		const message = `sd plan show ${planId} exited ${result.exitCode}: ${detail}`;
 		const recoveryHint = `run \`${deps.sdBinary} plan show ${planId}\` in ${projectPath} to diagnose`;
 		if (isNotFoundMessage(detail)) {
@@ -140,7 +139,7 @@ export async function showSeed(
 		timeoutMs: deps.timeoutMs ?? DEFAULT_SD_TIMEOUT_MS,
 	});
 	if (result.exitCode !== 0) {
-		const detail = truncate(result.stderr || result.stdout);
+		const detail = truncateSdOutput(result.stderr || result.stdout);
 		const message = `sd show ${seedId} exited ${result.exitCode}: ${detail}`;
 		const recoveryHint = `run \`${deps.sdBinary} show ${seedId}\` in ${projectPath} to diagnose`;
 		if (isNotFoundMessage(detail)) {
@@ -178,10 +177,4 @@ export async function showSeed(
  */
 function isNotFoundMessage(detail: string): boolean {
 	return /not found|no such/i.test(detail);
-}
-
-function truncate(raw: string, limit = 500): string {
-	const trimmed = raw.trim();
-	if (trimmed.length <= limit) return trimmed;
-	return `${trimmed.slice(0, limit)}… [truncated]`;
 }

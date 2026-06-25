@@ -32,9 +32,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { formatError } from "../core/errors.ts";
 import type { SeedsCliDeps } from "../seeds-cli/index.ts";
+import { DEFAULT_SD_TIMEOUT_MS, truncateSdOutput } from "../seeds-cli/util.ts";
 import { SdPlanSynthesisError } from "./errors.ts";
-
-const DEFAULT_SD_TIMEOUT_MS = 30_000;
 
 export interface SynthesizePlanInput {
 	/** Project clone root — `sd` resolves `.seeds/` relative to cwd. */
@@ -149,7 +148,7 @@ async function createParentSeed(
 	);
 	if (result.exitCode !== 0) {
 		throw new SdPlanSynthesisError(
-			`sd create (synthesis parent for plot ${plotId}) exited ${result.exitCode}: ${truncate(result.stderr || result.stdout)}`,
+			`sd create (synthesis parent for plot ${plotId}) exited ${result.exitCode}: ${truncateSdOutput(result.stderr || result.stdout)}`,
 		);
 	}
 	let parsed: unknown;
@@ -163,13 +162,13 @@ async function createParentSeed(
 	}
 	if (parsed === null || typeof parsed !== "object") {
 		throw new SdPlanSynthesisError(
-			`sd create (synthesis parent for plot ${plotId}) returned a non-object payload: ${truncate(JSON.stringify(parsed))}`,
+			`sd create (synthesis parent for plot ${plotId}) returned a non-object payload: ${truncateSdOutput(JSON.stringify(parsed))}`,
 		);
 	}
 	const id = (parsed as { id?: unknown }).id;
 	if (typeof id !== "string" || id.length === 0) {
 		throw new SdPlanSynthesisError(
-			`sd create (synthesis parent for plot ${plotId}) response missing string 'id': ${truncate(JSON.stringify(parsed))}`,
+			`sd create (synthesis parent for plot ${plotId}) response missing string 'id': ${truncateSdOutput(JSON.stringify(parsed))}`,
 		);
 	}
 	return id;
@@ -195,7 +194,7 @@ async function submitSynthesizedPlan(input: {
 		);
 		if (result.exitCode !== 0) {
 			throw new SdPlanSynthesisError(
-				`sd plan submit ${parentSeedId} exited ${result.exitCode}: ${truncate(result.stderr || result.stdout)}`,
+				`sd plan submit ${parentSeedId} exited ${result.exitCode}: ${truncateSdOutput(result.stderr || result.stdout)}`,
 			);
 		}
 		let parsed: unknown;
@@ -209,23 +208,17 @@ async function submitSynthesizedPlan(input: {
 		}
 		if (parsed === null || typeof parsed !== "object") {
 			throw new SdPlanSynthesisError(
-				`sd plan submit ${parentSeedId} returned a non-object payload: ${truncate(JSON.stringify(parsed))}`,
+				`sd plan submit ${parentSeedId} returned a non-object payload: ${truncateSdOutput(JSON.stringify(parsed))}`,
 			);
 		}
 		const planId = (parsed as { plan_id?: unknown }).plan_id;
 		if (typeof planId !== "string" || planId.length === 0) {
 			throw new SdPlanSynthesisError(
-				`sd plan submit ${parentSeedId} response missing string 'plan_id': ${truncate(JSON.stringify(parsed))}`,
+				`sd plan submit ${parentSeedId} response missing string 'plan_id': ${truncateSdOutput(JSON.stringify(parsed))}`,
 			);
 		}
 		return planId;
 	} finally {
 		await rm(dir, { recursive: true, force: true }).catch(() => undefined);
 	}
-}
-
-function truncate(raw: string, limit = 500): string {
-	const trimmed = raw.trim();
-	if (trimmed.length <= limit) return trimmed;
-	return `${trimmed.slice(0, limit)}… [truncated]`;
 }
