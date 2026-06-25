@@ -29,6 +29,7 @@ import {
 	parseScheduledSeeds,
 	SeedsListEnvelopeSchema,
 } from "./schema.ts";
+import { DEFAULT_SD_TIMEOUT_MS, truncateSdOutput } from "./util.ts";
 import { type WarrenExtensions, WarrenExtensionsSchema } from "./warren-extensions.ts";
 
 export interface SeedsCliDeps {
@@ -36,8 +37,6 @@ export interface SeedsCliDeps {
 	readonly spawn: SpawnFn;
 	readonly timeoutMs?: number;
 }
-
-const DEFAULT_SD_TIMEOUT_MS = 30_000;
 
 /**
  * Resolve the scheduled-for seeds for a single project. The caller (the
@@ -54,7 +53,7 @@ export async function listScheduledSeeds(
 	});
 	if (result.exitCode !== 0) {
 		throw new SeedsCliError(
-			`sd list exited ${result.exitCode}: ${truncate(result.stderr || result.stdout)}`,
+			`sd list exited ${result.exitCode}: ${truncateSdOutput(result.stderr || result.stdout)}`,
 			{
 				recoveryHint: `run \`${deps.sdBinary} doctor\` in ${projectPath} to diagnose`,
 			},
@@ -99,7 +98,7 @@ export async function closeSeed(
 	});
 	if (result.exitCode !== 0) {
 		throw new SeedsCliError(
-			`sd close ${seedId} exited ${result.exitCode}: ${truncate(result.stderr || result.stdout)}`,
+			`sd close ${seedId} exited ${result.exitCode}: ${truncateSdOutput(result.stderr || result.stdout)}`,
 		);
 	}
 }
@@ -156,13 +155,7 @@ export async function updateExtensions(
 	});
 	if (result.exitCode !== 0) {
 		throw new SeedsCliError(
-			`sd update ${seedId} exited ${result.exitCode}: ${truncate(result.stderr || result.stdout)}`,
+			`sd update ${seedId} exited ${result.exitCode}: ${truncateSdOutput(result.stderr || result.stdout)}`,
 		);
 	}
-}
-
-function truncate(raw: string, limit = 500): string {
-	const trimmed = raw.trim();
-	if (trimmed.length <= limit) return trimmed;
-	return `${trimmed.slice(0, limit)}… [truncated]`;
 }
