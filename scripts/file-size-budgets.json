@@ -5,7 +5,6 @@
 		"src/server/handlers/conversations.ts": 600,
 		"scripts/acceptance/scenarios/20-preview-path.ts": 560,
 		"scripts/acceptance/scenarios/25-plot-roundtrip.ts": 556,
-		"scripts/acceptance/scenarios/26-plan-run-roundtrip.ts": 563,
 		"scripts/acceptance/scenarios/28-plot-list-and-create.ts": 559,
 		"src/client/client.ts": 569,
 		"src/runs/spawn/dispatch.ts": 522,
