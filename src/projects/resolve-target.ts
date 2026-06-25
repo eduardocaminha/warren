@@ -20,7 +20,7 @@
 
 import type { ProjectsRepo } from "../db/repos/projects.ts";
 import { TargetProjectUnresolvedError } from "./errors.ts";
-import { parseGitHubUrl } from "./url.ts";
+import { parseGitHubUrl, stripGitSuffix } from "./url.ts";
 
 /** Minimal repos surface this resolver needs — just the projects list. */
 export interface ResolveTargetRepos {
@@ -32,10 +32,6 @@ interface NormalizedRef {
 	readonly slug: string | undefined;
 	/** Bare repo name, lowercased — always present. */
 	readonly name: string;
-}
-
-function stripGitSuffix(value: string): string {
-	return value.endsWith(".git") ? value.slice(0, -4) : value;
 }
 
 /**
