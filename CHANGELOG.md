@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.8] — 2026-06-28
+
+### Fixed
+
+- **`fix(register-agent)`** — error JSON for `skipped` and `agent_not_found` cases is
+  now written to stdout instead of stderr, so callers parsing structured output no longer
+  miss those paths; plain-text fatal errors remain on stderr (PR #126 / warren-1ba7).
+- **`fix(plan-run)`** — `DispatchAutoPlanRunsInput.planRuns.create` is now typed with
+  `CreatePlanRunInput` from the repo layer, removing the `as unknown as` cast in
+  `pipeline.ts`; compile-time fix only, no runtime behaviour change
+  (PR #125 / warren-34c5).
+- **`fix(tests)`** — added `serverEnv: {}` guard to the first `plotId` injection test
+  case in `plot-append.test.ts`, preventing ambient `WARREN_API_*` env vars from leaking
+  into test env assertions (PR #121).
+
+### Changed
+
+- **`refactor(server)`** — removed stale `eslint-disable no-console` comment from
+  `src/server/main/index.ts`; the project uses Biome, not ESLint, so the suppression
+  was a no-op leftover (PR #124 / warren-9418).
+- **`refactor(runs)`** — decomposed `src/runs/pr.test.ts` below the 500-line budget by
+  extracting shared `recordingFetch`/`jsonResponse` helpers into `pr.test-helpers.ts`
+  and splitting PR-merge/URL-parse describe blocks into `pr-checks.test.ts`;
+  grandfathered budget entry removed (PR #120).
+
+### Added
+
+- **`test(plan-run)`** — focused unit-test suite for `parsePlanIds` and
+  `parsePlanChildren` in `auto-plan-run.ts`, covering empty/whitespace input, malformed
+  JSON lines, missing/wrong-type id fields, multi-plan bodies, and type coercion in the
+  children array (PR #127 / warren-f37f).
+
 ## [0.9.7] — 2026-06-25
 
 ### Changed
