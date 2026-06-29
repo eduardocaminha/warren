@@ -142,6 +142,13 @@ export interface RunRow {
 	 */
 	prUrl: string | null;
 	/**
+	 * Branch override for this run (warren-05ea). When non-null, burrow pushes
+	 * to this branch instead of the composed `${prefix}/run_xxx` name. Used by
+	 * CI-fixer runs that must push to the existing PR branch so the PR's CI
+	 * re-runs. Null for ordinary runs.
+	 */
+	targetBranch: string | null;
+	/**
 	 * Per-run cost in USD (warren-a7dc). Currently populated only for runs
 	 * dispatched against the `pi` runtime — the bridge snapshots
 	 * `get_session_stats` at run-start + run-end and persists the delta.
