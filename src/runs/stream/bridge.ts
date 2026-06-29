@@ -37,7 +37,12 @@ import {
 } from "./conversation-turn.ts";
 import { defaultRunStateProbe, runStatePoller } from "./run-state-poller.ts";
 import { persistInStreamUsage, persistPiStatsDelta, snapshotStats } from "./stats.ts";
-import { detectRuntimeTerminal, isClaudeAgentEnd, isPiAgentEnd } from "./terminal-detect.ts";
+import {
+	detectRateLimitTerminal,
+	detectRuntimeTerminal,
+	isClaudeAgentEnd,
+	isPiAgentEnd,
+} from "./terminal-detect.ts";
 import {
 	type BridgeLogger,
 	type BridgeRunStreamInput,
@@ -111,7 +116,9 @@ export async function bridgeRunStream(input: BridgeRunStreamInput): Promise<Brid
 	let skipped = 0;
 	let errored = false;
 	let claimed = false;
-	let terminalDetected: { outcome: RunTerminalState } | undefined;
+	let terminalDetected:
+		| { outcome: RunTerminalState; rateLimited?: true; resumeAt?: Date }
+		| undefined;
 	let burrowRunMissing = false;
 	// pi cost tracking (warren-a7dc, warren-17a4). Two paths:
 	//   1. In-stream extraction (default): accumulate `turn_end` usage as
@@ -270,9 +277,19 @@ export async function bridgeRunStream(input: BridgeRunStreamInput): Promise<Brid
 
 			const outcome = detectRuntimeTerminal(event);
 			if (outcome !== null) {
-				terminalDetected = { outcome };
+				// warren-395e: also detect the rate-limit (429) shape and carry
+				// resumeAt so the pause+resume path (warren-3f64) can re-queue.
+				const rlInfo = detectRateLimitTerminal(event);
+				terminalDetected =
+					rlInfo !== null
+						? {
+								outcome,
+								rateLimited: true,
+								...(rlInfo.resumeAt !== undefined ? { resumeAt: rlInfo.resumeAt } : {}),
+							}
+						: { outcome };
 				input.logger?.info?.(
-					{ runId, burrowRunId, outcome, seq: event.seq },
+					{ runId, burrowRunId, outcome, rateLimited: rlInfo !== null, seq: event.seq },
 					"bridge observed runtime-terminal event; reap will finalize",
 				);
 				if (!statsPersisted) {

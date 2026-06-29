@@ -179,6 +179,15 @@ export async function runWithReconnect(
 				await input.reap({
 					runId: input.runId,
 					outcome: result.terminalDetected.outcome,
+					// warren-395e: propagate rate-limit classification so reap
+					// records failure_reason="rate_limited" (distinct from "crashed")
+					// and carries resumeAt in reap.completed for warren-3f64.
+					...(result.terminalDetected.rateLimited
+						? { failureReason: "rate_limited" as const }
+						: {}),
+					...(result.terminalDetected.resumeAt !== undefined
+						? { resumeAt: result.terminalDetected.resumeAt }
+						: {}),
 					repos: input.repos,
 					burrowClientPool: input.burrowClientPool,
 					broker: input.broker,
