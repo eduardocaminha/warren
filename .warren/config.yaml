@@ -22,14 +22,17 @@ interactiveAgents:
   plannerRuntime: claude-code
 
 # CI-fixer (src/ci-fixer/): each scheduler tick warren polls this project's
-# own failing PRs and dispatches the fixer on the PR branch to repair CI,
-# so a red warren PR self-heals instead of sitting open. Enabled 2026-06-29.
-# role MUST be cam-pr-fixer (claude-code/subscription): the builtin pr-fixer
-# is runtime:pi / provider:anthropic (API) and never_starts on this
-# subscription-only box. maxRetries/cooldown bumped after 5 never_started
-# attempts capped #142/#148 at the default maxRetries=2.
+# own failing PRs and dispatches the fixer on the PR branch to repair CI.
+# DISABLED 2026-06-29 until a ZimaOS rebuild: every ci-fixer run spawn_fails
+# because the deployed image (~06-24) lacks warren-a993 (targetBranch
+# persist + checkout). Without it the spawn does `git worktree add -b
+# <PR-branch> ... main` (CREATE) on the already-existing PR branch and dies
+# with "a branch named ... already exists". main HAS warren-a993, so flip
+# enabled back to true after the rebuild. role/maxRetries kept for then:
+# role MUST be cam-pr-fixer (claude-code/subscription); the builtin pr-fixer
+# is runtime:pi/API and never_starts on this subscription box.
 ciFixer:
-  enabled: true
+  enabled: false
   role: cam-pr-fixer
   maxRetries: 6
   cooldownMinutes: 5
