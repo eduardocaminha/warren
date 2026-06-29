@@ -21,6 +21,13 @@ defaultProvider: anthropic
 interactiveAgents:
   plannerRuntime: claude-code
 
+# CI-fixer (src/ci-fixer/): each scheduler tick warren polls this project's
+# own failing PRs and dispatches cam-pr-fixer on the PR branch to repair CI,
+# so a red warren PR self-heals instead of sitting open. Gated by maxRetries
+# + cooldown (defaults). Enabled 2026-06-29.
+ciFixer:
+  enabled: true
+
 # ── Optional knobs (uncomment to set) ───────────────────────────────────
 
 # Pre-fills the NewRun UI prompt textarea and is used as the prompt for
