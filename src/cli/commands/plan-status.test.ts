@@ -94,6 +94,7 @@ function runRow(over: Partial<RunRow> = {}): RunRow {
 		prompt: "",
 		trigger: "cli",
 		prUrl: null,
+		targetBranch: null,
 		costUsd: 0.1234,
 		tokensInput: null,
 		tokensOutput: null,

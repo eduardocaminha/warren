@@ -106,6 +106,7 @@ export interface RunRow {
 	prompt: string;
 	trigger: string;
 	prUrl: string | null;
+	targetBranch: string | null;
 	costUsd: number | null;
 	tokensInput: number | null;
 	tokensOutput: number | null;
