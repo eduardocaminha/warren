@@ -49,6 +49,8 @@ export {
 export {
 	type ListScheduledSeedsFn,
 	type LoadWarrenConfigFn,
+	type RateLimitedRetrySpawnFn,
+	type RateLimitedRetrySpawnInput,
 	type RunTickResult,
 	runTick,
 	type SchedulerHandle,

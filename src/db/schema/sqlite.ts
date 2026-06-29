@@ -211,22 +211,19 @@ export const runs = sqliteTable(
 		// supervisor clears them once the answering turn is dispatched.
 		pausedAt: text("paused_at"),
 		pausedQuestionEventId: text("paused_question_event_id"),
-		// Continuation back-link (warren-4b11): when an operator re-runs a
-		// terminated run "with a follow-up", the new run is spawned with the
-		// prior run's pushed branch as the workspace base (instead of the
-		// project default branch). This column records which run this one
-		// continues from, so the UI can render a chain indicator and chain
-		// cost/token totals are derivable by walking the link. Cost/tokens on
-		// each run stay independent — they are NOT accumulated with the
-		// parent. Nullable: the overwhelming majority of runs are roots.
-		// Plain text (no FK) for symmetry with the other run back-links and to
-		// keep the column tolerant of a since-deleted parent row.
+		// Continuation back-link (warren-4b11): "re-run with follow-up" forks from the
+		// parent's pushed branch. Nullable (most runs are roots). Plain text, no FK —
+		// tolerates a since-deleted parent and mirrors the other run back-links.
 		parentRunId: text("parent_run_id"),
 		// Chain-kind discriminator (warren-e96f). Tells a `parent_run_id`
 		// back-link apart: `continue` (warren-4b11) seeds the workspace from the
 		// parent's pushed branch; `replicate` re-dispatches its exact config
 		// against the project default base. Null for root runs. See `CLONE_KINDS`.
 		cloneKind: text("clone_kind", { enum: CLONE_KINDS }),
+		// warren-3f64: set to resetsAt epoch on rate-limited terminal; scheduler clears after re-dispatch.
+		resumeAt: text("resume_at"),
+		// warren-3f64: incremented each retry; scheduler stops at MAX_RATE_LIMIT_RESUME_ATTEMPTS.
+		resumeAttempts: integer("resume_attempts").notNull().default(0),
 	},
 	(t) => [
 		index(INDEX_NAMES.runsState).on(t.state),
@@ -236,6 +233,7 @@ export const runs = sqliteTable(
 		index(INDEX_NAMES.runsPlotId).on(t.plotId),
 		index(INDEX_NAMES.runsMode).on(t.mode),
 		index(INDEX_NAMES.runsPrUrl).on(t.prUrl),
+		index(INDEX_NAMES.runsResumeAt).on(t.resumeAt).where(sql`${t.resumeAt} IS NOT NULL`),
 	],
 );
 

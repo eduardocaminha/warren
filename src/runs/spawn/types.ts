@@ -165,6 +165,12 @@ export interface SpawnRunInput {
 	 */
 	readonly cloneKind?: CloneKind;
 	/**
+	 * Rate-limited retry depth (warren-3f64). Set to `parent.resumeAttempts + 1`
+	 * when spawning a rate-limited replicate; 0 (default) for all other runs.
+	 * Stored on `runs.resume_attempts` so reap can enforce the retry cap.
+	 */
+	readonly resumeAttempts?: number;
+	/**
 	 * Existing branch the run must push to instead of the composed
 	 * `${prefix}/${runId}` (warren-a993). The CI-fixer poller sets this to
 	 * the PR head branch so the fixer's commits push to the open PR and its

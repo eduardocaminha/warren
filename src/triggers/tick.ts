@@ -84,12 +84,35 @@ export interface TickLogger {
 	error(obj: Record<string, unknown>, msg?: string): void;
 }
 
+/**
+ * Spawn a rate-limited retry run (warren-3f64). The production wiring plugs
+ * `spawnRun` here with the right burrow/project context baked in via closure;
+ * tests inject a stub. Carries enough info to create a replicate run (the
+ * original run's identity) plus the incremented `resumeAttempts` counter.
+ */
+export interface RateLimitedRetrySpawnInput {
+	readonly agentName: string;
+	readonly projectId: string;
+	readonly prompt: string;
+	readonly trigger: string;
+	/** The original rate-limited run — becomes parentRunId of the replica. */
+	readonly parentRunId: string;
+	/** `parent.resumeAttempts + 1` — enforced by the caller. */
+	readonly resumeAttempts: number;
+}
+
+export type RateLimitedRetrySpawnFn = (
+	input: RateLimitedRetrySpawnInput,
+) => Promise<{ runId: string }>;
+
 export interface TickDeps {
-	readonly repos: Pick<Repos, "projects" | "triggers" | "runs" | "events">;
+	readonly repos: Pick<Repos, "projects" | "triggers" | "runs" | "events" | "planRuns">;
 	readonly loadWarrenConfig: LoadWarrenConfigFn;
 	readonly listScheduledSeeds: ListScheduledSeedsFn;
 	readonly updateExtensions: UpdateSeedExtensionsFn;
 	readonly spawn: DispatchSpawnFn;
+	/** warren-3f64: retry spawn for rate-limited runs. Omit to disable retries. */
+	readonly retryRateLimited?: RateLimitedRetrySpawnFn;
 	readonly ciFixer?: TickCiFixerDeps;
 	readonly now?: () => Date;
 	readonly logger?: TickLogger;
@@ -237,6 +260,102 @@ async function runProjectTick(input: RunProjectTickInput): Promise<void> {
 			} catch (err) {
 				await recordClearFailure(deps, result.runId, result.seedId, formatError(err));
 			}
+		}
+	}
+
+	// warren-3f64: rate-limited retry pass. Re-dispatch any run in this project
+	// whose `resume_at` has passed, spawning a fresh replicate. Runs without a
+	// `retryRateLimited` dep (tests / callers that opt out) are skipped silently.
+	if (deps.retryRateLimited !== undefined) {
+		await runRateLimitedRetries({ deps, project, now });
+	}
+}
+
+interface RunRateLimitedRetriesInput {
+	readonly deps: TickDeps;
+	readonly project: ProjectRow;
+	readonly now: Date;
+}
+
+/**
+ * warren-3f64: for each `failed/rate_limited` run in this project with a past
+ * `resume_at`, spawn a replicate, update any plan-run child pointing to the
+ * original run, then clear `resume_at` to prevent a second dispatch on the
+ * next tick.
+ *
+ * Order of operations: spawn first → update plan-run child → clear resume_at.
+ * If spawn throws, resume_at stays set and we retry next tick. If the child
+ * update or the clear fails, the run's resume_at is already gone (preventing
+ * double-dispatch) and we log the error; the plan-run coordinator will see the
+ * child still pointing at the OLD failed run and keep waiting until a human
+ * re-drives manually.
+ */
+async function runRateLimitedRetries(input: RunRateLimitedRetriesInput): Promise<void> {
+	const { deps, project, now } = input;
+	// retryRateLimited is guaranteed non-null by the caller's guard
+	const retrySpawn = deps.retryRateLimited as RateLimitedRetrySpawnFn;
+
+	let dueRuns: Awaited<ReturnType<typeof deps.repos.runs.listRateLimitedDue>>;
+	try {
+		dueRuns = await deps.repos.runs.listRateLimitedDue(project.id, now);
+	} catch (err) {
+		deps.logger?.error(
+			{ projectId: project.id, reason: formatError(err) },
+			"scheduler.rate_limited_retry_list_failed",
+		);
+		return;
+	}
+
+	for (const run of dueRuns) {
+		try {
+			const { runId: newRunId } = await retrySpawn({
+				agentName: run.agentName,
+				projectId: project.id,
+				prompt: run.prompt,
+				trigger: run.trigger,
+				parentRunId: run.id,
+				resumeAttempts: run.resumeAttempts + 1,
+			});
+			deps.logger?.info(
+				{ projectId: project.id, originalRunId: run.id, newRunId, attempt: run.resumeAttempts + 1 },
+				"scheduler.rate_limited_retry_spawned",
+			);
+
+			// If the original run was a plan-run child, redirect the child
+			// pointer to the new run so the coordinator follows the retry.
+			try {
+				const child = await deps.repos.planRuns.getChildForRunId(run.id);
+				if (child !== null) {
+					await deps.repos.planRuns.updateChild({
+						planRunId: child.planRunId,
+						seq: child.seq,
+						patch: { runId: newRunId },
+					});
+					deps.logger?.info(
+						{ planRunId: child.planRunId, seq: child.seq, newRunId },
+						"scheduler.rate_limited_retry_child_redirected",
+					);
+				}
+			} catch (childErr) {
+				deps.logger?.error(
+					{
+						projectId: project.id,
+						originalRunId: run.id,
+						newRunId,
+						reason: formatError(childErr),
+					},
+					"scheduler.rate_limited_retry_child_redirect_failed",
+				);
+			}
+
+			// Clear resume_at last so double-dispatch is prevented even if
+			// the plan-run child update failed.
+			await deps.repos.runs.attachResumeAt(run.id, null);
+		} catch (err) {
+			deps.logger?.error(
+				{ projectId: project.id, runId: run.id, reason: formatError(err) },
+				"scheduler.rate_limited_retry_spawn_failed",
+			);
 		}
 	}
 }

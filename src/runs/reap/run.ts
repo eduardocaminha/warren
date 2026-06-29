@@ -9,6 +9,14 @@ import { inferFailureReason, isTerminal, transitionToTerminal } from "./state.ts
 import type { ReapRunInput, ReapRunResult, ReapStep, ReapStepError } from "./types.ts";
 import { buildAlreadyTerminalResult, createSeqAllocator, defaultExec, defaultFs } from "./util.ts";
 
+/**
+ * Maximum number of times a rate-limited run may be automatically re-queued
+ * (warren-3f64). After this many retries the run is left as a permanent
+ * `failed/rate_limited` without a `resume_at`, so the scheduler stops looping
+ * and an operator must intervene.
+ */
+export const MAX_RATE_LIMIT_RESUME_ATTEMPTS = 3;
+
 export async function reapRun(input: ReapRunInput): Promise<ReapRunResult> {
 	const fs = input.fs ?? defaultFs;
 	const exec = input.exec ?? defaultExec;
@@ -80,9 +88,20 @@ export async function reapRun(input: ReapRunInput): Promise<ReapRunResult> {
 	// `project.defaultBranch`, the correct ref for `rev-list --count`.
 	const baseBranch: string | null = project?.defaultBranch ?? null;
 
+	// warren-3f64: a rate-limited terminal skips the full pipeline — the agent
+	// was mid-task, the workspace has uncommitted/partial work, and we should
+	// not push a branch, open a PR, or merge mulch. The workspace is destroyed
+	// below (normal path); if retries remain, the scheduler will spawn a fresh
+	// replicate once `resume_at` passes.
+	const isRateLimited = input.failureReason === "rate_limited" && input.resumeAt !== undefined;
 	// warren-df71: a conversation run must NOT push a branch / commit `.plot/`
 	// / open a PR (send-off owns its plotSync PR; this pipeline made junk PRs).
-	if (run.mode === "conversation" && workspacePath !== null) {
+	if (isRateLimited && workspacePath !== null) {
+		await emit("reap.rate_limited_paused", {
+			resumeAt: input.resumeAt.toISOString(),
+			resumeAttempts: run.resumeAttempts,
+		});
+	} else if (run.mode === "conversation" && workspacePath !== null) {
 		await emit("reap.branch_push_skipped", { reason: "conversation_run" });
 	} else if (stateOnEntry === "queued" && workspacePath !== null && project !== null) {
 		await emit("reap.never_started_skip", { message: "agent never ran; skipping pipeline" });
@@ -133,6 +152,24 @@ export async function reapRun(input: ReapRunInput): Promise<ReapRunResult> {
 		now(),
 		failureReason,
 	);
+
+	// warren-3f64: after the terminal transition, stamp resume_at on the row
+	// so the scheduler tick can locate and re-dispatch this run. Only set when
+	// within the retry cap; once the cap is hit, resume_at stays null and the
+	// run is a permanent failure.
+	if (isRateLimited && run.resumeAttempts < MAX_RATE_LIMIT_RESUME_ATTEMPTS) {
+		try {
+			await input.repos.runs.attachResumeAt(run.id, input.resumeAt as Date);
+		} catch (err) {
+			log.error(
+				{
+					event: "reap.resume_at_failed",
+					err: err instanceof Error ? err.message : String(err),
+				},
+				"failed to stamp resume_at on rate-limited run",
+			);
+		}
+	}
 
 	await emit("reap.completed", {
 		state: finalState,

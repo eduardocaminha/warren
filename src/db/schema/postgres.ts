@@ -135,6 +135,10 @@ export const runs = pgTable(
 		// Mirror of sqlite clone_kind (warren-e96f). Discriminates `continue`
 		// vs `replicate` chain links; see sqlite.ts for the full shape + intent.
 		cloneKind: text("clone_kind", { enum: CLONE_KINDS }),
+		// Mirror of sqlite resume_at / resume_attempts (warren-3f64). See
+		// sqlite.ts for full shape + intent.
+		resumeAt: text("resume_at"),
+		resumeAttempts: integer("resume_attempts").notNull().default(0),
 	},
 	(t) => [
 		index(INDEX_NAMES.runsState).on(t.state),
@@ -144,6 +148,7 @@ export const runs = pgTable(
 		index(INDEX_NAMES.runsPlotId).on(t.plotId),
 		index(INDEX_NAMES.runsMode).on(t.mode),
 		index(INDEX_NAMES.runsPrUrl).on(t.prUrl),
+		index(INDEX_NAMES.runsResumeAt).on(t.resumeAt).where(sql`${t.resumeAt} IS NOT NULL`),
 	],
 );
 
