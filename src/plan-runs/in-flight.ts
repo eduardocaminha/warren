@@ -13,6 +13,7 @@
  */
 
 import type { PlanRunChildRow, PlanRunRow, RunRow } from "../db/schema.ts";
+import type { RecoverDirtyPrFn } from "../runs/reap/pr-dirty-recovery.ts";
 import type {
 	AdvanceResult,
 	ChildExecution,
@@ -30,6 +31,8 @@ import {
 	resolveChildPrReopen,
 } from "./merge-gate.ts";
 import type { PrMergeChecker } from "./pr-merge.ts";
+
+export type { RecoverDirtyPrFn };
 
 export const defaultResolveExecution: CoordinatorResolveExecutionFn = async (planRun) => ({
 	executionProjectId: planRun.projectId,
@@ -119,6 +122,14 @@ export interface HandleInFlightInput {
 	readonly mergeTimeoutMs: number;
 	readonly now: () => Date;
 	readonly reopenPr?: CoordinatorReopenPrFn; // warren-22de: (re)open PR before failing
+	/**
+	 * warren-796b: belt-and-suspenders recovery for PRs DIRTY exclusively in
+	 * bookkeeping files. When the check returns `dirty`, the coordinator calls
+	 * this seam to attempt a local rebase+force-push that clears bookkeeping
+	 * conflicts. `"code_conflict"` → fail the plan; `"recovered"` → keep
+	 * polling; `"noop"` / `"error"` → treat as open and wait within budget.
+	 */
+	readonly recoverDirtyPr?: RecoverDirtyPrFn;
 }
 
 export type HandleInFlightDecision =
@@ -285,7 +296,7 @@ async function handleOpenPr(
 /**
  * Poll the child PR's merge state and settle the child accordingly:
  * merged → fall through to dispatch, open → wait/timeout, closed/fatal →
- * fail, transient → keep waiting.
+ * fail, dirty → attempt bookkeeping recovery, transient → keep waiting.
  */
 async function pollMergeState(
 	input: HandleInFlightInput,
@@ -316,6 +327,10 @@ async function pollMergeState(
 	if (polled.kind === "open") {
 		return await handleOpenPr(input, run, effectivePrUrl);
 	}
+	// warren-796b: dirty PR — attempt bookkeeping-only conflict recovery.
+	if (polled.kind === "dirty") {
+		return await handleDirtyPr(input, run, effectivePrUrl);
+	}
 	if (polled.kind === "closed_unmerged" || isFatalHttpError(polled)) {
 		const extra: Record<string, unknown> = { prUrl: effectivePrUrl };
 		if (polled.kind === "http_error") {
@@ -326,6 +341,45 @@ async function pollMergeState(
 	// `missing_token` or transient `http_error` (status 0 or 5xx that
 	// survived pr-merge.ts retries) — keep waiting.
 	return { kind: "result", result: { kind: "waiting_for_merge" } };
+}
+
+/**
+ * warren-796b: a PR whose `mergeable_state` is "dirty" may have conflicts
+ * exclusively in bookkeeping files (.seeds/*.jsonl, .plot/*.events.jsonl).
+ * Attempt recovery via the injected seam: rebase the run branch against main
+ * and force-push so GitHub recomputes mergeability with the conflicts resolved
+ * (merge=union applies on the local rebase but not on GitHub's merge side).
+ *
+ * Recovery outcomes:
+ *   - `"recovered"` → keep waiting; next poll should see a clean PR.
+ *   - `"code_conflict"` → conflicts in non-bookkeeping files; fail the plan.
+ *   - `"noop"` | `"error"` | no seam → treat as `open` (wait within budget).
+ */
+async function handleDirtyPr(
+	input: HandleInFlightInput,
+	run: RunRow,
+	effectivePrUrl: string,
+): Promise<HandleInFlightDecision> {
+	const { emit, planRun, child, recoverDirtyPr } = input;
+
+	if (recoverDirtyPr !== undefined) {
+		const outcome = await recoverDirtyPr(run.id);
+		if (outcome === "code_conflict") {
+			return await failChild(input, run, "pr_dirty_code_conflict", { prUrl: effectivePrUrl });
+		}
+		if (outcome === "recovered") {
+			await emit(run.id, "plan_run.waiting_for_merge", {
+				planRunId: planRun.id,
+				seq: child.seq,
+				prUrl: effectivePrUrl,
+				dirtyRecovery: "recovered",
+			});
+			return { kind: "result", result: { kind: "waiting_for_merge" } };
+		}
+		// "noop" or "error" — fall through to open-PR timeout handling.
+	}
+
+	return await handleOpenPr(input, run, effectivePrUrl);
 }
 
 export async function handleInFlight(input: HandleInFlightInput): Promise<HandleInFlightDecision> {

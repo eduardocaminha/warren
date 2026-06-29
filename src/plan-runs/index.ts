@@ -28,6 +28,7 @@ export {
 	isChildTerminal,
 	PLAN_RUN_EVENT_KINDS,
 	type PlanRunEventKind,
+	type RecoverDirtyPrFn,
 } from "./coordinator.ts";
 export {
 	type CreatePlanRunSpawnInput,

@@ -37,6 +37,30 @@ describe("checkPullRequestMerged", () => {
 		expect(result).toEqual({ kind: "open" });
 	});
 
+	test("200 with state:'open' + mergeable_state:'dirty' → dirty", async () => {
+		const { fetch } = recordingFetch([
+			jsonResponse(200, { merged_at: null, state: "open", mergeable_state: "dirty" }),
+		]);
+		const result = await checkPullRequestMerged({ ...baseArgs, fetch });
+		expect(result).toEqual({ kind: "dirty" });
+	});
+
+	test("200 with mergeable_state:'unknown' → open (GitHub still computing)", async () => {
+		const { fetch } = recordingFetch([
+			jsonResponse(200, { merged_at: null, state: "open", mergeable_state: "unknown" }),
+		]);
+		const result = await checkPullRequestMerged({ ...baseArgs, fetch });
+		expect(result).toEqual({ kind: "open" });
+	});
+
+	test("200 with mergeable_state:'clean' → open (clean but not merged)", async () => {
+		const { fetch } = recordingFetch([
+			jsonResponse(200, { merged_at: null, state: "open", mergeable_state: "clean" }),
+		]);
+		const result = await checkPullRequestMerged({ ...baseArgs, fetch });
+		expect(result).toEqual({ kind: "open" });
+	});
+
 	test("200 with state:'closed' + merged_at null → closed_unmerged", async () => {
 		const { fetch } = recordingFetch([jsonResponse(200, { merged_at: null, state: "closed" })]);
 		const result = await checkPullRequestMerged({ ...baseArgs, fetch });

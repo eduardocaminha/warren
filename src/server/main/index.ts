@@ -382,6 +382,7 @@ export async function bootServer(opts: BootServerOptions = {}): Promise<WarrenSe
 				planRunId: planRun.id,
 			});
 		},
+		...(runBranchPrefixDefault !== undefined ? { runBranchPrefixDefault } : {}),
 		tickMs: planRunCoordinatorConfig.tickMs,
 		disabled: planRunCoordinatorConfig.disabled,
 		mergeTimeoutMs: planRunCoordinatorConfig.mergeTimeoutMs,

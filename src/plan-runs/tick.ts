@@ -25,6 +25,7 @@
 import { formatError } from "../core/errors.ts";
 import type { Repos } from "../db/repos/index.ts";
 import type { PlanRunRow } from "../db/schema.ts";
+import { createRecoverDirtyPrFn } from "../runs/reap/pr-dirty-recovery.ts";
 import {
 	type AdvanceResult,
 	advancePlanRun,
@@ -36,6 +37,7 @@ import {
 	type CoordinatorSpawnFn,
 	type CoordinatorTransitionPlotFn,
 	type PlanRunEventKind,
+	type RecoverDirtyPrFn,
 } from "./coordinator.ts";
 import type { PrMergeChecker } from "./pr-merge.ts";
 
@@ -75,6 +77,12 @@ export interface PlanRunTickDeps {
 	 * on a child that succeeded with no prUrl and no empty-push event.
 	 */
 	readonly reopenPr?: CoordinatorReopenPrFn;
+	/**
+	 * warren-796b: optional dirty-PR recovery seam. When provided, the
+	 * coordinator attempts a local rebase+force-push on PRs stuck DIRTY
+	 * exclusively in bookkeeping files.
+	 */
+	readonly recoverDirtyPr?: RecoverDirtyPrFn;
 }
 
 export interface PlanRunAdvanceLog {
@@ -106,6 +114,7 @@ export async function runPlanRunTick(deps: PlanRunTickDeps): Promise<PlanRunTick
 				...(deps.transitionPlot !== undefined ? { transitionPlot: deps.transitionPlot } : {}),
 				...(deps.mergeTimeoutMs !== undefined ? { mergeTimeoutMs: deps.mergeTimeoutMs } : {}),
 				...(deps.reopenPr !== undefined ? { reopenPr: deps.reopenPr } : {}),
+				recoverDirtyPr: deps.recoverDirtyPr,
 				...(deps.now !== undefined ? { now: deps.now } : {}),
 			});
 			advances.push({ planRunId: planRun.id, result });
@@ -168,6 +177,10 @@ function buildDefaultEmit(repos: CoordinatorRepos, now?: () => Date): Coordinato
 export type PlanRunCoordinatorTimerHandle = object;
 
 export interface BootPlanRunCoordinatorInput extends PlanRunTickDeps {
+	/** Widen repos to include projects — used to wire recoverDirtyPr internally. */
+	readonly repos: Pick<Repos, "planRuns" | "runs" | "events" | "projects">;
+	/** Forwarded to `createRecoverDirtyPrFn` when `recoverDirtyPr` is not supplied. */
+	readonly runBranchPrefixDefault?: string;
 	readonly tickMs: number;
 	readonly disabled?: boolean;
 	readonly setInterval?: (cb: () => void, ms: number) => PlanRunCoordinatorTimerHandle;
@@ -200,6 +213,12 @@ export function bootPlanRunCoordinator(
 	const clearIntervalFn: (handle: PlanRunCoordinatorTimerHandle) => void =
 		input.clearInterval ?? ((handle) => globalThis.clearInterval(handle as never));
 
+	const tickDeps: PlanRunTickDeps = {
+		...input,
+		recoverDirtyPr:
+			input.recoverDirtyPr ?? createRecoverDirtyPrFn(input.repos, input.runBranchPrefixDefault),
+	};
+
 	let inFlight: Promise<PlanRunTickResult | null> | null = null;
 	let ticks = 0;
 	let stopped = false;
@@ -212,7 +231,7 @@ export function bootPlanRunCoordinator(
 		}
 		const promise = (async () => {
 			try {
-				const result = await runPlanRunTick(input);
+				const result = await runPlanRunTick(tickDeps);
 				ticks += 1;
 				return result;
 			} catch (err) {

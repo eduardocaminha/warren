@@ -48,12 +48,14 @@ import {
 	executionFields,
 	failChildAndPlan,
 	handleInFlight,
+	type RecoverDirtyPrFn,
 } from "./in-flight.ts";
 import { type CoordinatorReopenPrFn, checkParentRunMerged } from "./merge-gate.ts";
 import type { AutoTransitionResult } from "./plot-transition.ts";
 import type { PrMergeChecker } from "./pr-merge.ts";
 
 export type { CoordinatorReopenPrFn } from "./merge-gate.ts";
+export type { RecoverDirtyPrFn };
 
 export type CoordinatorRepos = Pick<Repos, "planRuns" | "runs" | "events">;
 
@@ -162,6 +164,11 @@ export interface AdvancePlanRunInput {
 	readonly mergeTimeoutMs?: number;
 	/** warren-22de: PR-(re)open seam. See {@link CoordinatorReopenPrFn}. */
 	readonly reopenPr?: CoordinatorReopenPrFn;
+	/**
+	 * warren-796b: dirty-PR recovery seam. See {@link RecoverDirtyPrFn}.
+	 * Omit to skip recovery (treat dirty as open, wait within merge budget).
+	 */
+	readonly recoverDirtyPr?: RecoverDirtyPrFn;
 	readonly now?: () => Date;
 }
 
@@ -217,6 +224,7 @@ export async function advancePlanRun(input: AdvancePlanRunInput): Promise<Advanc
 				mergeTimeoutMs,
 				now: nowFn,
 				reopenPr: input.reopenPr,
+				...(input.recoverDirtyPr !== undefined ? { recoverDirtyPr: input.recoverDirtyPr } : {}),
 			});
 			if (decision.kind === "merged") {
 				mergedChildSeq = inFlight.seq;

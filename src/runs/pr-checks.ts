@@ -86,6 +86,13 @@ export interface CheckPullRequestMergedInput {
 export type CheckPrMergedResult =
 	| { readonly kind: "merged"; readonly mergedAt: string }
 	| { readonly kind: "open" }
+	/**
+	 * PR is open but GitHub reports `mergeable_state: "dirty"` — the head
+	 * branch has merge conflicts with the base branch. The coordinator's
+	 * dirty-recovery seam can attempt a local rebase+force-push to clear
+	 * bookkeeping-only conflicts (warren-796b).
+	 */
+	| { readonly kind: "dirty" }
 	| { readonly kind: "closed_unmerged" }
 	| { readonly kind: "missing_token"; readonly message: string }
 	| { readonly kind: "http_error"; readonly status: number; readonly message: string };
@@ -126,7 +133,11 @@ export async function checkPullRequestMerged(
 		};
 	}
 
-	const body = (await readJson(res)) as { merged_at?: unknown; state?: unknown } | null;
+	const body = (await readJson(res)) as {
+		merged_at?: unknown;
+		state?: unknown;
+		mergeable_state?: unknown;
+	} | null;
 	const mergedAt = typeof body?.merged_at === "string" ? body.merged_at : null;
 	if (mergedAt !== null) {
 		return { kind: "merged", mergedAt };
@@ -134,6 +145,15 @@ export async function checkPullRequestMerged(
 	const state = typeof body?.state === "string" ? body.state : "";
 	if (state === "closed") {
 		return { kind: "closed_unmerged" };
+	}
+	// warren-796b: expose dirty state so the coordinator can attempt
+	// bookkeeping-only conflict recovery. Only signal dirty when GitHub has
+	// definitively computed the mergeability (mergeable_state is a stable
+	// string other than "unknown"); "unknown" means GitHub is still computing
+	// and the next poll may flip to a different state.
+	const mergeableState = typeof body?.mergeable_state === "string" ? body.mergeable_state : "";
+	if (mergeableState === "dirty") {
+		return { kind: "dirty" };
 	}
 	return { kind: "open" };
 }
