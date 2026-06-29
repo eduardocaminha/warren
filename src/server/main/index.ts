@@ -39,6 +39,7 @@ import {
 	bootPlanRunCoordinator,
 	createPlanRunSpawn,
 	createPrMergeChecker,
+	createRecoverDirtyPrFn,
 	createResolveExecution,
 	defaultPlotStatusSetter,
 	loadPlanRunCoordinatorConfigFromEnv,
@@ -63,6 +64,7 @@ import {
 } from "../../runs/index.ts";
 import { buildPrContent, openPullRequest } from "../../runs/pr.ts";
 import { loadWorkspaceGcConfigFromEnv, startWorkspaceGcWorker } from "../../runs/reap/gc.ts";
+import { defaultExec, defaultFs } from "../../runs/reap/util.ts";
 import { showSeed } from "../../seeds-cli/index.ts";
 import {
 	loadWarrenServerConfigFromFile,
@@ -382,6 +384,18 @@ export async function bootServer(opts: BootServerOptions = {}): Promise<WarrenSe
 				planRunId: planRun.id,
 			});
 		},
+		// warren-796b: belt-and-suspenders dirty-PR recovery. Rebases the run
+		// branch in an isolated worktree when GitHub reports mergeable_state:"dirty"
+		// exclusively due to bookkeeping-file conflicts. Wired unconditionally
+		// (independent of autoOpenPr) so runs dispatched before seeds/plot
+		// direct-push was deployed can still self-heal.
+		recoverDirtyPr: createRecoverDirtyPrFn({
+			repos,
+			warrenConfigs,
+			runBranchPrefixDefault,
+			exec: defaultExec,
+			fs: defaultFs,
+		}),
 		tickMs: planRunCoordinatorConfig.tickMs,
 		disabled: planRunCoordinatorConfig.disabled,
 		mergeTimeoutMs: planRunCoordinatorConfig.mergeTimeoutMs,
