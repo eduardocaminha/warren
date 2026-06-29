@@ -5,7 +5,12 @@ import { readReportOnly } from "../../registry/schema.ts";
 import { bindBridgeLogger } from "../stream/index.ts";
 import { runWorkspaceDestroy } from "./destroy.ts";
 import { createPipelineState, runReapPipeline } from "./pipeline.ts";
-import { inferFailureReason, isTerminal, transitionToTerminal } from "./state.ts";
+import {
+	extractRateLimitFromEvents,
+	inferFailureReason,
+	isTerminal,
+	transitionToTerminal,
+} from "./state.ts";
 import type { ReapRunInput, ReapRunResult, ReapStep, ReapStepError } from "./types.ts";
 import { buildAlreadyTerminalResult, createSeqAllocator, defaultExec, defaultFs } from "./util.ts";
 
@@ -118,11 +123,17 @@ export async function reapRun(input: ReapRunInput): Promise<ReapRunResult> {
 	const effectiveOutcome: RunTerminalState = state.droppedCommit ? "failed" : input.outcome;
 
 	let failureReason: RunFailureReason | null = null;
+	let resumeAt: Date | null | undefined;
 	if (state.droppedCommit) {
 		failureReason = "dropped_commit";
 	} else if (effectiveOutcome === "failed") {
 		failureReason =
 			input.failureReason ?? (await inferFailureReason(input.repos, run.id, stateOnEntry));
+		// warren-395e: extract resumeAt from the event log when rate-limited.
+		if (failureReason === "rate_limited") {
+			const events = await input.repos.events.listByRun(run.id);
+			resumeAt = extractRateLimitFromEvents(events)?.resumeAt ?? null;
+		}
 	}
 
 	const finalState = await transitionToTerminal(
@@ -240,5 +251,6 @@ export async function reapRun(input: ReapRunInput): Promise<ReapRunResult> {
 		workspaceDestroyed,
 		errors,
 		alreadyTerminal: false,
+		...(resumeAt !== undefined ? { resumeAt } : {}),
 	};
 }

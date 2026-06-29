@@ -131,6 +131,13 @@ export type CloneKind = (typeof CLONE_KINDS)[number];
  *     which stays `succeeded`. Marking the run `failed` keeps a dropped
  *     commit from masquerading as success and, on plan-runs, fails the
  *     plan instead of silently auto-merging/advancing past the child.
+ *   - `rate_limited` (warren-395e) means the runtime result carried the
+ *     Anthropic session-limit 429 signal — either `api_error_status: 429`
+ *     on the `result` event, a `rate_limit_event` with `status: rejected`,
+ *     or the "session limit . resets" text in the result. Distinguished
+ *     from `crashed` so step 3 (warren-3f64) can pause and re-queue the
+ *     run instead of permanently failing it. `resume_at` (when extracted
+ *     from `resetsAt`) flows through the reap result for the re-queue step.
  *
  * Null on succeeded/cancelled rows.
  */
@@ -142,6 +149,7 @@ export const RUN_FAILURE_REASONS = [
 	"burrow_run_lost",
 	"burrow_unreachable",
 	"dropped_commit",
+	"rate_limited",
 ] as const;
 export type RunFailureReason = (typeof RUN_FAILURE_REASONS)[number];
 

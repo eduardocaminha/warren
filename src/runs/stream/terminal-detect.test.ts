@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import type { RunEvent } from "@os-eco/burrow-cli";
-import { detectRuntimeTerminal, isClaudeAgentEnd, isPiAgentEnd } from "./terminal-detect.ts";
+import {
+	detectRuntimeTerminal,
+	extractRateLimitInfo,
+	isClaudeAgentEnd,
+	isPiAgentEnd,
+} from "./terminal-detect.ts";
 
 /**
  * warren-6fcc / pl-5516 step 2: focused unit coverage for
@@ -183,6 +188,138 @@ describe("isClaudeAgentEnd (warren-8b7c)", () => {
 
 	test("pi state_change/agent_end envelope does NOT match isClaudeAgentEnd", () => {
 		expect(isClaudeAgentEnd(envelope({ type: "agent_end", messages: [] }))).toBe(false);
+	});
+});
+
+describe("extractRateLimitInfo (warren-395e)", () => {
+	function chatAgentEndEvent(payload: Record<string, unknown>): RunEvent {
+		return {
+			id: 0,
+			burrowId: "bur_x",
+			runId: "run_x",
+			seq: 1,
+			kind: "agent_end",
+			stream: "system",
+			payload,
+			ts: new Date(2026, 4, 27, 12, 0, 0),
+		};
+	}
+
+	// Shape 1: state_change result with api_error_status 429
+	test("detects result with api_error_status 429 (no resetsAt)", () => {
+		const info = extractRateLimitInfo(
+			envelope({ type: "result", is_error: true, api_error_status: 429 }),
+		);
+		expect(info).not.toBeNull();
+		expect(info?.resumeAt).toBeNull();
+	});
+
+	test("detects result with api_error_status 429 and ISO resetsAt", () => {
+		const ts = "2026-01-01T12:00:00.000Z";
+		const info = extractRateLimitInfo(
+			envelope({ type: "result", is_error: true, api_error_status: 429, resetsAt: ts }),
+		);
+		expect(info).not.toBeNull();
+		expect(info?.resumeAt).toEqual(new Date(ts));
+	});
+
+	test("detects result with api_error_status 429 and epoch-ms resetsAt", () => {
+		const epochMs = 1_800_000_000_000;
+		const info = extractRateLimitInfo(
+			envelope({ type: "result", is_error: true, api_error_status: 429, resetsAt: epochMs }),
+		);
+		expect(info).not.toBeNull();
+		expect(info?.resumeAt).toEqual(new Date(epochMs));
+	});
+
+	// Shape 2: rate_limit_event
+	test("detects rate_limit_event with status rejected (no resetsAt)", () => {
+		const info = extractRateLimitInfo(envelope({ type: "rate_limit_event", status: "rejected" }));
+		expect(info).not.toBeNull();
+		expect(info?.resumeAt).toBeNull();
+	});
+
+	test("detects rate_limit_event with status rejected and resetsAt", () => {
+		const ts = "2026-06-01T00:00:00.000Z";
+		const info = extractRateLimitInfo(
+			envelope({ type: "rate_limit_event", status: "rejected", resetsAt: ts }),
+		);
+		expect(info).not.toBeNull();
+		expect(info?.resumeAt).toEqual(new Date(ts));
+	});
+
+	test("ignores rate_limit_event with status !== rejected", () => {
+		expect(
+			extractRateLimitInfo(envelope({ type: "rate_limit_event", status: "allowed" })),
+		).toBeNull();
+	});
+
+	// Shape 3: session limit text fallback
+	test("detects session-limit text in result field", () => {
+		const info = extractRateLimitInfo(
+			envelope({
+				type: "result",
+				is_error: true,
+				result: "You've hit your session limit. It resets at midnight.",
+			}),
+		);
+		expect(info).not.toBeNull();
+		expect(info?.resumeAt).toBeNull();
+	});
+
+	test("session-limit text match is case-insensitive", () => {
+		const info = extractRateLimitInfo(
+			envelope({
+				type: "result",
+				is_error: true,
+				result: "SESSION LIMIT REACHED. Will RESET soon.",
+			}),
+		);
+		expect(info).not.toBeNull();
+	});
+
+	// Shape for claude-code-chat: kind="agent_end"
+	test("detects agent_end result with api_error_status 429", () => {
+		const ts = "2026-07-01T00:00:00.000Z";
+		const info = extractRateLimitInfo(
+			chatAgentEndEvent({ type: "result", is_error: true, api_error_status: 429, resetsAt: ts }),
+		);
+		expect(info).not.toBeNull();
+		expect(info?.resumeAt).toEqual(new Date(ts));
+	});
+
+	// Negative cases
+	test("non-429 result returns null", () => {
+		expect(extractRateLimitInfo(envelope({ type: "result", is_error: true }))).toBeNull();
+	});
+
+	test("normal succeeded result returns null", () => {
+		expect(extractRateLimitInfo(envelope({ type: "result", is_error: false }))).toBeNull();
+	});
+
+	test("non-system stream returns null", () => {
+		const ev = envelope({ type: "result", api_error_status: 429 });
+		expect(extractRateLimitInfo({ ...ev, stream: "stdout" })).toBeNull();
+	});
+
+	test("non-state_change non-agent_end kind returns null", () => {
+		const ev = envelope({ type: "result", api_error_status: 429 });
+		expect(extractRateLimitInfo({ ...ev, kind: "text" })).toBeNull();
+	});
+
+	test("resetsAt with invalid string returns null resumeAt", () => {
+		const info = extractRateLimitInfo(
+			envelope({ type: "result", api_error_status: 429, resetsAt: "not-a-date" }),
+		);
+		expect(info).not.toBeNull();
+		expect(info?.resumeAt).toBeNull();
+	});
+
+	test("existing non-rate-limit result events are unaffected", () => {
+		// Regression: a normal pi agent_end should still return null.
+		expect(
+			extractRateLimitInfo(envelope({ type: "agent_end", stopReason: "end_turn", content: [] })),
+		).toBeNull();
 	});
 });
 

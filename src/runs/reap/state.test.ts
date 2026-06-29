@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { reapRun } from "./index.ts";
+import { extractRateLimitFromEvents } from "./state.ts";
 import {
 	type Ctx,
 	fakeBurrowClient,
@@ -202,5 +203,199 @@ describe("reapRun failure-reason inference (warren-3c40 / warren-5165)", () => {
 		});
 		expect(second.alreadyTerminal).toBe(true);
 		expect(second.failureReason).toBe("crashed");
+	});
+});
+
+describe("extractRateLimitFromEvents (warren-395e)", () => {
+	function makeEvent(stream: "system" | "stdout" | "stderr", payload: unknown) {
+		return {
+			id: 1,
+			runId: "run_x",
+			burrowEventSeq: 1,
+			ts: "2026-01-01T00:00:00.000Z",
+			kind: "state_change",
+			stream,
+			payloadJson: payload,
+		} as const;
+	}
+
+	test("returns null for empty event list", () => {
+		expect(extractRateLimitFromEvents([])).toBeNull();
+	});
+
+	test("detects result with api_error_status 429", () => {
+		const events = [makeEvent("system", { type: "result", is_error: true, api_error_status: 429 })];
+		const info = extractRateLimitFromEvents(events);
+		expect(info).not.toBeNull();
+		expect(info?.resumeAt).toBeNull();
+	});
+
+	test("extracts resumeAt from result api_error_status 429 with resetsAt", () => {
+		const ts = "2026-06-29T08:00:00.000Z";
+		const events = [
+			makeEvent("system", { type: "result", is_error: true, api_error_status: 429, resetsAt: ts }),
+		];
+		const info = extractRateLimitFromEvents(events);
+		expect(info).not.toBeNull();
+		expect(info?.resumeAt).toEqual(new Date(ts));
+	});
+
+	test("detects rate_limit_event with status rejected", () => {
+		const ts = "2026-06-29T09:00:00.000Z";
+		const events = [
+			makeEvent("system", { type: "rate_limit_event", status: "rejected", resetsAt: ts }),
+		];
+		const info = extractRateLimitFromEvents(events);
+		expect(info).not.toBeNull();
+		expect(info?.resumeAt).toEqual(new Date(ts));
+	});
+
+	test("detects session-limit text fallback", () => {
+		const events = [
+			makeEvent("system", {
+				type: "result",
+				is_error: true,
+				result: "You've hit your session limit. It resets in 5 hours.",
+			}),
+		];
+		expect(extractRateLimitFromEvents(events)).not.toBeNull();
+	});
+
+	test("ignores stdout events with rate-limit-looking payloads", () => {
+		const events = [makeEvent("stdout", { type: "result", api_error_status: 429 })];
+		expect(extractRateLimitFromEvents(events)).toBeNull();
+	});
+
+	test("returns null for normal failed run events (no 429 signal)", () => {
+		const events = [
+			makeEvent("system", { type: "result", is_error: true }),
+			{
+				id: 2,
+				runId: "run_x",
+				burrowEventSeq: 2,
+				ts: "2026-01-01T00:00:00.000Z",
+				kind: "text",
+				stream: "stdout" as const,
+				payloadJson: { text: "work done" },
+			},
+		];
+		expect(extractRateLimitFromEvents(events)).toBeNull();
+	});
+});
+
+describe("inferFailureReason — rate_limited classification (warren-395e)", () => {
+	let ctx: Ctx;
+
+	beforeEach(async () => {
+		ctx = await setup();
+	});
+
+	afterEach(async () => {
+		await ctx.db.close();
+	});
+
+	test("classifies running-on-entry with 429 result as rate_limited", async () => {
+		// Seed a model-turn event AND a 429 result — verifies rate_limited wins
+		// over the crashed heuristic.
+		await ctx.repos.events.append({
+			runId: ctx.runId,
+			burrowEventSeq: 1,
+			ts: new Date().toISOString(),
+			kind: "text",
+			stream: "stdout",
+			payload: { text: "Starting analysis." },
+		});
+		await ctx.repos.events.append({
+			runId: ctx.runId,
+			burrowEventSeq: 2,
+			ts: new Date().toISOString(),
+			kind: "state_change",
+			stream: "system",
+			payload: { type: "result", is_error: true, api_error_status: 429 },
+		});
+
+		const result = await reapRun({
+			runId: ctx.runId,
+			outcome: "failed",
+			repos: ctx.repos,
+			burrowClientPool: await makePool(fakeBurrowClient(makeBurrow()), ctx.repos),
+			fs: fakeFs().fs,
+			exec: fakeExec().exec,
+		});
+
+		expect(result.failureReason).toBe("rate_limited");
+	});
+
+	test("rate_limited run with resetsAt propagates resumeAt", async () => {
+		const ts = "2026-07-01T06:00:00.000Z";
+		await ctx.repos.events.append({
+			runId: ctx.runId,
+			burrowEventSeq: 1,
+			ts: new Date().toISOString(),
+			kind: "state_change",
+			stream: "system",
+			payload: {
+				type: "rate_limit_event",
+				status: "rejected",
+				resetsAt: ts,
+			},
+		});
+
+		const result = await reapRun({
+			runId: ctx.runId,
+			outcome: "failed",
+			repos: ctx.repos,
+			burrowClientPool: await makePool(fakeBurrowClient(makeBurrow()), ctx.repos),
+			fs: fakeFs().fs,
+			exec: fakeExec().exec,
+		});
+
+		expect(result.failureReason).toBe("rate_limited");
+		expect(result.resumeAt).toEqual(new Date(ts));
+	});
+
+	test("crashed run without 429 signal still classifies as crashed", async () => {
+		await ctx.repos.events.append({
+			runId: ctx.runId,
+			burrowEventSeq: 1,
+			ts: new Date().toISOString(),
+			kind: "text",
+			stream: "stdout",
+			payload: { text: "Doing work then crashing." },
+		});
+
+		const result = await reapRun({
+			runId: ctx.runId,
+			outcome: "failed",
+			repos: ctx.repos,
+			burrowClientPool: await makePool(fakeBurrowClient(makeBurrow()), ctx.repos),
+			fs: fakeFs().fs,
+			exec: fakeExec().exec,
+		});
+
+		expect(result.failureReason).toBe("crashed");
+	});
+
+	test("rate_limited run without resetsAt propagates resumeAt as null", async () => {
+		await ctx.repos.events.append({
+			runId: ctx.runId,
+			burrowEventSeq: 1,
+			ts: new Date().toISOString(),
+			kind: "state_change",
+			stream: "system",
+			payload: { type: "result", is_error: true, api_error_status: 429 },
+		});
+
+		const result = await reapRun({
+			runId: ctx.runId,
+			outcome: "failed",
+			repos: ctx.repos,
+			burrowClientPool: await makePool(fakeBurrowClient(makeBurrow()), ctx.repos),
+			fs: fakeFs().fs,
+			exec: fakeExec().exec,
+		});
+
+		expect(result.failureReason).toBe("rate_limited");
+		expect(result.resumeAt).toBeNull();
 	});
 });

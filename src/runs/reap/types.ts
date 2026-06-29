@@ -302,6 +302,13 @@ export interface ReapRunResult {
 	readonly errors: readonly ReapStepError[];
 	/** True when the row was already terminal on entry — sub-steps were skipped. */
 	readonly alreadyTerminal: boolean;
+	/**
+	 * When `failureReason === "rate_limited"` (warren-395e), the reset
+	 * timestamp extracted from the rate-limit event's `resetsAt` field.
+	 * `null` when rate-limited but `resetsAt` was absent or unparseable.
+	 * `undefined` (absent) on all non-rate-limited runs.
+	 */
+	readonly resumeAt?: Date | null;
 }
 
 /* ----------------------------------------------------------------------- */
