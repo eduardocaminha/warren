@@ -122,11 +122,12 @@ export interface RunRow {
 	cloneKind: "replicate" | "continue" | null;
 	/**
 	 * Run mode discriminator (pl-0344 step 1 / warren-67b6, step 4 /
-	 * warren-b3b9). `'batch'` is the legacy one-shot dispatch; `'interactive'`
-	 * is the respawn-per-turn primitive bound to a Plot. Pinned at row
-	 * creation; warren-side only (burrow doesn't know about run mode).
+	 * warren-b3b9). `'batch'` is the legacy one-shot dispatch;
+	 * `'conversation'` is the pi-chat runtime mode (warren-c770). The
+	 * retired `'interactive'` value was dropped in warren-d622. Pinned at
+	 * row creation; warren-side only (burrow doesn't know about run mode).
 	 */
-	mode: "batch" | "interactive";
+	mode: "batch" | "conversation";
 	renderedAgentJson: unknown;
 	state: RunState;
 	failureReason: RunFailureReason | null;
