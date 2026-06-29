@@ -287,6 +287,7 @@ async function seedsCommitStep(ctx: ReapPipelineContext, state: ReapPipelineStat
 		state.seedsCommitted = await stageSeedsForCommit({
 			workspacePath: ctx.workspacePath,
 			projectPath: ctx.project.localPath,
+			targetBranch: ctx.project.defaultBranch,
 			fs: ctx.fs,
 			exec: ctx.exec,
 			emit: ctx.emit,

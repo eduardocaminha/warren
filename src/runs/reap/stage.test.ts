@@ -256,7 +256,7 @@ describe("reapRun commit-through-reap sub-steps (warren-343a + warren-7ecc)", ()
 	});
 
 	/* ------------------------------------------------------------------ */
-	/* warren-7ecc: commit-through-reap for .seeds/                        */
+	/* warren-2501: seeds-direct-push — seeds state lands on main         */
 	/* ------------------------------------------------------------------ */
 
 	async function setupWithSeeds(): Promise<Ctx> {
@@ -293,7 +293,10 @@ describe("reapRun commit-through-reap sub-steps (warren-343a + warren-7ecc)", ()
 		};
 	}
 
-	test("authors a warren commit when project .seeds/ has a delta the agent never committed (warren-7ecc)", async () => {
+	const PROJECT_PATH = "/data/projects/x/y";
+	const WORKSPACE_PATH = "/data/burrow/ws";
+
+	test("commits seeds directly to main (not run branch) when project .seeds/ has a delta (warren-2501)", async () => {
 		const seedsCtx = await setupWithSeeds();
 		try {
 			const f = fakeFs({
@@ -314,19 +317,27 @@ describe("reapRun commit-through-reap sub-steps (warren-343a + warren-7ecc)", ()
 			});
 
 			expect(result.seedsCommitted).toBe(true);
-			expect(f.files.get("/data/burrow/ws/.seeds/issues.jsonl")).toContain("warren-1234");
-			expect(f.files.get("/data/burrow/ws/.seeds/plans.jsonl")).toContain("pl-abcd");
-			const gitArgs = e.calls.filter((c) => c.cmd === "git").map((c) => c.args);
-			expect(gitArgs).toContainEqual(["add", "--", ".seeds/"]);
-			expect(gitArgs).toContainEqual([
-				"diff",
-				"--cached",
-				"--quiet",
-				"--",
-				".seeds/issues.jsonl",
-				".seeds/plans.jsonl",
-			]);
-			const commit = gitArgs.find((a) => a[0] === "-c" && a.includes("commit"));
+			// Seeds are NOT copied to the workspace — they go to main directly.
+			expect(f.files.has("/data/burrow/ws/.seeds/issues.jsonl")).toBe(false);
+			expect(f.files.has("/data/burrow/ws/.seeds/plans.jsonl")).toBe(false);
+
+			const gitCalls = e.calls.filter((c) => c.cmd === "git");
+
+			// Staging and commit happen in the project clone, not the workspace.
+			const addCall = gitCalls.find((c) => c.args[0] === "add" && c.args.includes(".seeds/"));
+			expect(addCall?.cwd).toBe(PROJECT_PATH);
+
+			const diffCall = gitCalls.find(
+				(c) =>
+					c.args[0] === "diff" &&
+					c.args.includes("--cached") &&
+					c.args.includes(".seeds/issues.jsonl"),
+			);
+			expect(diffCall?.cwd).toBe(PROJECT_PATH);
+
+			const commit = gitCalls
+				.map((c) => c.args)
+				.find((a) => a[0] === "-c" && a.includes("commit") && a.includes("--only"));
 			expect(commit).toEqual([
 				"-c",
 				"user.name=warren",
@@ -341,14 +352,70 @@ describe("reapRun commit-through-reap sub-steps (warren-343a + warren-7ecc)", ()
 				".seeds/issues.jsonl",
 				".seeds/plans.jsonl",
 			]);
+			// Commit must be in the project clone.
+			const commitCall = gitCalls.find(
+				(c) => c.args[0] === "-c" && c.args.includes("commit") && c.args.includes("--only"),
+			);
+			expect(commitCall?.cwd).toBe(PROJECT_PATH);
+
+			// rebasePushToMain commands run to push to main.
+			expect(gitCalls.some((c) => c.args[0] === "worktree" && c.args[1] === "add")).toBe(true);
+			expect(gitCalls.some((c) => c.args[0] === "push" && c.args.includes("HEAD:main"))).toBe(true);
+
 			const events = await seedsCtx.repos.events.listByRun(seedsCtx.runId);
-			expect(events.find((ev) => ev.kind === "reap.seeds_committed")).toBeDefined();
+			const seedsEvent = events.find((ev) => ev.kind === "reap.seeds_committed");
+			expect(seedsEvent).toBeDefined();
+			expect((seedsEvent?.payloadJson as { directPush?: boolean })?.directPush).toBe(true);
 		} finally {
 			await seedsCtx.db.close();
 		}
 	});
 
-	test("path-limits the seeds commit to the two carriers so pre-staged unrelated files aren't swept in (warren-be12)", async () => {
+	test("workspace seeds are cleaned up (restore+clean) before the run branch push (warren-2501)", async () => {
+		const seedsCtx = await setupWithSeeds();
+		try {
+			const f = fakeFs({
+				"/data/projects/x/y/.seeds/issues.jsonl":
+					'{"id":"warren-1234","status":"open","updatedAt":"2026-05-22T10:00:00Z"}\n',
+			});
+			const e = fakeExec({ stagedDelta: true });
+
+			await reapRun({
+				runId: seedsCtx.runId,
+				outcome: "succeeded",
+				repos: seedsCtx.repos,
+				burrowClientPool: await makePool(fakeBurrowClient(makeBurrow()), seedsCtx.repos),
+				fs: f.fs,
+				exec: e.exec,
+			});
+
+			const wsGitCalls = e.calls.filter((c) => c.cmd === "git" && c.cwd === WORKSPACE_PATH);
+			// restore --staged clears any seeds staged by the agent
+			expect(
+				wsGitCalls.some(
+					(c) =>
+						c.args[0] === "restore" && c.args.includes("--staged") && c.args.includes(".seeds/"),
+				),
+			).toBe(true);
+			// restore clears tracked seeds modifications
+			expect(
+				wsGitCalls.some(
+					(c) =>
+						c.args[0] === "restore" && !c.args.includes("--staged") && c.args.includes(".seeds/"),
+				),
+			).toBe(true);
+			// clean -f removes untracked seeds files (e.g. plans.jsonl from sd plan submit)
+			expect(
+				wsGitCalls.some(
+					(c) => c.args[0] === "clean" && c.args.includes("-f") && c.args.includes(".seeds/"),
+				),
+			).toBe(true);
+		} finally {
+			await seedsCtx.db.close();
+		}
+	});
+
+	test("path-limits the project-clone commit to the two seeds carriers (warren-be12)", async () => {
 		const seedsCtx = await setupWithSeeds();
 		try {
 			const f = fakeFs({
@@ -371,9 +438,7 @@ describe("reapRun commit-through-reap sub-steps (warren-343a + warren-7ecc)", ()
 			const commit = e.calls
 				.filter((c) => c.cmd === "git")
 				.map((c) => c.args)
-				.find((a) => a[0] === "-c" && a.includes("commit"));
-			// `--only -- .seeds/issues.jsonl .seeds/plans.jsonl` confines the
-			// commit to the two carriers, never an unrelated pre-staged file.
+				.find((a) => a[0] === "-c" && a.includes("commit") && a.includes("--only"));
 			expect(commit).toContain("--only");
 			const dashDash = commit?.indexOf("--") ?? -1;
 			expect(dashDash).toBeGreaterThan(-1);
@@ -402,8 +467,11 @@ describe("reapRun commit-through-reap sub-steps (warren-343a + warren-7ecc)", ()
 			});
 
 			expect(result.seedsCommitted).toBe(false);
-			const commit = e.calls.find((c) => c.cmd === "git" && c.args.includes("commit"));
-			expect(commit).toBeUndefined();
+			// No commit anywhere (no --only commit in project clone or workspace).
+			const commitCall = e.calls.find(
+				(c) => c.cmd === "git" && c.args.includes("commit") && c.args.includes("--only"),
+			);
+			expect(commitCall).toBeUndefined();
 			const events = await seedsCtx.repos.events.listByRun(seedsCtx.runId);
 			expect(events.find((ev) => ev.kind === "reap.seeds_committed")).toBeUndefined();
 		} finally {
@@ -411,44 +479,16 @@ describe("reapRun commit-through-reap sub-steps (warren-343a + warren-7ecc)", ()
 		}
 	});
 
-	test("skips .seeds/config.yaml + .seeds/templates.jsonl when copying into the workspace", async () => {
+	test("seeds-only run: workspace is clean after cleanup so droppedCommit stays false (warren-2501)", async () => {
 		const seedsCtx = await setupWithSeeds();
 		try {
 			const f = fakeFs({
 				"/data/projects/x/y/.seeds/issues.jsonl":
 					'{"id":"warren-1234","status":"open","updatedAt":"2026-05-22T10:00:00Z"}\n',
-				"/data/projects/x/y/.seeds/config.yaml": 'project: "x"\n',
-				"/data/projects/x/y/.seeds/templates.jsonl": '{"id":"t1"}\n',
 			});
-			const e = fakeExec({ stagedDelta: true });
-
-			await reapRun({
-				runId: seedsCtx.runId,
-				outcome: "succeeded",
-				repos: seedsCtx.repos,
-				burrowClientPool: await makePool(fakeBurrowClient(makeBurrow()), seedsCtx.repos),
-				fs: f.fs,
-				exec: e.exec,
-			});
-
-			expect(f.files.get("/data/burrow/ws/.seeds/issues.jsonl")).toBeDefined();
-			expect(f.files.get("/data/burrow/ws/.seeds/config.yaml")).toBeUndefined();
-			expect(f.files.get("/data/burrow/ws/.seeds/templates.jsonl")).toBeUndefined();
-		} finally {
-			await seedsCtx.db.close();
-		}
-	});
-
-	test("planner-default-prompt round trip: warren commit keeps reap.empty_push silent (warren-7ecc)", async () => {
-		const seedsCtx = await setupWithSeeds();
-		try {
-			const f = fakeFs({
-				"/data/projects/x/y/.seeds/issues.jsonl":
-					'{"id":"warren-1234","status":"open","updatedAt":"2026-05-22T10:00:00Z"}\n',
-				"/data/projects/x/y/.seeds/plans.jsonl":
-					'{"id":"pl-abcd","status":"open","updatedAt":"2026-05-22T10:00:00Z"}\n',
-			});
-			const e = fakeExec({ stagedDelta: true, revListCount: "1" });
+			// fakeExec: stagedDelta=true (seeds changed in project clone), gitStatus=""
+			// (workspace is clean after cleanup), revListCount="0" (no agent commits on run branch).
+			const e = fakeExec({ stagedDelta: true, gitStatus: "", revListCount: "0" });
 
 			const result = await reapRun({
 				runId: seedsCtx.runId,
@@ -461,9 +501,14 @@ describe("reapRun commit-through-reap sub-steps (warren-343a + warren-7ecc)", ()
 
 			expect(result.seedsCommitted).toBe(true);
 			expect(result.branchPushed).toBe(true);
-			expect(result.commitsAhead).toBe(1);
+			expect(result.commitsAhead).toBe(0);
 			const events = await seedsCtx.repos.events.listByRun(seedsCtx.runId);
-			expect(events.find((ev) => ev.kind === "reap.empty_push")).toBeUndefined();
+			// empty_push fires (0 commits on run branch) but with droppedCommit=false
+			const emptyPushEvent = events.find((ev) => ev.kind === "reap.empty_push");
+			expect(emptyPushEvent).toBeDefined();
+			expect((emptyPushEvent?.payloadJson as { droppedCommit?: boolean })?.droppedCommit).toBe(
+				false,
+			);
 		} finally {
 			await seedsCtx.db.close();
 		}
@@ -485,9 +530,16 @@ describe("reapRun commit-through-reap sub-steps (warren-343a + warren-7ecc)", ()
 		});
 
 		expect(result.seedsCommitted).toBe(false);
-		expect(f.files.get("/data/burrow/ws/.seeds/issues.jsonl")).toBeUndefined();
-		const gitArgs = e.calls.filter((c) => c.cmd === "git").map((c) => c.args);
-		expect(gitArgs.find((a) => a.includes("add") && a.includes(".seeds/"))).toBeUndefined();
-		expect(gitArgs.find((a) => a.includes("commit"))).toBeUndefined();
+		expect(f.files.has("/data/burrow/ws/.seeds/issues.jsonl")).toBe(false);
+		const gitCalls = e.calls.filter((c) => c.cmd === "git");
+		// No add/commit for .seeds/ when hasSeeds=false
+		expect(
+			gitCalls.find(
+				(c) => c.args.includes("add") && c.args.includes(".seeds/") && c.cwd === PROJECT_PATH,
+			),
+		).toBeUndefined();
+		expect(
+			gitCalls.find((c) => c.args.includes("commit") && c.args.includes("--only")),
+		).toBeUndefined();
 	});
 });
