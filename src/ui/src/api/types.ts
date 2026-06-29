@@ -227,15 +227,6 @@ export interface CreateRunInput {
 	 * plot_id for a project without Plots returns a 400 ValidationError.
 	 */
 	plotId?: string;
-	/**
-	 * Run mode (pl-0344 step 4 / warren-b3b9). Defaults to `'batch'`
-	 * server-side; pass `'interactive'` together with `plotId` to spawn
-	 * an interactive turn. `interactiveAgent` may override `agent` when
-	 * mode is interactive so a UI surface can flip mode without
-	 * re-keying the picker (`agent` stays its batch default).
-	 */
-	mode?: "batch" | "interactive";
-	interactiveAgent?: string;
 	dispatcherHandle?: string;
 	/**
 	 * Optional continuation parent (warren-4b11). When set, the new run is
