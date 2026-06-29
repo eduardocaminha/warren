@@ -1,3 +1,4 @@
 {"type":"plot_created","actor":"user:operator","at":"2026-06-23T12:27:24.815Z","data":{"name":"Security Warden"}}
 {"type":"status_changed","actor":"user:operator","at":"2026-06-23T12:27:31.963Z","data":{"from":"drafting","to":"ready"}}
 {"type":"run_dispatched","actor":"user:operator","at":"2026-06-23T13:18:12.176Z","data":{"run_id":"run_wcrdfj774jwg","agent":"leveret","model":"claude-opus-4-8","project":"prj_74w0r1ytsqqc"}}
+{"type":"run_dispatched","actor":"user:cam-securitywatch","at":"2026-06-29T09:04:59.169Z","data":{"run_id":"run_7daybqxh801n","agent":"leveret","model":"claude-opus-4-8","project":"prj_74w0r1ytsqqc"}}
