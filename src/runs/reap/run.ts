@@ -1,6 +1,7 @@
 import type { BurrowClient } from "../../burrow-client/client.ts";
 import { withTransportMapping } from "../../burrow-client/client.ts";
 import type { EventRow, RunFailureReason, RunTerminalState } from "../../db/schema.ts";
+import { readReportOnly } from "../../registry/schema.ts";
 import { bindBridgeLogger } from "../stream/index.ts";
 import { runWorkspaceDestroy } from "./destroy.ts";
 import { createPipelineState, runReapPipeline } from "./pipeline.ts";
@@ -101,6 +102,7 @@ export async function reapRun(input: ReapRunInput): Promise<ReapRunResult> {
 				log,
 				emit,
 				fail,
+				reportOnly: readReportOnly(run.renderedAgentJson),
 			},
 			state,
 		);

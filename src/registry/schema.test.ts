@@ -5,6 +5,7 @@ import {
 	parseRenderedAgent,
 	RenderResponseSchema,
 	readProviderFrontmatter,
+	readReportOnly,
 	readRuntimeId,
 	readToolsFrontmatter,
 	withMaxCostUsdOverride,
@@ -306,5 +307,34 @@ describe("readToolsFrontmatter", () => {
 				frontmatter: { tools: "read" },
 			}),
 		).toThrow(/frontmatter\.tools must be an object/);
+	});
+});
+
+describe("readReportOnly (warren-4e30)", () => {
+	test("returns false when frontmatter is absent", () => {
+		expect(readReportOnly({})).toBe(false);
+		expect(readReportOnly({ frontmatter: {} })).toBe(false);
+		expect(readReportOnly(null)).toBe(false);
+		expect(readReportOnly(undefined)).toBe(false);
+	});
+
+	test("returns true for boolean true", () => {
+		expect(readReportOnly({ frontmatter: { report_only: true } })).toBe(true);
+	});
+
+	test("returns true for string 'true' (warren-5f07 coercion)", () => {
+		expect(readReportOnly({ frontmatter: { report_only: "true" } })).toBe(true);
+		expect(readReportOnly({ frontmatter: { report_only: "TRUE" } })).toBe(true);
+		expect(readReportOnly({ frontmatter: { report_only: "  true  " } })).toBe(true);
+	});
+
+	test("returns false for boolean false or string 'false'", () => {
+		expect(readReportOnly({ frontmatter: { report_only: false } })).toBe(false);
+		expect(readReportOnly({ frontmatter: { report_only: "false" } })).toBe(false);
+	});
+
+	test("returns false for unexpected types", () => {
+		expect(readReportOnly({ frontmatter: { report_only: 1 } })).toBe(false);
+		expect(readReportOnly({ frontmatter: { report_only: null } })).toBe(false);
 	});
 });

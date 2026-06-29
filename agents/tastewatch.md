@@ -4,6 +4,7 @@ description: "Taste auditor: weekly stratified sample of merged work judged agai
 runtime: pi
 provider: anthropic
 model: claude-opus-4-8
+report_only: true
 ---
 
 ## system

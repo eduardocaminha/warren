@@ -425,6 +425,28 @@ export function readAutoPlanRunAgent(
 	return undefined;
 }
 
+/**
+ * Read `report_only` from a frozen `renderedAgentJson` (warren-4e30). When
+ * true, reap treats a dirty-but-uncommitted workspace as success rather than
+ * `dropped_commit` — the agent's value is its seed/message output, not source
+ * changes. Accepts `true` (boolean) or `"true"` (string, warren-5f07 pattern).
+ * Defaults to false when the field is absent or the JSON shape is unexpected.
+ */
+export function readReportOnly(renderedAgentJson: unknown): boolean {
+	if (
+		renderedAgentJson === null ||
+		typeof renderedAgentJson !== "object" ||
+		Array.isArray(renderedAgentJson)
+	)
+		return false;
+	const fm = (renderedAgentJson as Record<string, unknown>).frontmatter;
+	if (fm === null || typeof fm !== "object" || Array.isArray(fm)) return false;
+	const v = (fm as Record<string, unknown>).report_only;
+	if (v === true) return true;
+	if (typeof v === "string") return v.trim().toLowerCase() === "true";
+	return false;
+}
+
 function formatZodIssue(issue: z.core.$ZodIssue): string {
 	const path = issue.path.length === 0 ? "<root>" : issue.path.join(".");
 	return `${path}: ${issue.message}`;
