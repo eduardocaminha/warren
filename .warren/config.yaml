@@ -22,11 +22,17 @@ interactiveAgents:
   plannerRuntime: claude-code
 
 # CI-fixer (src/ci-fixer/): each scheduler tick warren polls this project's
-# own failing PRs and dispatches cam-pr-fixer on the PR branch to repair CI,
-# so a red warren PR self-heals instead of sitting open. Gated by maxRetries
-# + cooldown (defaults). Enabled 2026-06-29.
+# own failing PRs and dispatches the fixer on the PR branch to repair CI,
+# so a red warren PR self-heals instead of sitting open. Enabled 2026-06-29.
+# role MUST be cam-pr-fixer (claude-code/subscription): the builtin pr-fixer
+# is runtime:pi / provider:anthropic (API) and never_starts on this
+# subscription-only box. maxRetries/cooldown bumped after 5 never_started
+# attempts capped #142/#148 at the default maxRetries=2.
 ciFixer:
   enabled: true
+  role: cam-pr-fixer
+  maxRetries: 6
+  cooldownMinutes: 5
 
 # ── Optional knobs (uncomment to set) ───────────────────────────────────
 
