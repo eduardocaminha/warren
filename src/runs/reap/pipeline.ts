@@ -96,6 +96,13 @@ export interface ReapPipelineContext {
 	readonly log: BoundBridgeLogger;
 	readonly emit: (kind: string, payload: unknown) => Promise<EventRow>;
 	readonly fail: (step: ReapStep, err: unknown, path?: string) => Promise<void>;
+	/**
+	 * True when the agent declared `report_only: true` in frontmatter
+	 * (warren-4e30). Exempts a dirty-but-uncommitted workspace from the
+	 * `dropped_commit` failure — the agent's value is its seed/message
+	 * output, not source changes.
+	 */
+	readonly reportOnly: boolean;
 }
 
 async function mergeMulchStep(ctx: ReapPipelineContext, state: ReapPipelineState): Promise<void> {
@@ -348,15 +355,20 @@ async function commitsAheadStep(ctx: ReapPipelineContext, state: ReapPipelineSta
 	if (state.commitsAhead !== 0) return;
 	// warren-72b9: dirty tree + zero commits = staged-but-uncommitted.
 	const dirty = await isWorkspaceDirty(ctx.exec, ctx.workspacePath);
-	state.droppedCommit = dirty && ctx.input.outcome === "succeeded";
+	// warren-4e30: report-only agents produce no commit by design; exempt them.
+	state.droppedCommit = dirty && ctx.input.outcome === "succeeded" && !ctx.reportOnly;
 	await ctx.emit("reap.empty_push", {
 		branch: ctx.branch,
 		baseBranch,
 		dirty,
 		droppedCommit: state.droppedCommit,
-		message: dirty
-			? "git push exited zero and the workspace still has uncommitted changes — agent staged work but never committed"
-			: "git push exited zero but the branch landed no new commits — agent did not commit",
+		reportOnly: ctx.reportOnly,
+		message:
+			dirty && ctx.reportOnly
+				? "git push exited zero and the workspace has uncommitted changes, but agent is report-only — treating as success"
+				: dirty
+					? "git push exited zero and the workspace still has uncommitted changes — agent staged work but never committed"
+					: "git push exited zero but the branch landed no new commits — agent did not commit",
 	});
 }
 

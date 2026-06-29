@@ -123,6 +123,95 @@ describe("reapRun", () => {
 		expect(run.failureReason).toBe("dropped_commit");
 	});
 
+	test("report-only agent: dirty tree + zero commits succeeds instead of dropped_commit (warren-4e30)", async () => {
+		const anchor = await ctx.repos.runs.require(ctx.runId);
+		if (anchor.projectId === null) throw new Error("setup failed: no projectId");
+		const run = await ctx.repos.runs.create({
+			agentName: "refactor-bot",
+			projectId: anchor.projectId,
+			prompt: "audit",
+			renderedAgentJson: { frontmatter: { report_only: true } },
+			trigger: "manual",
+			burrowId: "bur_reportonly001",
+			burrowRunId: "run_reportonly001",
+		});
+		await ctx.repos.burrows.create({ id: "bur_reportonly001", workerId: "local" });
+		await ctx.repos.runs.markRunning(run.id);
+
+		const e = fakeExec({ revListCount: "0", gitStatus: " M src/foo.ts\n?? new.ts\n" });
+
+		const result = await reapRun({
+			runId: run.id,
+			outcome: "succeeded",
+			repos: ctx.repos,
+			burrowClientPool: await makePool(fakeBurrowClient(makeBurrow()), ctx.repos),
+			broker: ctx.broker,
+			fs: fakeFs().fs,
+			exec: e.exec,
+		});
+
+		expect(result.commitsAhead).toBe(0);
+		expect(result.state).toBe("succeeded");
+		expect(result.failureReason).toBeNull();
+		const events = await ctx.repos.events.listByRun(run.id);
+		const empty = events.find((ev) => ev.kind === "reap.empty_push");
+		expect(empty?.payloadJson).toMatchObject({
+			dirty: true,
+			droppedCommit: false,
+			reportOnly: true,
+		});
+		const row = await ctx.repos.runs.require(run.id);
+		expect(row.state).toBe("succeeded");
+	});
+
+	test("report-only string true also exempts dirty workspace (warren-4e30 / warren-5f07 coercion)", async () => {
+		const anchor = await ctx.repos.runs.require(ctx.runId);
+		if (anchor.projectId === null) throw new Error("setup failed: no projectId");
+		const run = await ctx.repos.runs.create({
+			agentName: "refactor-bot",
+			projectId: anchor.projectId,
+			prompt: "audit",
+			renderedAgentJson: { frontmatter: { report_only: "true" } },
+			trigger: "manual",
+			burrowId: "bur_reportonly002",
+			burrowRunId: "run_reportonly002",
+		});
+		await ctx.repos.burrows.create({ id: "bur_reportonly002", workerId: "local" });
+		await ctx.repos.runs.markRunning(run.id);
+
+		const e = fakeExec({ revListCount: "0", gitStatus: " M src/foo.ts\n" });
+
+		const result = await reapRun({
+			runId: run.id,
+			outcome: "succeeded",
+			repos: ctx.repos,
+			burrowClientPool: await makePool(fakeBurrowClient(makeBurrow()), ctx.repos),
+			broker: ctx.broker,
+			fs: fakeFs().fs,
+			exec: e.exec,
+		});
+
+		expect(result.state).toBe("succeeded");
+		expect(result.failureReason).toBeNull();
+	});
+
+	test("coding run (no report_only) still fails as dropped_commit when dirty (warren-4e30 no-regression)", async () => {
+		const e = fakeExec({ revListCount: "0", gitStatus: " M src/foo.ts\n" });
+
+		const result = await reapRun({
+			runId: ctx.runId,
+			outcome: "succeeded",
+			repos: ctx.repos,
+			burrowClientPool: await makePool(fakeBurrowClient(makeBurrow()), ctx.repos),
+			broker: ctx.broker,
+			fs: fakeFs().fs,
+			exec: e.exec,
+		});
+
+		expect(result.state).toBe("failed");
+		expect(result.failureReason).toBe("dropped_commit");
+	});
+
 	test("git status probe failure degrades a zero-commit push to a no-op success (warren-72b9)", async () => {
 		const e = fakeExec({ revListCount: "0", failGitStatus: "fatal: not a git repo" });
 

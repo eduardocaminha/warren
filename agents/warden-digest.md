@@ -4,6 +4,7 @@ description: "Weekly digest driver: re-wakes the standing Audit Warden conversat
 runtime: pi
 provider: anthropic
 model: claude-sonnet-4-6
+report_only: true
 ---
 
 ## system
