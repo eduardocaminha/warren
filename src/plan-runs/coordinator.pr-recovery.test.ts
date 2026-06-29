@@ -2,9 +2,11 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { type Harness, NOW, neverPoll, setup } from "./coordinator.test-helpers.ts";
 import {
 	advancePlanRun,
+	type CoordinatorRecoverDirtyPrFn,
 	type CoordinatorReopenPrFn,
 	type CoordinatorTransitionPlotFn,
 } from "./coordinator.ts";
+import type { RecoverDirtyPrOutcome } from "./dirty-pr-recovery.ts";
 import type { AutoTransitionResult } from "./plot-transition.ts";
 
 // ---------------------------------------------------------------------------
@@ -351,5 +353,165 @@ describe("advancePlanRun — PR recovery and plan completion", () => {
 		});
 		expect(result.kind).toBe("plan_succeeded");
 		expect(called).toBe(false);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// warren-796b: dirty-PR auto-recovery — bookkeeping-only conflict rebase+push
+// ---------------------------------------------------------------------------
+
+async function setupPrOpenChild(harness: Harness): Promise<{ runId: string }> {
+	await harness.repos.planRuns.transitionTo(harness.planRun.id, "running", {
+		startedAt: NOW.toISOString(),
+	});
+	const runId = await harness.makeRun("warren-a");
+	await harness.repos.runs.markRunning(runId, NOW);
+	await harness.repos.runs.finalize(runId, "succeeded", NOW);
+	await harness.repos.runs.setPrUrl(runId, "https://github.com/x/y/pull/10");
+	await harness.repos.planRuns.updateChild({
+		planRunId: harness.planRun.id,
+		seq: 1,
+		patch: { runId, state: "pr_open", startedAt: NOW.toISOString() },
+	});
+	return { runId };
+}
+
+describe("advancePlanRun — dirty PR recovery (warren-796b)", () => {
+	let h: Harness;
+
+	beforeEach(async () => {
+		h = await setup();
+	});
+	afterEach(async () => {
+		await h.db.close();
+	});
+
+	test("dirty → recovered: emits dirty_pr_recovered, returns waiting_for_merge", async () => {
+		await setupPrOpenChild(h);
+		const planRun = await h.repos.planRuns.require(h.planRun.id);
+		const calls: Array<[string, string]> = [];
+		const recoverDirtyPr: CoordinatorRecoverDirtyPrFn = async (runId, prUrl) => {
+			calls.push([runId, prUrl]);
+			return "recovered" satisfies RecoverDirtyPrOutcome;
+		};
+		const result = await advancePlanRun({
+			planRun,
+			repos: h.repos,
+			showSeed: h.showSeedStub("open"),
+			checkPrMerged: async () => ({ kind: "dirty" }),
+			spawn: h.spawnStub(() => "unused"),
+			emit: h.emit,
+			recoverDirtyPr,
+			now: () => NOW,
+		});
+		expect(result.kind).toBe("waiting_for_merge");
+		expect(calls).toHaveLength(1);
+		expect(calls[0]?.[1]).toBe("https://github.com/x/y/pull/10");
+		expect(h.events.some((e) => e.kind === "plan_run.dirty_pr_recovered")).toBe(true);
+		// Plan still running — not failed.
+		const reloaded = await h.repos.planRuns.require(h.planRun.id);
+		expect(reloaded.state).toBe("running");
+	});
+
+	test("dirty → code_conflict: fails plan with pr_dirty_code_conflict", async () => {
+		const { runId } = await setupPrOpenChild(h);
+		const planRun = await h.repos.planRuns.require(h.planRun.id);
+		const recoverDirtyPr: CoordinatorRecoverDirtyPrFn = async () =>
+			"code_conflict" satisfies RecoverDirtyPrOutcome;
+		const result = await advancePlanRun({
+			planRun,
+			repos: h.repos,
+			showSeed: h.showSeedStub("open"),
+			checkPrMerged: async () => ({ kind: "dirty" }),
+			spawn: h.spawnStub(() => "unused"),
+			emit: h.emit,
+			recoverDirtyPr,
+			now: () => NOW,
+		});
+		expect(result.kind).toBe("plan_failed");
+		if (result.kind === "plan_failed") {
+			expect(result.reason).toBe("pr_dirty_code_conflict");
+		}
+		const reloaded = await h.repos.planRuns.require(h.planRun.id);
+		expect(reloaded.state).toBe("failed");
+		expect(reloaded.failureReason).toBe("pr_dirty_code_conflict");
+		void runId;
+	});
+
+	test("dirty → noop (no seam): falls through to handleOpenPr → waiting_for_merge", async () => {
+		await setupPrOpenChild(h);
+		const planRun = await h.repos.planRuns.require(h.planRun.id);
+		const result = await advancePlanRun({
+			planRun,
+			repos: h.repos,
+			showSeed: h.showSeedStub("open"),
+			checkPrMerged: async () => ({ kind: "dirty" }),
+			spawn: h.spawnStub(() => "unused"),
+			emit: h.emit,
+			// recoverDirtyPr omitted — no seam
+			mergeTimeoutMs: 60_000,
+			now: () => NOW,
+		});
+		// No seam → dirty treated as open → still within budget → waiting_for_merge
+		expect(result.kind).toBe("waiting_for_merge");
+		const reloaded = await h.repos.planRuns.require(h.planRun.id);
+		expect(reloaded.state).toBe("running");
+	});
+
+	test("dirty → noop outcome (transient): falls through to waiting_for_merge", async () => {
+		await setupPrOpenChild(h);
+		const planRun = await h.repos.planRuns.require(h.planRun.id);
+		const recoverDirtyPr: CoordinatorRecoverDirtyPrFn = async () =>
+			"noop" satisfies RecoverDirtyPrOutcome;
+		const result = await advancePlanRun({
+			planRun,
+			repos: h.repos,
+			showSeed: h.showSeedStub("open"),
+			checkPrMerged: async () => ({ kind: "dirty" }),
+			spawn: h.spawnStub(() => "unused"),
+			emit: h.emit,
+			recoverDirtyPr,
+			mergeTimeoutMs: 60_000,
+			now: () => NOW,
+		});
+		// Noop → fall through to handleOpenPr → within budget → waiting_for_merge
+		expect(result.kind).toBe("waiting_for_merge");
+		const reloaded = await h.repos.planRuns.require(h.planRun.id);
+		expect(reloaded.state).toBe("running");
+	});
+
+	test("dirty + past merge budget + no seam → child_pr_merge_timeout", async () => {
+		// Set up with endedAt 2h in the past so mergeDeadlineExceeded fires.
+		const TWO_HOURS_MS = 2 * 60 * 60 * 1000;
+		const pastEndedAt = new Date(NOW.getTime() - TWO_HOURS_MS);
+		await h.repos.planRuns.transitionTo(h.planRun.id, "running", {
+			startedAt: NOW.toISOString(),
+		});
+		const runId = await h.makeRun("warren-a");
+		await h.repos.runs.markRunning(runId, pastEndedAt);
+		await h.repos.runs.finalize(runId, "succeeded", pastEndedAt);
+		await h.repos.runs.setPrUrl(runId, "https://github.com/x/y/pull/10");
+		await h.repos.planRuns.updateChild({
+			planRunId: h.planRun.id,
+			seq: 1,
+			patch: { runId, state: "pr_open", startedAt: pastEndedAt.toISOString() },
+		});
+		const planRun = await h.repos.planRuns.require(h.planRun.id);
+		const result = await advancePlanRun({
+			planRun,
+			repos: h.repos,
+			showSeed: h.showSeedStub("open"),
+			checkPrMerged: async () => ({ kind: "dirty" }),
+			spawn: h.spawnStub(() => "unused"),
+			emit: h.emit,
+			mergeTimeoutMs: 60_000,
+			now: () => NOW,
+		});
+		// dirty → no seam → treated as open → past budget → timeout
+		expect(result.kind).toBe("plan_failed");
+		if (result.kind === "plan_failed") {
+			expect(result.reason).toBe("child_pr_merge_timeout");
+		}
+		void runId;
 	});
 });

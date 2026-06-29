@@ -86,6 +86,8 @@ export interface CheckPullRequestMergedInput {
 export type CheckPrMergedResult =
 	| { readonly kind: "merged"; readonly mergedAt: string }
 	| { readonly kind: "open" }
+	/** PR has merge conflicts (`mergeable_state === "dirty"`). warren-796b. */
+	| { readonly kind: "dirty" }
 	| { readonly kind: "closed_unmerged" }
 	| { readonly kind: "missing_token"; readonly message: string }
 	| { readonly kind: "http_error"; readonly status: number; readonly message: string };
@@ -126,7 +128,11 @@ export async function checkPullRequestMerged(
 		};
 	}
 
-	const body = (await readJson(res)) as { merged_at?: unknown; state?: unknown } | null;
+	const body = (await readJson(res)) as {
+		merged_at?: unknown;
+		state?: unknown;
+		mergeable_state?: unknown;
+	} | null;
 	const mergedAt = typeof body?.merged_at === "string" ? body.merged_at : null;
 	if (mergedAt !== null) {
 		return { kind: "merged", mergedAt };
@@ -134,6 +140,11 @@ export async function checkPullRequestMerged(
 	const state = typeof body?.state === "string" ? body.state : "";
 	if (state === "closed") {
 		return { kind: "closed_unmerged" };
+	}
+	// warren-796b: "dirty" is the definitive conflict signal. "unknown" means
+	// GitHub hasn't computed mergeability yet — treat that as open and re-poll.
+	if (body?.mergeable_state === "dirty") {
+		return { kind: "dirty" };
 	}
 	return { kind: "open" };
 }

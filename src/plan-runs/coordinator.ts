@@ -43,6 +43,7 @@ import {
 } from "../db/schema.ts";
 import { buildDispatchPrompt } from "../runs/dispatch-prompt.ts";
 import { SeedNotFoundError, type SeedShowResult } from "../seeds-cli/index.ts";
+import type { CoordinatorRecoverDirtyPrFn } from "./dirty-pr-recovery.ts";
 import {
 	defaultResolveExecution,
 	executionFields,
@@ -53,6 +54,7 @@ import { type CoordinatorReopenPrFn, checkParentRunMerged } from "./merge-gate.t
 import type { AutoTransitionResult } from "./plot-transition.ts";
 import type { PrMergeChecker } from "./pr-merge.ts";
 
+export type { CoordinatorRecoverDirtyPrFn, RecoverDirtyPrOutcome } from "./dirty-pr-recovery.ts";
 export type { CoordinatorReopenPrFn } from "./merge-gate.ts";
 
 export type CoordinatorRepos = Pick<Repos, "planRuns" | "runs" | "events">;
@@ -130,6 +132,8 @@ export const PLAN_RUN_EVENT_KINDS = [
 	"plan_run.plot_status_skipped",
 	"plan_run.plot_auto_done_failed",
 	"plan_run.waiting_for_pr_reopen",
+	/** warren-796b: bookkeeping-dirty auto-rebase + re-push succeeded. */
+	"plan_run.dirty_pr_recovered",
 ] as const;
 export type PlanRunEventKind = (typeof PLAN_RUN_EVENT_KINDS)[number];
 
@@ -162,6 +166,8 @@ export interface AdvancePlanRunInput {
 	readonly mergeTimeoutMs?: number;
 	/** warren-22de: PR-(re)open seam. See {@link CoordinatorReopenPrFn}. */
 	readonly reopenPr?: CoordinatorReopenPrFn;
+	/** warren-796b: bookkeeping-dirty-recovery seam. See {@link CoordinatorRecoverDirtyPrFn}. */
+	readonly recoverDirtyPr?: CoordinatorRecoverDirtyPrFn;
 	readonly now?: () => Date;
 }
 
@@ -217,6 +223,7 @@ export async function advancePlanRun(input: AdvancePlanRunInput): Promise<Advanc
 				mergeTimeoutMs,
 				now: nowFn,
 				reopenPr: input.reopenPr,
+				recoverDirtyPr: input.recoverDirtyPr,
 			});
 			if (decision.kind === "merged") {
 				mergedChildSeq = inFlight.seq;

@@ -21,6 +21,7 @@ import type {
 	CoordinatorResolveExecutionFn,
 	CoordinatorShowSeedFn,
 } from "./coordinator.ts";
+import type { CoordinatorRecoverDirtyPrFn } from "./dirty-pr-recovery.ts";
 import {
 	type CoordinatorReopenPrFn,
 	hasEmptyPushEvent,
@@ -119,6 +120,7 @@ export interface HandleInFlightInput {
 	readonly mergeTimeoutMs: number;
 	readonly now: () => Date;
 	readonly reopenPr?: CoordinatorReopenPrFn; // warren-22de: (re)open PR before failing
+	readonly recoverDirtyPr?: CoordinatorRecoverDirtyPrFn; // warren-796b: bookkeeping-dirty recovery
 }
 
 export type HandleInFlightDecision =
@@ -283,6 +285,37 @@ async function handleOpenPr(
 }
 
 /**
+ * Handle a `{ kind: "dirty" }` PR (warren-796b). Attempt auto-rebase+push
+ * via the injected seam if available. On success emit
+ * `plan_run.dirty_pr_recovered` and keep waiting. On code conflict fail the
+ * child terminally. On noop (or no seam) fall through to the normal
+ * `handleOpenPr` path so the merge-wait timeout still applies.
+ */
+async function handleDirtyPr(
+	input: HandleInFlightInput,
+	run: RunRow,
+	effectivePrUrl: string,
+): Promise<HandleInFlightDecision> {
+	const { emit, planRun, child } = input;
+	if (input.recoverDirtyPr !== undefined) {
+		const outcome = await input.recoverDirtyPr(run.id, effectivePrUrl);
+		if (outcome === "code_conflict") {
+			return await failChild(input, run, "pr_dirty_code_conflict", { prUrl: effectivePrUrl });
+		}
+		if (outcome === "recovered") {
+			await emit(run.id, "plan_run.dirty_pr_recovered", {
+				planRunId: planRun.id,
+				seq: child.seq,
+				prUrl: effectivePrUrl,
+			});
+			return { kind: "result", result: { kind: "waiting_for_merge" } };
+		}
+		// "noop" — fall through to handleOpenPr so the merge-wait timeout applies.
+	}
+	return await handleOpenPr(input, run, effectivePrUrl);
+}
+
+/**
  * Poll the child PR's merge state and settle the child accordingly:
  * merged → fall through to dispatch, open → wait/timeout, closed/fatal →
  * fail, transient → keep waiting.
@@ -315,6 +348,9 @@ async function pollMergeState(
 	}
 	if (polled.kind === "open") {
 		return await handleOpenPr(input, run, effectivePrUrl);
+	}
+	if (polled.kind === "dirty") {
+		return await handleDirtyPr(input, run, effectivePrUrl);
 	}
 	if (polled.kind === "closed_unmerged" || isFatalHttpError(polled)) {
 		const extra: Record<string, unknown> = { prUrl: effectivePrUrl };

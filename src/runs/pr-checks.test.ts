@@ -43,6 +43,22 @@ describe("checkPullRequestMerged", () => {
 		expect(result).toEqual({ kind: "closed_unmerged" });
 	});
 
+	test("200 with mergeable_state:'dirty' → dirty (warren-796b)", async () => {
+		const { fetch } = recordingFetch([
+			jsonResponse(200, { merged_at: null, state: "open", mergeable_state: "dirty" }),
+		]);
+		const result = await checkPullRequestMerged({ ...baseArgs, fetch });
+		expect(result).toEqual({ kind: "dirty" });
+	});
+
+	test("200 with mergeable_state:'unknown' → open (not yet computed)", async () => {
+		const { fetch } = recordingFetch([
+			jsonResponse(200, { merged_at: null, state: "open", mergeable_state: "unknown" }),
+		]);
+		const result = await checkPullRequestMerged({ ...baseArgs, fetch });
+		expect(result).toEqual({ kind: "open" });
+	});
+
 	test("404 → http_error", async () => {
 		const { fetch } = recordingFetch([jsonResponse(404, { message: "Not Found" })]);
 		const result = await checkPullRequestMerged({ ...baseArgs, fetch });

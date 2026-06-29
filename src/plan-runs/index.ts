@@ -17,6 +17,7 @@ export {
 	type AdvanceResult,
 	advancePlanRun,
 	type CoordinatorEmitFn,
+	type CoordinatorRecoverDirtyPrFn,
 	type CoordinatorReopenPrFn,
 	type CoordinatorRepos,
 	type CoordinatorShowSeedFn,
@@ -28,7 +29,14 @@ export {
 	isChildTerminal,
 	PLAN_RUN_EVENT_KINDS,
 	type PlanRunEventKind,
+	type RecoverDirtyPrOutcome,
 } from "./coordinator.ts";
+export {
+	type CreateRecoverDirtyPrFnInput,
+	createRecoverDirtyPrFn,
+	type RecoverRunBranchInput,
+	recoverRunBranch,
+} from "./dirty-pr-recovery.ts";
 export {
 	type CreatePlanRunSpawnInput,
 	createPlanRunSpawn,
