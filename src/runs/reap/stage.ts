@@ -18,113 +18,214 @@ import type { ReapExec, ReapFs } from "./types.ts";
  */
 const PLOT_INDEX_SKIP_PREFIX = ".index.db";
 
+/**
+ * After a `merge=union` rebase in the isolated push worktree, dedup any
+ * `.plot/*.events.jsonl` files that accumulated duplicate `id` rows and amend
+ * the top commit in-place. Extracted from `stagePlotForCommit`'s `postRebase`
+ * callback to keep that function's cognitive complexity within budget.
+ */
+async function dedupPlotEventFiles(
+	worktreePath: string,
+	fs: ReapFs,
+	exec: ReapExec,
+): Promise<void> {
+	let entries: readonly string[] = [];
+	try {
+		entries = await fs.readdir(join(worktreePath, ".plot"));
+	} catch {
+		return;
+	}
+	const eventFiles = entries.filter(
+		(name) => name.startsWith("plot-") && name.endsWith(".events.jsonl"),
+	);
+	const amendedPathspecs: string[] = [];
+	for (const name of eventFiles) {
+		const filePath = join(worktreePath, ".plot", name);
+		const body = await fs.readFile(filePath);
+		if (body === null) continue;
+		const deduped = dedupJsonl(body);
+		if (deduped === body) continue;
+		await fs.writeFile(filePath, deduped);
+		amendedPathspecs.push(join(".plot", name));
+	}
+	if (amendedPathspecs.length === 0) return;
+	await exec.run("git", ["add", "--", ...amendedPathspecs], {
+		cwd: worktreePath,
+		timeoutMs: 10_000,
+	});
+	let hasDedupdelta: boolean;
+	try {
+		await exec.run("git", ["diff", "--cached", "--quiet", "--", ...amendedPathspecs], {
+			cwd: worktreePath,
+			timeoutMs: 10_000,
+		});
+		hasDedupdelta = false;
+	} catch {
+		hasDedupdelta = true;
+	}
+	if (!hasDedupdelta) return;
+	await exec.run(
+		"git",
+		[...warrenCommitIdentityArgs(), "commit", "--amend", "--no-verify", "--no-edit"],
+		{ cwd: worktreePath, timeoutMs: 10_000 },
+	);
+}
+
 interface StagePlotForCommitInput {
 	readonly workspacePath: string;
 	readonly projectPath: string;
+	/** Branch to push the bookkeeping commit to directly (e.g. "main"). */
+	readonly targetBranch: string;
 	readonly fs: ReapFs;
 	readonly exec: ReapExec;
 	readonly emit: (kind: string, payload: unknown) => Promise<EventRow>;
 }
 
 /**
- * Replicate every committable `.plot/` file from the project clone into
- * the burrow workspace, then stage `.plot/` and author a
- * `chore(warren): plot state` commit when there's a real delta the agent
- * never committed. Returns true when a warren-identity commit landed.
+ * Stage and commit committable `.plot/` files in the project clone (not the
+ * burrow workspace), then push that commit directly to `targetBranch` via
+ * `rebasePushToMain`. Returns true when a warren-identity commit was committed
+ * and pushed.
  *
- * The project clone is the union point: by this step `mergePlot` has
- * already merged the workspace's agent-side `.plot/` writes into the
- * project clone, and the project clone also carries any host-side
- * appender writes (`defaultPlotAppender`, `defaultPlanRunPlotAppender`,
- * `autoTransitionPlotToDone`) that warren wrote at dispatch / plan-run
- * coordination time. Copying that union back into the workspace gives
- * `git push` a single canonical view to ship to origin.
+ * **Why direct-push instead of run branch?** The same race that hit seeds
+ * (warren-1a00, plan pl-b5f1) applies to plot: GitHub ignores `merge=union`
+ * on PR merges, so concurrent reap PRs with `.plot/*.events.jsonl` changes
+ * produce real conflicts. Routing the bookkeeping commit around the PR queue
+ * via fetch→rebase→push (where `merge=union` fires correctly) eliminates the
+ * race (warren-1312, pl-b5f1 step 5).
  *
- * `.plot/.index.db*` files are skipped — derived SQLite state Plot
- * rebuilds via `plot rebuild-index` (mx-239786). Anything that isn't
- * `plot-*.json` or `plot-*.events.jsonl` is also skipped: the SPEC §11.O
- * file layout for `.plot/` is flat and these two extensions cover the
- * full carrier surface; filtering keeps stray dotfiles out of the warren
- * commit.
+ * The project clone is the canonical union point: by this step `mergePlot` has
+ * already merged the workspace's agent-side `.plot/` writes into the project
+ * clone, and the project clone also carries any host-side appender writes
+ * (`defaultPlotAppender`, `defaultPlanRunPlotAppender`,
+ * `autoTransitionPlotToDone`). Committing that merged view directly in the
+ * project clone and pushing gives origin a single authoritative write without
+ * touching the run branch.
  *
- * The `git add` / staged-delta / `--only` commit pathspecs are limited
- * to the actually-copied carrier files (warren-c55e, symmetric with
- * stageSeedsForCommit / #420) so a pre-staged unrelated file — even one
- * under `.plot/` — can neither spoof a staged delta nor be swept into
- * the warren bookkeeping commit. The add still honors a project-level
- * `.gitignore` of `.plot/`: a project that gitignored the directory has
- * opted out of committing Plot state, the copied carriers stage nothing,
- * and the staged-changes check below sees no entries.
+ * A `postRebase` hook deduplicates `.plot/*.events.jsonl` files in the isolated
+ * push worktree after each rebase (last-write-wins by `id`) so `merge=union`
+ * duplicate rows from concurrent direct-pushes are collapsed before the commit
+ * lands on origin.
+ *
+ * **Workspace cleanup:** the agent may have staged or modified `.plot/` files
+ * without committing them. After routing plot to main, those changes are removed
+ * from the workspace so the run branch stays clean and `isWorkspaceDirty` does
+ * not falsely trigger `droppedCommit` for a plot-only run.
+ *
+ * `.plot/.index.db*` files and entries that don't match `plot-*.json` or
+ * `plot-*.events.jsonl` are excluded — same filter as the old workspace-copy
+ * path (warren-c55e).
  */
 export async function stagePlotForCommit(input: StagePlotForCommitInput): Promise<boolean> {
-	const { workspacePath, projectPath, fs, exec, emit } = input;
+	const { workspacePath, projectPath, targetBranch, fs, exec, emit } = input;
 	const projectPlotDir = join(projectPath, ".plot");
-	const workspacePlotDir = join(workspacePath, ".plot");
 
+	// Discover committable plot files in the project clone.
 	const entries = await fs.readdir(projectPlotDir);
-	const copiedPathspecs: string[] = [];
+	const committableFiles: string[] = [];
 	for (const name of entries) {
 		if (name.startsWith(PLOT_INDEX_SKIP_PREFIX)) continue;
 		if (!name.startsWith("plot-")) continue;
 		if (!name.endsWith(".json") && !name.endsWith(".events.jsonl")) continue;
-		const contents = await fs.readFile(join(projectPlotDir, name));
-		if (contents === null) continue;
-		if (copiedPathspecs.length === 0) await fs.mkdirp(workspacePlotDir);
-		await fs.writeFile(join(workspacePlotDir, name), contents);
-		copiedPathspecs.push(join(".plot", name));
+		committableFiles.push(name);
 	}
-	const copied = copiedPathspecs.length;
-	if (copied === 0) return false;
+	if (committableFiles.length === 0) return false;
 
-	await exec.run("git", ["add", "--", ...copiedPathspecs], {
-		cwd: workspacePath,
+	const committablePathspecs = committableFiles.map((name) => join(".plot", name));
+
+	// Remove agent-side plot changes from the workspace so uncommitted plot
+	// state does not appear on the run branch or cause a false droppedCommit.
+	// The canonical merged plot view lives in the project clone and goes to
+	// main via direct push below. Errors are swallowed (best-effort cleanup).
+	await exec
+		.run("git", ["restore", "--staged", "--", ".plot/"], {
+			cwd: workspacePath,
+			timeoutMs: 10_000,
+		})
+		.catch(() => {});
+	await exec
+		.run("git", ["restore", "--", ".plot/"], {
+			cwd: workspacePath,
+			timeoutMs: 10_000,
+		})
+		.catch(() => {});
+	await exec
+		.run("git", ["clean", "-f", "--", ".plot/"], {
+			cwd: workspacePath,
+			timeoutMs: 10_000,
+		})
+		.catch(() => {});
+
+	// Stage plot files in the project clone.
+	await exec.run("git", ["add", "--", ...committablePathspecs], {
+		cwd: projectPath,
 		timeoutMs: 10_000,
 	});
 
 	// warren-be12 (#420) / warren-c55e: narrow the staged-delta guard to the
-	// actually-copied `.plot/` carriers (symmetry with the `--only`
-	// pathspecs below, and with stageSeedsForCommit) so an unrelated
-	// pre-staged file under `.plot/` can't spoof a delta. `git diff
-	// --cached --quiet` exits non-zero when there's a staged change — the
-	// natural primitive for "did the add pick up a delta the agent hadn't
-	// already committed".
+	// committable carriers so an unrelated pre-staged file under `.plot/` can't
+	// spoof a delta.
 	let hasStagedDelta: boolean;
 	try {
-		await exec.run("git", ["diff", "--cached", "--quiet", "--", ...copiedPathspecs], {
-			cwd: workspacePath,
+		await exec.run("git", ["diff", "--cached", "--quiet", "--", ...committablePathspecs], {
+			cwd: projectPath,
 			timeoutMs: 10_000,
 		});
 		hasStagedDelta = false;
 	} catch {
 		hasStagedDelta = true;
 	}
-	if (!hasStagedDelta) return false;
 
+	if (!hasStagedDelta) {
+		await exec
+			.run("git", ["restore", "--staged", "--", ".plot/"], {
+				cwd: projectPath,
+				timeoutMs: 10_000,
+			})
+			.catch(() => {});
+		return false;
+	}
+
+	// Commit in the project clone (not the workspace/run branch).
 	await exec.run(
 		"git",
 		[
 			...warrenCommitIdentityArgs(),
 			"commit",
-			// warren-27d3: internal bookkeeping commits must never be gated by
-			// the project's git hooks (e.g. a pre-commit hook running the full
-			// check:all gauntlet). --no-verify skips pre-commit / commit-msg.
+			// warren-27d3: skip project git hooks for warren's bookkeeping commit.
 			"--no-verify",
 			// warren-be12 (#420) / warren-c55e: path-limit the commit to the
-			// actually-copied `.plot/` carriers via `--only` so any unrelated
-			// files an earlier step pre-staged in the workspace index — even
-			// ones under `.plot/` — are not swept into the warren bookkeeping
-			// commit.
+			// committable carriers via `--only` so pre-staged unrelated files are
+			// not swept into the warren bookkeeping commit.
 			"--only",
 			"-m",
 			"chore(warren): plot state",
 			"--",
-			...copiedPathspecs,
+			...committablePathspecs,
 		],
-		{ cwd: workspacePath, timeoutMs: 10_000 },
+		{ cwd: projectPath, timeoutMs: 10_000 },
 	);
+
+	// Push the bookkeeping commit directly to main (bypassing the run branch).
+	// postRebase deduplicates .events.jsonl files in the worktree so merge=union
+	// duplicates from concurrent direct-pushes are collapsed before the push lands.
+	const pushResult = await rebasePushToMain({
+		projectPath,
+		targetBranch,
+		exec,
+		postRebase: (wt) => dedupPlotEventFiles(wt, fs, exec),
+	});
+
+	if (!pushResult.ok) {
+		const detail = "message" in pushResult ? `: ${pushResult.message}` : "";
+		throw new Error(`plot direct push failed: ${pushResult.reason}${detail}`);
+	}
+
 	await emit("reap.plot_committed", {
 		message: "chore(warren): plot state",
-		filesStaged: copied,
+		filesStaged: committableFiles.length,
+		directPush: true,
+		attempts: pushResult.attempts,
 	});
 	return true;
 }

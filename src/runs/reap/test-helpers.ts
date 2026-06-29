@@ -278,6 +278,42 @@ export async function setup(): Promise<Ctx> {
 	};
 }
 
+export const PROJECT_PATH = "/data/projects/x/y";
+export const WORKSPACE_PATH = "/data/burrow/ws";
+
+export async function setupWithFeatures(
+	flags: { hasPlot?: boolean; hasSeeds?: boolean } = {},
+): Promise<Ctx> {
+	const db = await openDatabase({ path: ":memory:" });
+	const repos = createRepos(db);
+	await repos.agents.upsert({ name: "refactor-bot", renderedJson: { sections: { system: "x" } } });
+	const project = await repos.projects.create({
+		gitUrl: "https://github.com/x/y.git",
+		localPath: PROJECT_PATH,
+		defaultBranch: "main",
+		...flags,
+	});
+	const run = await repos.runs.create({
+		agentName: "refactor-bot",
+		projectId: project.id,
+		prompt: "p",
+		renderedAgentJson: {},
+		trigger: "manual",
+		burrowId: "bur_aaaaaaaaaaaa",
+		burrowRunId: "run_zzzzzzzzzzzz",
+	});
+	await repos.burrows.create({ id: "bur_aaaaaaaaaaaa", workerId: "local" });
+	await repos.runs.markRunning(run.id);
+	return {
+		db,
+		repos,
+		broker: new RunEventBroker(),
+		runId: run.id,
+		projectPath: project.localPath,
+		workspacePath: WORKSPACE_PATH,
+	};
+}
+
 export function fakeOpenPr(
 	responses: ReadonlyArray<OpenPullRequestResult | (() => OpenPullRequestResult)>,
 ): {

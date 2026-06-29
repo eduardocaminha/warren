@@ -61,8 +61,8 @@ describe("defaultPlotSyncer.sync", () => {
 		}
 	});
 
-	test("performs full sync with PR open and immediate merge", async () => {
-		const tempDir = mkdtempSync(join(tmpdir(), "warren-sync-full-"));
+	test("immediate mode: pushes directly to main without opening a PR (warren-1312)", async () => {
+		const tempDir = mkdtempSync(join(tmpdir(), "warren-sync-immediate-"));
 		const plotDir = join(tempDir, ".plot");
 		mkdirSync(plotDir, { recursive: true });
 		writeFileSync(join(plotDir, "plot-1.json"), '{"id":"plot-1"}');
@@ -77,10 +77,8 @@ describe("defaultPlotSyncer.sync", () => {
 			return { stdout: "", stderr: "", exitCode: 0 };
 		};
 
-		const { fetch, calls: fetchCalls } = stubFetch([
-			jsonResponse(201, { html_url: "https://github.com/owner/repo/pull/42" }),
-			jsonResponse(200, { merged: true, sha: "mergesha123" }),
-		]);
+		// No fetch stubs — immediate mode must not call the GitHub API.
+		const { fetch: noCallFetch, calls: fetchCalls } = stubFetch([]);
 
 		try {
 			const result = await defaultPlotSyncer.sync({
@@ -94,39 +92,87 @@ describe("defaultPlotSyncer.sync", () => {
 					targetBranch: "main",
 				},
 				spawn,
-				fetch,
+				fetch: noCallFetch,
 				gitBinary: "git",
 			});
 
-			expect(result.kind).toBe("synced");
-			if (result.kind === "synced") {
-				expect(result.branch).toMatch(/^warren\/plot-sync-[a-f0-9]{8}$/);
-				expect(result.prUrl).toBe("https://github.com/owner/repo/pull/42");
-				expect(result.prNumber).toBe(42);
-				expect(result.merged).toBe(true);
+			expect(result.kind).toBe("direct_push");
+			if (result.kind === "direct_push") {
+				expect(result.targetBranch).toBe("main");
+				expect(result.attempts).toBeGreaterThanOrEqual(1);
 			}
 
-			// Verify spawn calls for git commands
+			// No PR-related API calls.
+			expect(fetchCalls).toHaveLength(0);
+
+			// Direct-push git flow: status, fetch (prune), worktree add (detached),
+			// add, commit, fetch (retry loop), rebase, push HEAD:<target>, worktree remove.
 			const hasCommand = (subcmd: string) => spawnCalls.some((c) => c.includes(subcmd));
 			expect(hasCommand("status")).toBe(true);
 			expect(hasCommand("fetch")).toBe(true);
 			expect(hasCommand("worktree")).toBe(true);
 			expect(hasCommand("add")).toBe(true);
 			expect(hasCommand("commit")).toBe(true);
-			expect(hasCommand("push")).toBe(true);
-
-			// Verify PR open and merge requests
-			expect(fetchCalls).toHaveLength(2);
-			expect(fetchCalls[0]?.url).toBe("https://api.github.com/repos/owner/repo/pulls");
-			expect(fetchCalls[0]?.method).toBe("POST");
-			expect(fetchCalls[1]?.url).toBe("https://api.github.com/repos/owner/repo/pulls/42/merge");
-			expect(fetchCalls[1]?.method).toBe("PUT");
+			// Push must target HEAD:main (not a PR branch).
+			expect(spawnCalls.some((c) => c.includes("push") && c.includes("HEAD:main"))).toBe(true);
+			// No PR branch (warren/plot-sync-*) pushed.
+			expect(
+				spawnCalls.some(
+					(c) => c.includes("push") && c.some((arg) => arg.startsWith("warren/plot-sync-")),
+				),
+			).toBe(false);
+			// Worktree is detached (--detach), not a named branch.
+			expect(
+				spawnCalls.some(
+					(c) => c.includes("worktree") && c.includes("add") && c.includes("--detach"),
+				),
+			).toBe(true);
 		} finally {
 			rmSync(tempDir, { recursive: true, force: true });
 		}
 	});
 
-	test("respects manual mergeStrategy and skips merge step", async () => {
+	test("auto mode: pushes directly to main without opening a PR (warren-1312)", async () => {
+		const tempDir = mkdtempSync(join(tmpdir(), "warren-sync-auto-"));
+		const plotDir = join(tempDir, ".plot");
+		mkdirSync(plotDir, { recursive: true });
+		writeFileSync(join(plotDir, "plot-2.events.jsonl"), '{"event":"updated"}\n');
+
+		const spawnCalls: string[][] = [];
+		const spawn = async (cmd: readonly string[]) => {
+			spawnCalls.push(cmd as string[]);
+			if (cmd.includes("status")) {
+				return { stdout: " M .plot/plot-2.events.jsonl\n", stderr: "", exitCode: 0 };
+			}
+			return { stdout: "", stderr: "", exitCode: 0 };
+		};
+
+		const { fetch: noCallFetch, calls: fetchCalls } = stubFetch([]);
+
+		try {
+			const result = await defaultPlotSyncer.sync({
+				projectPath: tempDir,
+				gitUrl: "https://github.com/owner/repo",
+				defaultBranch: "main",
+				token: "ghp_test",
+				handle: "alice",
+				plotSyncConfig: { mergeStrategy: "auto" },
+				spawn,
+				fetch: noCallFetch,
+				gitBinary: "git",
+			});
+
+			expect(result.kind).toBe("direct_push");
+			if (result.kind === "direct_push") {
+				expect(result.targetBranch).toBe("main");
+			}
+			expect(fetchCalls).toHaveLength(0);
+		} finally {
+			rmSync(tempDir, { recursive: true, force: true });
+		}
+	});
+
+	test("respects manual mergeStrategy and opens a PR (unchanged path)", async () => {
 		const tempDir = mkdtempSync(join(tmpdir(), "warren-sync-manual-"));
 		const plotDir = join(tempDir, ".plot");
 		mkdirSync(plotDir, { recursive: true });
@@ -169,6 +215,12 @@ describe("defaultPlotSyncer.sync", () => {
 
 			expect(fetchCalls).toHaveLength(1);
 			expect(fetchCalls[0]?.url).toBe("https://api.github.com/repos/owner/repo/pulls");
+			// PR branch (warren/plot-sync-*) is pushed.
+			expect(
+				spawnCalls.some(
+					(c) => c.includes("push") && c.some((arg) => arg.startsWith("warren/plot-sync-")),
+				),
+			).toBe(true);
 		} finally {
 			rmSync(tempDir, { recursive: true, force: true });
 		}

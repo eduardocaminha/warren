@@ -2,18 +2,18 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { reapRun } from "./index.ts";
 import {
 	type Ctx,
-	createRepos,
 	fakeBurrowClient,
 	fakeExec,
 	fakeFs,
 	makeBurrow,
 	makePool,
-	openDatabase,
-	RunEventBroker,
+	PROJECT_PATH,
 	setup,
+	setupWithFeatures,
+	WORKSPACE_PATH,
 } from "./test-helpers.ts";
 
-describe("reapRun commit-through-reap sub-steps (warren-343a + warren-7ecc)", () => {
+describe("reapRun plot-direct-push (warren-1312)", () => {
 	let ctx: Ctx;
 
 	beforeEach(async () => {
@@ -24,46 +24,8 @@ describe("reapRun commit-through-reap sub-steps (warren-343a + warren-7ecc)", ()
 		await ctx.db.close();
 	});
 
-	/* ------------------------------------------------------------------ */
-	/* warren-343a: commit-through-reap for .plot/                         */
-	/* ------------------------------------------------------------------ */
-
-	async function setupWithPlot(): Promise<Ctx> {
-		const db = await openDatabase({ path: ":memory:" });
-		const repos = createRepos(db);
-		await repos.agents.upsert({
-			name: "refactor-bot",
-			renderedJson: { sections: { system: "x" } },
-		});
-		const project = await repos.projects.create({
-			gitUrl: "https://github.com/x/y.git",
-			localPath: "/data/projects/x/y",
-			defaultBranch: "main",
-			hasPlot: true,
-		});
-		const run = await repos.runs.create({
-			agentName: "refactor-bot",
-			projectId: project.id,
-			prompt: "p",
-			renderedAgentJson: {},
-			trigger: "manual",
-			burrowId: "bur_aaaaaaaaaaaa",
-			burrowRunId: "run_zzzzzzzzzzzz",
-		});
-		await repos.burrows.create({ id: "bur_aaaaaaaaaaaa", workerId: "local" });
-		await repos.runs.markRunning(run.id);
-		return {
-			db,
-			repos,
-			broker: new RunEventBroker(),
-			runId: run.id,
-			projectPath: project.localPath,
-			workspacePath: "/data/burrow/ws",
-		};
-	}
-
-	test("authors a warren commit when project .plot/ has a delta the agent never committed (warren-343a)", async () => {
-		const plotCtx = await setupWithPlot();
+	test("commits plot directly to main (not run branch) when project .plot/ has a delta (warren-1312)", async () => {
+		const plotCtx = await setupWithFeatures({ hasPlot: true });
 		try {
 			const f = fakeFs({
 				"/data/projects/x/y/.plot/plot-abc.events.jsonl":
@@ -83,16 +45,20 @@ describe("reapRun commit-through-reap sub-steps (warren-343a + warren-7ecc)", ()
 			});
 
 			expect(result.plotCommitted).toBe(true);
-			expect(f.files.get("/data/burrow/ws/.plot/plot-abc.events.jsonl")).toContain(
-				"run_dispatched",
-			);
-			expect(f.files.get("/data/burrow/ws/.plot/plot-abc.json")).toContain('"status":"active"');
-			const gitArgs = e.calls.filter((c) => c.cmd === "git").map((c) => c.args);
-			// warren-c55e: per-carrier pathspecs (sorted), symmetric with seeds.
+			expect(f.files.has("/data/burrow/ws/.plot/plot-abc.events.jsonl")).toBe(false);
+			expect(f.files.has("/data/burrow/ws/.plot/plot-abc.json")).toBe(false);
+
+			const gitCalls = e.calls.filter((c) => c.cmd === "git");
 			const paths = [".plot/plot-abc.events.jsonl", ".plot/plot-abc.json"];
-			expect(gitArgs).toContainEqual(["add", "--", ...paths]);
-			expect(gitArgs).toContainEqual(["diff", "--cached", "--quiet", "--", ...paths]);
-			const commit = gitArgs.find((a) => a[0] === "-c" && a.includes("commit"));
+
+			const addCall = gitCalls.find(
+				(c) => c.args[0] === "add" && paths.every((p) => c.args.includes(p)),
+			);
+			expect(addCall?.cwd).toBe(PROJECT_PATH);
+
+			const commit = gitCalls
+				.map((c) => c.args)
+				.find((a) => a[0] === "-c" && a.includes("commit") && a.includes("--only"));
 			expect(commit).toEqual([
 				"-c",
 				"user.name=warren",
@@ -106,15 +72,66 @@ describe("reapRun commit-through-reap sub-steps (warren-343a + warren-7ecc)", ()
 				"--",
 				...paths,
 			]);
+			const commitCall = gitCalls.find(
+				(c) => c.args[0] === "-c" && c.args.includes("commit") && c.args.includes("--only"),
+			);
+			expect(commitCall?.cwd).toBe(PROJECT_PATH);
+
+			expect(gitCalls.some((c) => c.args[0] === "worktree" && c.args[1] === "add")).toBe(true);
+			expect(gitCalls.some((c) => c.args[0] === "push" && c.args.includes("HEAD:main"))).toBe(true);
+
 			const events = await plotCtx.repos.events.listByRun(plotCtx.runId);
-			expect(events.find((ev) => ev.kind === "reap.plot_committed")).toBeDefined();
+			const plotEvent = events.find((ev) => ev.kind === "reap.plot_committed");
+			expect(plotEvent).toBeDefined();
+			expect((plotEvent?.payloadJson as { directPush?: boolean })?.directPush).toBe(true);
 		} finally {
 			await plotCtx.db.close();
 		}
 	});
 
-	test("path-limits the plot commit to .plot/ so pre-staged unrelated files aren't swept in (warren-be12)", async () => {
-		const plotCtx = await setupWithPlot();
+	test("workspace .plot/ is cleaned up (restore+clean) before the run branch push (warren-1312)", async () => {
+		const plotCtx = await setupWithFeatures({ hasPlot: true });
+		try {
+			const f = fakeFs({
+				"/data/projects/x/y/.plot/plot-abc.events.jsonl":
+					'{"type":"run_dispatched","actor":"user:operator","at":"2026-05-18T10:00:00Z","data":{}}\n',
+			});
+			const e = fakeExec({ stagedDelta: true });
+
+			await reapRun({
+				runId: plotCtx.runId,
+				outcome: "succeeded",
+				repos: plotCtx.repos,
+				burrowClientPool: await makePool(fakeBurrowClient(makeBurrow()), plotCtx.repos),
+				fs: f.fs,
+				exec: e.exec,
+			});
+
+			const wsGitCalls = e.calls.filter((c) => c.cmd === "git" && c.cwd === WORKSPACE_PATH);
+			expect(
+				wsGitCalls.some(
+					(c) =>
+						c.args[0] === "restore" && c.args.includes("--staged") && c.args.includes(".plot/"),
+				),
+			).toBe(true);
+			expect(
+				wsGitCalls.some(
+					(c) =>
+						c.args[0] === "restore" && !c.args.includes("--staged") && c.args.includes(".plot/"),
+				),
+			).toBe(true);
+			expect(
+				wsGitCalls.some(
+					(c) => c.args[0] === "clean" && c.args.includes("-f") && c.args.includes(".plot/"),
+				),
+			).toBe(true);
+		} finally {
+			await plotCtx.db.close();
+		}
+	});
+
+	test("path-limits the project-clone commit to the plot carriers (warren-be12/warren-1312)", async () => {
+		const plotCtx = await setupWithFeatures({ hasPlot: true });
 		try {
 			const f = fakeFs({
 				"/data/projects/x/y/.plot/plot-abc.events.jsonl":
@@ -134,22 +151,22 @@ describe("reapRun commit-through-reap sub-steps (warren-343a + warren-7ecc)", ()
 			const commit = e.calls
 				.filter((c) => c.cmd === "git")
 				.map((c) => c.args)
-				.find((a) => a[0] === "-c" && a.includes("commit"));
-			// `--only -- .plot/plot-abc.events.jsonl` confines the commit to the
-			// actually-copied carrier, so git ignores anything else an earlier
-			// step left in the index — even another file under `.plot/`
-			// (warren-c55e).
+				.find((a) => a[0] === "-c" && a.includes("commit") && a.includes("--only"));
 			expect(commit).toContain("--only");
 			const dashDash = commit?.indexOf("--") ?? -1;
 			expect(dashDash).toBeGreaterThan(-1);
 			expect(commit?.slice(dashDash + 1)).toEqual([".plot/plot-abc.events.jsonl"]);
+			const commitCall = e.calls.find(
+				(c) => c.cmd === "git" && c.args[0] === "-c" && c.args.includes("commit"),
+			);
+			expect(commitCall?.cwd).toBe(PROJECT_PATH);
 		} finally {
 			await plotCtx.db.close();
 		}
 	});
 
 	test("does not commit when the agent already committed every .plot/ delta", async () => {
-		const plotCtx = await setupWithPlot();
+		const plotCtx = await setupWithFeatures({ hasPlot: true });
 		try {
 			const f = fakeFs({
 				"/data/projects/x/y/.plot/plot-abc.events.jsonl":
@@ -167,8 +184,10 @@ describe("reapRun commit-through-reap sub-steps (warren-343a + warren-7ecc)", ()
 			});
 
 			expect(result.plotCommitted).toBe(false);
-			const commit = e.calls.find((c) => c.cmd === "git" && c.args.includes("commit"));
-			expect(commit).toBeUndefined();
+			const commitCall = e.calls.find(
+				(c) => c.cmd === "git" && c.args.includes("commit") && c.args.includes("--only"),
+			);
+			expect(commitCall).toBeUndefined();
 			const events = await plotCtx.repos.events.listByRun(plotCtx.runId);
 			expect(events.find((ev) => ev.kind === "reap.plot_committed")).toBeUndefined();
 		} finally {
@@ -176,8 +195,8 @@ describe("reapRun commit-through-reap sub-steps (warren-343a + warren-7ecc)", ()
 		}
 	});
 
-	test("skips .plot/.index.db* and non-plot-* entries when copying into the workspace", async () => {
-		const plotCtx = await setupWithPlot();
+	test("skips .index.db* and non-plot-* entries from staging in the project clone (warren-1312)", async () => {
+		const plotCtx = await setupWithFeatures({ hasPlot: true });
 		try {
 			const f = fakeFs({
 				"/data/projects/x/y/.plot/plot-abc.events.jsonl": '{"type":"note"}\n',
@@ -196,23 +215,27 @@ describe("reapRun commit-through-reap sub-steps (warren-343a + warren-7ecc)", ()
 				exec: e.exec,
 			});
 
-			expect(f.files.get("/data/burrow/ws/.plot/plot-abc.events.jsonl")).toBeDefined();
-			expect(f.files.get("/data/burrow/ws/.plot/.index.db")).toBeUndefined();
-			expect(f.files.get("/data/burrow/ws/.plot/.index.db-wal")).toBeUndefined();
-			expect(f.files.get("/data/burrow/ws/.plot/README.md")).toBeUndefined();
+			const addCall = e.calls
+				.filter((c) => c.cmd === "git" && c.cwd === PROJECT_PATH)
+				.find((c) => c.args[0] === "add");
+			expect(addCall).toBeDefined();
+			expect(addCall?.args).toContain(".plot/plot-abc.events.jsonl");
+			expect(addCall?.args).not.toContain(".plot/.index.db");
+			expect(addCall?.args).not.toContain(".plot/.index.db-wal");
+			expect(addCall?.args).not.toContain(".plot/README.md");
 		} finally {
 			await plotCtx.db.close();
 		}
 	});
 
-	test("trivial-merge child: warren commit keeps reap.empty_push silent", async () => {
-		const plotCtx = await setupWithPlot();
+	test("plot-only run: workspace is clean after cleanup so droppedCommit stays false (warren-1312)", async () => {
+		const plotCtx = await setupWithFeatures({ hasPlot: true });
 		try {
 			const f = fakeFs({
 				"/data/projects/x/y/.plot/plot-abc.events.jsonl":
 					'{"type":"run_dispatched","actor":"user:operator","at":"2026-05-18T10:00:00Z","data":{}}\n',
 			});
-			const e = fakeExec({ stagedDelta: true, revListCount: "1" });
+			const e = fakeExec({ stagedDelta: true, gitStatus: "", revListCount: "0" });
 
 			const result = await reapRun({
 				runId: plotCtx.runId,
@@ -225,9 +248,13 @@ describe("reapRun commit-through-reap sub-steps (warren-343a + warren-7ecc)", ()
 
 			expect(result.plotCommitted).toBe(true);
 			expect(result.branchPushed).toBe(true);
-			expect(result.commitsAhead).toBe(1);
+			expect(result.commitsAhead).toBe(0);
 			const events = await plotCtx.repos.events.listByRun(plotCtx.runId);
-			expect(events.find((ev) => ev.kind === "reap.empty_push")).toBeUndefined();
+			const emptyPushEvent = events.find((ev) => ev.kind === "reap.empty_push");
+			expect(emptyPushEvent).toBeDefined();
+			expect((emptyPushEvent?.payloadJson as { droppedCommit?: boolean })?.droppedCommit).toBe(
+				false,
+			);
 		} finally {
 			await plotCtx.db.close();
 		}
@@ -249,55 +276,32 @@ describe("reapRun commit-through-reap sub-steps (warren-343a + warren-7ecc)", ()
 		});
 
 		expect(result.plotCommitted).toBe(false);
-		expect(f.files.get("/data/burrow/ws/.plot/plot-abc.events.jsonl")).toBeUndefined();
-		const gitArgs = e.calls.filter((c) => c.cmd === "git").map((c) => c.args);
-		expect(gitArgs.find((a) => a.includes("add"))).toBeUndefined();
-		expect(gitArgs.find((a) => a.includes("commit"))).toBeUndefined();
+		expect(f.files.has("/data/burrow/ws/.plot/plot-abc.events.jsonl")).toBe(false);
+		const gitCalls = e.calls.filter((c) => c.cmd === "git");
+		expect(
+			gitCalls.find(
+				(c) => c.args.includes("add") && c.args.includes(".plot/") && c.cwd === PROJECT_PATH,
+			),
+		).toBeUndefined();
+		expect(
+			gitCalls.find((c) => c.args.includes("commit") && c.args.includes("--only")),
+		).toBeUndefined();
+	});
+});
+
+describe("reapRun seeds-direct-push (warren-2501)", () => {
+	let ctx: Ctx;
+
+	beforeEach(async () => {
+		ctx = await setup();
 	});
 
-	/* ------------------------------------------------------------------ */
-	/* warren-2501: seeds-direct-push — seeds state lands on main         */
-	/* ------------------------------------------------------------------ */
-
-	async function setupWithSeeds(): Promise<Ctx> {
-		const db = await openDatabase({ path: ":memory:" });
-		const repos = createRepos(db);
-		await repos.agents.upsert({
-			name: "refactor-bot",
-			renderedJson: { sections: { system: "x" } },
-		});
-		const project = await repos.projects.create({
-			gitUrl: "https://github.com/x/y.git",
-			localPath: "/data/projects/x/y",
-			defaultBranch: "main",
-			hasSeeds: true,
-		});
-		const run = await repos.runs.create({
-			agentName: "refactor-bot",
-			projectId: project.id,
-			prompt: "p",
-			renderedAgentJson: {},
-			trigger: "manual",
-			burrowId: "bur_aaaaaaaaaaaa",
-			burrowRunId: "run_zzzzzzzzzzzz",
-		});
-		await repos.burrows.create({ id: "bur_aaaaaaaaaaaa", workerId: "local" });
-		await repos.runs.markRunning(run.id);
-		return {
-			db,
-			repos,
-			broker: new RunEventBroker(),
-			runId: run.id,
-			projectPath: project.localPath,
-			workspacePath: "/data/burrow/ws",
-		};
-	}
-
-	const PROJECT_PATH = "/data/projects/x/y";
-	const WORKSPACE_PATH = "/data/burrow/ws";
+	afterEach(async () => {
+		await ctx.db.close();
+	});
 
 	test("commits seeds directly to main (not run branch) when project .seeds/ has a delta (warren-2501)", async () => {
-		const seedsCtx = await setupWithSeeds();
+		const seedsCtx = await setupWithFeatures({ hasSeeds: true });
 		try {
 			const f = fakeFs({
 				"/data/projects/x/y/.seeds/issues.jsonl":
@@ -317,23 +321,13 @@ describe("reapRun commit-through-reap sub-steps (warren-343a + warren-7ecc)", ()
 			});
 
 			expect(result.seedsCommitted).toBe(true);
-			// Seeds are NOT copied to the workspace — they go to main directly.
 			expect(f.files.has("/data/burrow/ws/.seeds/issues.jsonl")).toBe(false);
 			expect(f.files.has("/data/burrow/ws/.seeds/plans.jsonl")).toBe(false);
 
 			const gitCalls = e.calls.filter((c) => c.cmd === "git");
 
-			// Staging and commit happen in the project clone, not the workspace.
 			const addCall = gitCalls.find((c) => c.args[0] === "add" && c.args.includes(".seeds/"));
 			expect(addCall?.cwd).toBe(PROJECT_PATH);
-
-			const diffCall = gitCalls.find(
-				(c) =>
-					c.args[0] === "diff" &&
-					c.args.includes("--cached") &&
-					c.args.includes(".seeds/issues.jsonl"),
-			);
-			expect(diffCall?.cwd).toBe(PROJECT_PATH);
 
 			const commit = gitCalls
 				.map((c) => c.args)
@@ -352,13 +346,11 @@ describe("reapRun commit-through-reap sub-steps (warren-343a + warren-7ecc)", ()
 				".seeds/issues.jsonl",
 				".seeds/plans.jsonl",
 			]);
-			// Commit must be in the project clone.
 			const commitCall = gitCalls.find(
 				(c) => c.args[0] === "-c" && c.args.includes("commit") && c.args.includes("--only"),
 			);
 			expect(commitCall?.cwd).toBe(PROJECT_PATH);
 
-			// rebasePushToMain commands run to push to main.
 			expect(gitCalls.some((c) => c.args[0] === "worktree" && c.args[1] === "add")).toBe(true);
 			expect(gitCalls.some((c) => c.args[0] === "push" && c.args.includes("HEAD:main"))).toBe(true);
 
@@ -372,7 +364,7 @@ describe("reapRun commit-through-reap sub-steps (warren-343a + warren-7ecc)", ()
 	});
 
 	test("workspace seeds are cleaned up (restore+clean) before the run branch push (warren-2501)", async () => {
-		const seedsCtx = await setupWithSeeds();
+		const seedsCtx = await setupWithFeatures({ hasSeeds: true });
 		try {
 			const f = fakeFs({
 				"/data/projects/x/y/.seeds/issues.jsonl":
@@ -390,21 +382,18 @@ describe("reapRun commit-through-reap sub-steps (warren-343a + warren-7ecc)", ()
 			});
 
 			const wsGitCalls = e.calls.filter((c) => c.cmd === "git" && c.cwd === WORKSPACE_PATH);
-			// restore --staged clears any seeds staged by the agent
 			expect(
 				wsGitCalls.some(
 					(c) =>
 						c.args[0] === "restore" && c.args.includes("--staged") && c.args.includes(".seeds/"),
 				),
 			).toBe(true);
-			// restore clears tracked seeds modifications
 			expect(
 				wsGitCalls.some(
 					(c) =>
 						c.args[0] === "restore" && !c.args.includes("--staged") && c.args.includes(".seeds/"),
 				),
 			).toBe(true);
-			// clean -f removes untracked seeds files (e.g. plans.jsonl from sd plan submit)
 			expect(
 				wsGitCalls.some(
 					(c) => c.args[0] === "clean" && c.args.includes("-f") && c.args.includes(".seeds/"),
@@ -416,7 +405,7 @@ describe("reapRun commit-through-reap sub-steps (warren-343a + warren-7ecc)", ()
 	});
 
 	test("path-limits the project-clone commit to the two seeds carriers (warren-be12)", async () => {
-		const seedsCtx = await setupWithSeeds();
+		const seedsCtx = await setupWithFeatures({ hasSeeds: true });
 		try {
 			const f = fakeFs({
 				"/data/projects/x/y/.seeds/issues.jsonl":
@@ -449,7 +438,7 @@ describe("reapRun commit-through-reap sub-steps (warren-343a + warren-7ecc)", ()
 	});
 
 	test("does not commit when the agent already committed every .seeds/ delta", async () => {
-		const seedsCtx = await setupWithSeeds();
+		const seedsCtx = await setupWithFeatures({ hasSeeds: true });
 		try {
 			const f = fakeFs({
 				"/data/projects/x/y/.seeds/issues.jsonl":
@@ -467,7 +456,6 @@ describe("reapRun commit-through-reap sub-steps (warren-343a + warren-7ecc)", ()
 			});
 
 			expect(result.seedsCommitted).toBe(false);
-			// No commit anywhere (no --only commit in project clone or workspace).
 			const commitCall = e.calls.find(
 				(c) => c.cmd === "git" && c.args.includes("commit") && c.args.includes("--only"),
 			);
@@ -480,14 +468,12 @@ describe("reapRun commit-through-reap sub-steps (warren-343a + warren-7ecc)", ()
 	});
 
 	test("seeds-only run: workspace is clean after cleanup so droppedCommit stays false (warren-2501)", async () => {
-		const seedsCtx = await setupWithSeeds();
+		const seedsCtx = await setupWithFeatures({ hasSeeds: true });
 		try {
 			const f = fakeFs({
 				"/data/projects/x/y/.seeds/issues.jsonl":
 					'{"id":"warren-1234","status":"open","updatedAt":"2026-05-22T10:00:00Z"}\n',
 			});
-			// fakeExec: stagedDelta=true (seeds changed in project clone), gitStatus=""
-			// (workspace is clean after cleanup), revListCount="0" (no agent commits on run branch).
 			const e = fakeExec({ stagedDelta: true, gitStatus: "", revListCount: "0" });
 
 			const result = await reapRun({
@@ -503,7 +489,6 @@ describe("reapRun commit-through-reap sub-steps (warren-343a + warren-7ecc)", ()
 			expect(result.branchPushed).toBe(true);
 			expect(result.commitsAhead).toBe(0);
 			const events = await seedsCtx.repos.events.listByRun(seedsCtx.runId);
-			// empty_push fires (0 commits on run branch) but with droppedCommit=false
 			const emptyPushEvent = events.find((ev) => ev.kind === "reap.empty_push");
 			expect(emptyPushEvent).toBeDefined();
 			expect((emptyPushEvent?.payloadJson as { droppedCommit?: boolean })?.droppedCommit).toBe(
@@ -532,7 +517,6 @@ describe("reapRun commit-through-reap sub-steps (warren-343a + warren-7ecc)", ()
 		expect(result.seedsCommitted).toBe(false);
 		expect(f.files.has("/data/burrow/ws/.seeds/issues.jsonl")).toBe(false);
 		const gitCalls = e.calls.filter((c) => c.cmd === "git");
-		// No add/commit for .seeds/ when hasSeeds=false
 		expect(
 			gitCalls.find(
 				(c) => c.args.includes("add") && c.args.includes(".seeds/") && c.cwd === PROJECT_PATH,
