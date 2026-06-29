@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { warrenCommitIdentityArgs } from "../bot-identity.ts";
 import type { SpawnFn } from "../projects/index.ts";
 import { parseGitHubUrl } from "../projects/url.ts";
-import { mergePullRequest, openPullRequest, parsePullRequestRef } from "../runs/pr.ts";
+import { openPullRequest, parsePullRequestRef } from "../runs/pr.ts";
 import type { PlotSyncConfig } from "../warren-config/index.ts";
 
 export interface PlotSyncRequest {
@@ -27,6 +27,12 @@ export type PlotSyncResult =
 			readonly prUrl: string;
 			readonly prNumber?: number;
 			readonly merged: boolean;
+	  }
+	| {
+			/** Direct-push path used by auto/immediate mergeStrategy (warren-1312). */
+			readonly kind: "direct_push";
+			readonly targetBranch: string;
+			readonly attempts: number;
 	  };
 
 export interface PlotSyncer {
@@ -81,6 +87,123 @@ async function copyPlotDir(src: string, dst: string): Promise<void> {
 	}
 }
 
+function isNonFastForward(output: string): boolean {
+	return /non-fast-forward|rejected|fetch first/i.test(output);
+}
+
+const DIRECT_PUSH_MAX_ATTEMPTS = 5;
+
+/**
+ * Direct-push path for auto/immediate mergeStrategy (warren-1312).
+ *
+ * Creates an isolated detached worktree, copies plot files, commits, then
+ * retries fetch→rebase→push until the push lands on `targetBranch` or the
+ * retry ceiling is hit. No PR is opened — the commit lands directly on origin
+ * like the seeds/plot reap bookkeeping commits.
+ */
+async function directPushPlotSync(
+	spawn: SpawnFn,
+	gitBinary: string,
+	projectPath: string,
+	targetBranch: string,
+): Promise<{ targetBranch: string; attempts: number }> {
+	const bytes = new Uint8Array(4);
+	crypto.getRandomValues(bytes);
+	const hash = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+	const worktreePath = await mkdtemp(join(tmpdir(), `warren-plot-sync-${hash}-`));
+
+	try {
+		// Create detached worktree from origin/<targetBranch> (fallback to local ref).
+		let worktreeAddRes = await trySpawn(
+			spawn,
+			[gitBinary, "worktree", "add", "--detach", worktreePath, `origin/${targetBranch}`],
+			{ cwd: projectPath },
+		);
+		if (worktreeAddRes.exitCode !== 0) {
+			worktreeAddRes = await trySpawn(
+				spawn,
+				[gitBinary, "worktree", "add", "--detach", worktreePath, targetBranch],
+				{ cwd: projectPath },
+			);
+		}
+		if (worktreeAddRes.exitCode !== 0) {
+			throw new Error(
+				`Failed to create git worktree (exit ${worktreeAddRes.exitCode}): ${worktreeAddRes.stderr}`,
+			);
+		}
+
+		// Copy plot files into the worktree.
+		await copyPlotDir(join(projectPath, ".plot"), join(worktreePath, ".plot"));
+
+		// Stage and commit.
+		const addRes = await trySpawn(spawn, [gitBinary, "add", ".plot/"], { cwd: worktreePath });
+		if (addRes.exitCode !== 0) {
+			throw new Error(
+				`Failed to stage changes in worktree (exit ${addRes.exitCode}): ${addRes.stderr}`,
+			);
+		}
+		const commitRes = await trySpawn(
+			spawn,
+			[
+				gitBinary,
+				...warrenCommitIdentityArgs(),
+				"commit",
+				// warren-27d3: warren's plot-sync bookkeeping commit must not be
+				// gated by the project's git hooks.
+				"--no-verify",
+				"-m",
+				"plot sync: update plot metadata",
+			],
+			{ cwd: worktreePath },
+		);
+		if (commitRes.exitCode !== 0) {
+			throw new Error(
+				`Failed to commit changes in worktree (exit ${commitRes.exitCode}): ${commitRes.stderr}`,
+			);
+		}
+
+		// Retry loop: fetch → rebase → push directly to targetBranch.
+		for (let attempt = 1; attempt <= DIRECT_PUSH_MAX_ATTEMPTS; attempt++) {
+			await trySpawn(spawn, [gitBinary, "fetch", "origin", targetBranch], {
+				cwd: worktreePath,
+			});
+
+			const rebaseRes = await trySpawn(spawn, [gitBinary, "rebase", `origin/${targetBranch}`], {
+				cwd: worktreePath,
+			});
+			if (rebaseRes.exitCode !== 0) {
+				await trySpawn(spawn, [gitBinary, "rebase", "--abort"], { cwd: worktreePath }).catch(
+					() => {},
+				);
+				throw new Error(`Rebase conflict during plot sync direct push: ${rebaseRes.stderr}`);
+			}
+
+			const pushRes = await trySpawn(spawn, [gitBinary, "push", "origin", `HEAD:${targetBranch}`], {
+				cwd: worktreePath,
+			});
+			if (pushRes.exitCode === 0) {
+				return { targetBranch, attempts: attempt };
+			}
+			const combinedOutput = `${pushRes.stdout} ${pushRes.stderr}`;
+			if (!isNonFastForward(combinedOutput)) {
+				throw new Error(
+					`Failed to push directly to ${targetBranch} (exit ${pushRes.exitCode}): ${pushRes.stderr}`,
+				);
+			}
+			// non-fast-forward: retry with fresh fetch+rebase
+		}
+
+		throw new Error(
+			`plot sync direct push: retry ceiling exceeded after ${DIRECT_PUSH_MAX_ATTEMPTS} attempts`,
+		);
+	} finally {
+		await trySpawn(spawn, [gitBinary, "worktree", "remove", "--force", worktreePath], {
+			cwd: projectPath,
+		}).catch(() => {});
+		await rm(worktreePath, { recursive: true, force: true }).catch(() => {});
+	}
+}
+
 export const defaultPlotSyncer: PlotSyncer = {
 	async sync(input) {
 		const { projectPath, gitUrl, defaultBranch, token, handle, plotSyncConfig, spawn, gitBinary } =
@@ -110,17 +233,23 @@ export const defaultPlotSyncer: PlotSyncer = {
 			// Best-effort in offline/test mode: warn but don't hard crash if it's local branch only
 		}
 
-		// 4. Generate unique branch name
+		// 4. auto/immediate: push directly to targetBranch — no PR (warren-1312).
+		if (mergeStrategy === "immediate" || mergeStrategy === "auto") {
+			const result = await directPushPlotSync(spawn, gitBinary, projectPath, targetBranch);
+			return { kind: "direct_push", ...result };
+		}
+
+		// 5. manual: PR path (unchanged).
 		const bytes = new Uint8Array(4);
 		crypto.getRandomValues(bytes);
 		const branchHash = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 		const branchName = `warren/plot-sync-${branchHash}`;
 
-		// 5. Create temporary worktree
+		// 6. Create temporary worktree
 		const worktreePath = await mkdtemp(join(tmpdir(), `warren-plot-sync-${branchHash}-`));
 
 		try {
-			// 6. Create worktree from origin/<targetBranch> falling back to local targetBranch
+			// 7. Create worktree from origin/<targetBranch> falling back to local targetBranch
 			let worktreeAddRes = await trySpawn(
 				spawn,
 				[gitBinary, "worktree", "add", "-b", branchName, worktreePath, `origin/${targetBranch}`],
@@ -139,10 +268,10 @@ export const defaultPlotSyncer: PlotSyncer = {
 				);
 			}
 
-			// 7. Copy plot files to worktree
+			// 8. Copy plot files to worktree
 			await copyPlotDir(join(projectPath, ".plot"), join(worktreePath, ".plot"));
 
-			// 8. Stage, commit, and push
+			// 9. Stage, commit, and push to PR branch
 			const addRes = await trySpawn(spawn, [gitBinary, "add", ".plot/"], { cwd: worktreePath });
 			if (addRes.exitCode !== 0) {
 				throw new Error(
@@ -179,14 +308,14 @@ export const defaultPlotSyncer: PlotSyncer = {
 				);
 			}
 		} finally {
-			// 9. Clean up worktree definition and directory
+			// 10. Clean up worktree definition and directory
 			await trySpawn(spawn, [gitBinary, "worktree", "remove", "--force", worktreePath], {
 				cwd: projectPath,
-			});
+			}).catch(() => {});
 			await rm(worktreePath, { recursive: true, force: true }).catch(() => {});
 		}
 
-		// 10. Open Pull Request
+		// 11. Open Pull Request
 		const parsedUrl = parseGitHubUrl(gitUrl);
 		const prResult = await openPullRequest(
 			{
@@ -207,33 +336,6 @@ export const defaultPlotSyncer: PlotSyncer = {
 
 		const prParsed = parsePullRequestRef(prResult.url);
 		const prNumber = prParsed?.number;
-
-		// 11. Optionally Merge Pull Request
-		if (mergeStrategy === "immediate" || mergeStrategy === "auto") {
-			if (prNumber === undefined) {
-				throw new Error(`Failed to parse PR number from URL: ${prResult.url}`);
-			}
-			const mergeResult = await mergePullRequest({
-				owner: parsedUrl.owner,
-				repo: parsedUrl.name,
-				number: prNumber,
-				token,
-				fetch: fetchImpl,
-			});
-			const merged = mergeResult.kind === "merged" || mergeResult.kind === "already_merged";
-			if (!merged) {
-				throw new Error(
-					`Failed to merge sync pull request: ${mergeResult.kind === "not_mergeable" ? mergeResult.message : mergeResult.kind}`,
-				);
-			}
-			return {
-				kind: "synced",
-				branch: branchName,
-				prUrl: prResult.url,
-				prNumber,
-				merged: true,
-			};
-		}
 
 		return {
 			kind: "synced",

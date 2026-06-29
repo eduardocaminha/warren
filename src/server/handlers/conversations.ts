@@ -31,7 +31,7 @@ import { ValidationError } from "../../core/errors.ts";
 import { assertRunTransition } from "../../db/repos/runs.ts";
 import type { ConversationRow, ConversationState } from "../../db/schema.ts";
 import { ProjectLacksPlotError } from "../../plan-runs/errors.ts";
-import { defaultPlotCreator, defaultPlotSyncer } from "../../plots/index.ts";
+import { defaultPlotCreator, defaultPlotSyncer, type PlotSyncResult } from "../../plots/index.ts";
 import { isSpawnPerTurnRuntime, readEffectiveRuntimeId } from "../../registry/schema.ts";
 import { rewakeConversation } from "../../runs/conversation-rewake.ts";
 import { resolveDispatcherHandle, spawnRun, steerRun } from "../../runs/index.ts";
@@ -468,6 +468,11 @@ function assertSendOffReady(
 	return { token, plotId: conversation.plotId };
 }
 
+type SyncedPrFields = { prUrl: string; prNumber: number | undefined; branch: string | undefined };
+const plannerPrFields = (r: Exclude<PlotSyncResult, { kind: "no_op" }>): SyncedPrFields =>
+	r.kind === "synced"
+		? { prUrl: r.prUrl, prNumber: r.prNumber, branch: r.branch }
+		: { prUrl: "", prNumber: undefined, branch: undefined };
 export function sendOffConversationHandler(deps: ServerDeps): RouteHandler {
 	return async (ctx) => {
 		const id = requireParam(ctx, "id");
@@ -497,13 +502,15 @@ export function sendOffConversationHandler(deps: ServerDeps): RouteHandler {
 			);
 		}
 
+		const { prUrl, prNumber, branch } = plannerPrFields(result);
+
 		const now = deps.now?.() ?? new Date();
 		await finalizeAnchoringRun(deps, conversation, now);
 		const closed = await deps.repos.conversations.recordSubmission(
 			id,
 			{
-				prUrl: result.prUrl,
-				...(result.prNumber !== undefined ? { prNumber: result.prNumber } : {}),
+				prUrl,
+				...(prNumber !== undefined ? { prNumber } : {}),
 				plannerAgent,
 			},
 			now,
@@ -512,7 +519,7 @@ export function sendOffConversationHandler(deps: ServerDeps): RouteHandler {
 		return jsonResponse(200, {
 			conversation: closed,
 			plot_id: plotId,
-			pr: { url: result.prUrl, number: result.prNumber ?? null, branch: result.branch },
+			pr: { url: prUrl, number: prNumber ?? null, branch: branch ?? null },
 			planner_agent: plannerAgent,
 		});
 	};

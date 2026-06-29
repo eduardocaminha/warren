@@ -1118,6 +1118,12 @@ export type PlotSyncResponse =
 			prUrl: string;
 			prNumber?: number;
 			merged: boolean;
+	  }
+	| {
+			/** Direct-push path used by auto/immediate mergeStrategy (warren-1312). */
+			kind: "direct_push";
+			targetBranch: string;
+			attempts: number;
 	  };
 
 /* ----------------------------------------------------------------------- */

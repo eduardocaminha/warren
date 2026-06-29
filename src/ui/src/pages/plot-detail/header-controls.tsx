@@ -32,6 +32,8 @@ export function PlotSyncButton({ plotId }: { plotId: string }) {
 					text: "Everything is already up to date on GitHub.",
 					type: "info",
 				});
+			} else if (resp.kind === "direct_push") {
+				setStatusMessage({ text: `Synced directly to ${resp.targetBranch}.`, type: "success" });
 			} else {
 				setStatusMessage({
 					text: resp.merged

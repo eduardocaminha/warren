@@ -205,14 +205,11 @@ async function mergePlotStep(ctx: ReapPipelineContext, state: ReapPipelineState)
 }
 
 /**
- * warren-343a / shape (a) commit-through-reap: replicate the merged `.plot/`
- * from the project clone into the workspace and author a `chore(warren): plot
- * state` commit when there's a staged delta the agent never committed. This is
- * the carrier for host-side appender writes (defaultPlotAppender,
- * defaultPlanRunPlotAppender, autoTransitionPlotToDone — see SPEC §11.O) and
- * for any agent-emitted `.plot/` lines that the agent left uncommitted. Skipped
- * when the project has no `.plot/`. Best-effort: failures emit `reap_failed`
- * step=`plot_commit` and do not fail the run.
+ * warren-343a / warren-1312: commit `.plot/` state from the project clone
+ * directly to `defaultBranch` via rebase+push, bypassing the run branch.
+ * Symmetric with seedsCommitStep. Skipped when the project has no `.plot/`.
+ * Best-effort: failures emit `reap_failed` step=`plot_commit` and do not fail
+ * the run.
  */
 async function plotCommitStep(ctx: ReapPipelineContext, state: ReapPipelineState): Promise<void> {
 	if (!ctx.project.hasPlot) return;
@@ -220,6 +217,7 @@ async function plotCommitStep(ctx: ReapPipelineContext, state: ReapPipelineState
 		state.plotCommitted = await stagePlotForCommit({
 			workspacePath: ctx.workspacePath,
 			projectPath: ctx.project.localPath,
+			targetBranch: ctx.project.defaultBranch,
 			fs: ctx.fs,
 			exec: ctx.exec,
 			emit: ctx.emit,
