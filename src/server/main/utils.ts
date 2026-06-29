@@ -6,6 +6,7 @@
 
 import { type AnyWarrenDb, WARREN_DB_POOL_MAX_ENV } from "../../db/client.ts";
 import { parseDatabaseUrl } from "../../db/url.ts";
+import { ValidationError } from "../../core/errors.ts";
 import type { SpawnFn, SpawnOptions, SpawnResult } from "../../projects/clone.ts";
 import type { EnvLike } from "../config.ts";
 
@@ -92,7 +93,7 @@ export function parseIntEnv<F extends number | undefined>(
 	if (raw === undefined || raw === "") return fallback;
 	const n = Number.parseInt(raw, 10);
 	if (!Number.isFinite(n) || n <= 0 || String(n) !== raw) {
-		throw new Error(`${name} must be a positive integer (got ${JSON.stringify(raw)})`);
+		throw new ValidationError(`${name} must be a positive integer (got ${JSON.stringify(raw)})`);
 	}
 	return n;
 }
