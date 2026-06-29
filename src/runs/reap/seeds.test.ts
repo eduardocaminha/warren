@@ -258,7 +258,7 @@ describe("mirrorPlans (warren-d9a2)", () => {
 		}
 	});
 
-	test("mirrored plans survive into workspace via stageSeedsForCommit", async () => {
+	test("mirrored plans land in project clone and go to main via stageSeedsForCommit (warren-2501)", async () => {
 		const ctx = await setupWithSeeds();
 		try {
 			const newPlan = '{"id":"pl-agent-created","status":"approved","children":["warren-x"]}\n';
@@ -268,7 +268,7 @@ describe("mirrorPlans (warren-d9a2)", () => {
 			});
 			const e = fakeExec({ stagedDelta: true });
 
-			await reapRun({
+			const result = await reapRun({
 				runId: ctx.runId,
 				outcome: "succeeded",
 				repos: ctx.repos,
@@ -280,8 +280,15 @@ describe("mirrorPlans (warren-d9a2)", () => {
 				exec: e.exec,
 			});
 
-			const workspacePlans = f.files.get("/data/burrow/ws/.seeds/plans.jsonl") ?? "";
-			expect(workspacePlans).toContain("pl-agent-created");
+			// The plan was mirrored into the project clone by mirrorPlans.
+			const projectPlans = f.files.get("/data/projects/x/y/.seeds/plans.jsonl") ?? "";
+			expect(projectPlans).toContain("pl-agent-created");
+			// stageSeedsForCommit committed in the project clone and pushed to main (not workspace).
+			expect(result.seedsCommitted).toBe(true);
+			// Workspace plans are NOT written back — seeds go to main directly.
+			expect(f.files.has("/data/burrow/ws/.seeds/plans.jsonl")).toBe(false);
+			// Verify the direct push reached main via rebasePushToMain.
+			expect(e.calls.some((c) => c.cmd === "git" && c.args.includes("HEAD:main"))).toBe(true);
 		} finally {
 			await ctx.db.close();
 		}

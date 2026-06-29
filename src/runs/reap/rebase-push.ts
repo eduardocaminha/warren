@@ -33,6 +33,14 @@ export interface RebasePushToMainInput {
 	 * creating a real directory.
 	 */
 	readonly mkTmpDir?: () => Promise<string>;
+	/**
+	 * Optional hook called after each successful `git rebase` but before
+	 * `git push`. Use for post-rebase processing such as JSONL dedup after
+	 * a `merge=union` rebase. The hook receives the isolated worktree path
+	 * and may run git commands (via exec) or write files. If the hook
+	 * throws, the attempt is marked `reason: "error"` immediately.
+	 */
+	readonly postRebase?: (worktreePath: string) => Promise<void>;
 }
 
 /* ----------------------------------------------------------------------- */
@@ -101,7 +109,13 @@ export async function rebasePushToMain(
 		}
 
 		for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-			const r = await runAttempt(exec, worktreePath, targetBranch, attempt === maxAttempts);
+			const r = await runAttempt(
+				exec,
+				worktreePath,
+				targetBranch,
+				attempt === maxAttempts,
+				input.postRebase,
+			);
 			if (r.done) {
 				if (r.ok) return { ok: true, attempts: attempt };
 				if (r.reason === "retry_ceiling_exceeded") {
@@ -134,6 +148,7 @@ async function runAttempt(
 	worktreePath: string,
 	targetBranch: string,
 	isLastAttempt: boolean,
+	postRebase?: (worktreePath: string) => Promise<void>,
 ): Promise<AttemptResult> {
 	try {
 		await exec.run("git", ["fetch", "origin", targetBranch], {
@@ -154,6 +169,14 @@ async function runAttempt(
 			.run("git", ["rebase", "--abort"], { cwd: worktreePath, timeoutMs: 10_000 })
 			.catch(() => {});
 		return { done: true, ok: false, reason: "rebase_conflict", message: errMsg(err) };
+	}
+
+	if (postRebase !== undefined) {
+		try {
+			await postRebase(worktreePath);
+		} catch (err) {
+			return { done: true, ok: false, reason: "error", message: `postRebase: ${errMsg(err)}` };
+		}
 	}
 
 	try {

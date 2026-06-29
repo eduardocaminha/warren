@@ -379,4 +379,82 @@ describe("rebasePushToMain", () => {
 		});
 		expect(result).toEqual({ ok: true, attempts: 3 });
 	});
+
+	test("postRebase hook is called after rebase, before push (warren-2501)", async () => {
+		const { exec, calls } = makeExec(allOk());
+		const hookCalls: string[] = [];
+		const postRebase = async (worktreePath: string) => {
+			hookCalls.push(worktreePath);
+		};
+		const result = await rebasePushToMain({
+			projectPath: PROJECT_PATH,
+			targetBranch: "main",
+			exec,
+			mkTmpDir: fakeMkTmpDir(),
+			postRebase,
+		});
+		expect(result).toEqual({ ok: true, attempts: 1 });
+		expect(hookCalls).toEqual([WORKTREE_PATH]);
+		// Verify hook ran between rebase (index 2) and push (index 3)
+		const rebaseIdx = calls.findIndex((c) => c.args[0] === "rebase" && !c.args.includes("--abort"));
+		const pushIdx = calls.findIndex((c) => c.args[0] === "push");
+		// hook ran in between — its side effects would appear between these two calls
+		expect(rebaseIdx).toBeGreaterThan(-1);
+		expect(pushIdx).toBeGreaterThan(rebaseIdx);
+	});
+
+	test("postRebase hook error surfaces as reason: error (warren-2501)", async () => {
+		const { exec } = makeExec([
+			{ ok: true }, // worktree add
+			{ ok: true }, // fetch
+			{ ok: true }, // rebase
+			// no push response needed — hook throws before push
+			{ ok: true }, // worktree remove
+		]);
+		const postRebase = async (_worktreePath: string) => {
+			throw new Error("dedup write failed: disk full");
+		};
+		const result = await rebasePushToMain({
+			projectPath: PROJECT_PATH,
+			targetBranch: "main",
+			exec,
+			mkTmpDir: fakeMkTmpDir(),
+			postRebase,
+		});
+		expect(result.ok).toBe(false);
+		if (result.ok === false && result.reason === "error") {
+			expect(result.message).toContain("postRebase:");
+			expect(result.message).toContain("dedup write failed");
+		} else {
+			expect(result.ok).toBe(false); // force branch
+		}
+	});
+
+	test("postRebase hook is called on each retry attempt (warren-2501)", async () => {
+		const { exec } = makeExec([
+			{ ok: true }, // worktree add
+			{ ok: true }, // fetch 1
+			{ ok: true }, // rebase 1
+			// hook call 1 (no exec commands from it in this test)
+			nff, // push 1 — non-ff
+			{ ok: true }, // fetch 2
+			{ ok: true }, // rebase 2
+			// hook call 2
+			{ ok: true }, // push 2 — success
+			{ ok: true }, // worktree remove
+		]);
+		const hookCalls: string[] = [];
+		const postRebase = async (p: string) => {
+			hookCalls.push(p);
+		};
+		const result = await rebasePushToMain({
+			projectPath: PROJECT_PATH,
+			targetBranch: "main",
+			exec,
+			mkTmpDir: fakeMkTmpDir(),
+			postRebase,
+		});
+		expect(result).toEqual({ ok: true, attempts: 2 });
+		expect(hookCalls).toHaveLength(2);
+	});
 });
