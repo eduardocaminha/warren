@@ -7,7 +7,7 @@ This page enumerates every HTTP route registered by warren's `Bun.serve` router.
 
 To refresh: `bun run gen:docs`. To check (CI mode): `bun run gen:docs:check`.
 
-Total routes: **60**.
+Total routes: **61**.
 
 ## /agents
 
@@ -16,6 +16,12 @@ Total routes: **60**.
 | `GET` | `/agents` | `listAgentsHandler` |  |
 | `POST` | `/agents/refresh` | `refreshAgentsHandler` |  |
 | `GET` | `/agents/:name` | `getAgentHandler` |  |
+
+## /alerts
+
+| Method | Pattern | Handler | Notes |
+| --- | --- | --- | --- |
+| `POST` | `/alerts/heal` | `healAlertHandler` | warren-3db0: closed-loop alert intake. Token-gated via the standard bearer gate (not auth-exempt); webhook senders carry the bearer. |
 
 ## /analytics
 

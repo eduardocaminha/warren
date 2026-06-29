@@ -41,6 +41,24 @@
 
 import { z } from "zod";
 import { parseDurationMs } from "../preview/duration.ts";
+import { CiFixerConfigSchema, HealerConfigSchema } from "./feature-loop-config.ts";
+
+// warren-3db0: re-exported so the historical import sites (and
+// `warren-config/index.ts`) keep resolving these from `./schema.ts`
+// after the extraction into `feature-loop-config.ts`.
+export {
+	type CiFixerConfig,
+	CiFixerConfigSchema,
+	DEFAULT_CI_FIXER_COOLDOWN_MINUTES,
+	DEFAULT_CI_FIXER_LOG_TAIL_LINES,
+	DEFAULT_CI_FIXER_MAX_RETRIES,
+	DEFAULT_CI_FIXER_ROLE,
+	DEFAULT_HEALER_COOLDOWN_MINUTES,
+	DEFAULT_HEALER_MAX_RETRIES,
+	DEFAULT_HEALER_ROLE,
+	type HealerConfig,
+	HealerConfigSchema,
+} from "./feature-loop-config.ts";
 
 const TriggerIdSchema = z
 	.string()
@@ -236,41 +254,6 @@ const PlotSyncConfigSchema = z
 
 export type PlotSyncConfig = z.infer<typeof PlotSyncConfigSchema>;
 
-// warren-05ea: per-project opt-in for the polling CI-fixer (V1). When
-// `enabled`, warren's CI-status poller watches the project's own PRs
-// (matched via `runs.prUrl`) and, on a failing check-run, dispatches a
-// `pr-fixer` run against the existing PR branch. Off by default — a
-// missing block means "not opted in". Numeric knobs carry `.default()`
-// so consumers always see concrete numbers; the `DEFAULT_CI_FIXER_*`
-// constants are the fallbacks when the whole block is absent.
-export const DEFAULT_CI_FIXER_MAX_RETRIES = 2;
-export const DEFAULT_CI_FIXER_COOLDOWN_MINUTES = 10;
-export const DEFAULT_CI_FIXER_LOG_TAIL_LINES = 200;
-export const DEFAULT_CI_FIXER_ROLE = "pr-fixer";
-
-const boundedInt = (field: string, min: number, max: number) =>
-	z
-		.number()
-		.int(`${field} must be an integer`)
-		.min(min, `${field} must be between ${min} and ${max}`)
-		.max(max, `${field} must be between ${min} and ${max}`);
-
-const CiFixerConfigSchema = z
-	.object({
-		enabled: z.boolean().default(false),
-		maxRetries: boundedInt("ciFixer.maxRetries", 0, 10).default(DEFAULT_CI_FIXER_MAX_RETRIES),
-		cooldownMinutes: boundedInt("ciFixer.cooldownMinutes", 0, 1_440).default(
-			DEFAULT_CI_FIXER_COOLDOWN_MINUTES,
-		),
-		logTailLines: boundedInt("ciFixer.logTailLines", 1, 2_000).default(
-			DEFAULT_CI_FIXER_LOG_TAIL_LINES,
-		),
-		role: RoleNameSchema.default(DEFAULT_CI_FIXER_ROLE),
-	})
-	.strict();
-
-export type CiFixerConfig = z.infer<typeof CiFixerConfigSchema>;
-
 // warren-b802: per-project override of the burrow runtime backing the
 // planner interactive built-in agent. Without this, an
 // operator must stand up a canopy library just to change the runtime
@@ -413,6 +396,8 @@ export const DefaultsConfigSchema = z
 		plotSync: PlotSyncConfigSchema.optional(),
 		// warren-05ea: opt-in polling CI-fixer; missing block → poller skips it.
 		ciFixer: CiFixerConfigSchema.optional(),
+		// warren-3db0: opt-in closed-loop healer; missing block → intake skips it.
+		healer: HealerConfigSchema.optional(),
 		qualityGate: z.string().min(1, "qualityGate must be non-empty if provided").optional(),
 	})
 	.strict();

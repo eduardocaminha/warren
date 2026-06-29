@@ -22,7 +22,7 @@ import {
 } from "./index.ts";
 
 describe("BUILTIN_AGENTS", () => {
-	test("includes claude-code, sapling, pi, planner, pr-fixer, and leveret", () => {
+	test("includes claude-code, sapling, pi, planner, pr-fixer, leveret, and healer", () => {
 		expect(BUILTIN_AGENT_NAMES.has("claude-code")).toBe(true);
 		expect(BUILTIN_AGENT_NAMES.has("sapling")).toBe(true);
 		expect(BUILTIN_AGENT_NAMES.has("pi")).toBe(true);
@@ -30,6 +30,7 @@ describe("BUILTIN_AGENTS", () => {
 		expect(BUILTIN_AGENT_NAMES.has("planner")).toBe(true);
 		expect(BUILTIN_AGENT_NAMES.has("pr-fixer")).toBe(true);
 		expect(BUILTIN_AGENT_NAMES.has("leveret")).toBe(true);
+		expect(BUILTIN_AGENT_NAMES.has("healer")).toBe(true);
 	});
 
 	test("each builtin has a non-empty system section (warren's required schema field)", () => {

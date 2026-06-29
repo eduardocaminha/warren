@@ -40,6 +40,7 @@ import {
 	refreshAgentsHandler,
 	refreshProjectAgentsHandler,
 } from "./agents.ts";
+import { healAlertHandler } from "./alerts.ts";
 import { getBurrowHandler, listBurrowsHandler } from "./burrows.ts";
 import {
 	createConversationHandler,
@@ -264,6 +265,10 @@ const ROUTE_TABLE: readonly RouteEntry[] = [
 	{ method: "POST", pattern: "/agents/refresh", build: refreshAgentsHandler },
 	{ method: "GET", pattern: "/agents/:name", build: getAgentHandler },
 
+	// warren-3db0: closed-loop alert intake. Token-gated via the standard
+	// bearer gate (not auth-exempt); webhook senders carry the bearer.
+	{ method: "POST", pattern: "/alerts/heal", build: healAlertHandler },
+
 	{ method: "GET", pattern: "/projects", build: listProjectsHandler },
 	{ method: "POST", pattern: "/projects", build: createProjectHandler },
 	{ method: "GET", pattern: "/projects/:id/warren-config", build: getProjectWarrenConfigHandler },
@@ -395,6 +400,7 @@ export function buildApiRoutes(deps: ServerDeps): Route[] {
  */
 export const API_PREFIXES: readonly string[] = [
 	"/agents",
+	"/alerts",
 	"/analytics",
 	"/burrows",
 	"/conversations",
@@ -414,7 +420,7 @@ export const API_PREFIXES: readonly string[] = [
 
 /**
  * True iff `pathname` is one of the API surfaces above. Cheap prefix
- * scan — fourteen entries, no allocations on the hot path.
+ * scan — a handful of entries, no allocations on the hot path.
  */
 export function isApiPath(pathname: string): boolean {
 	for (const prefix of API_PREFIXES) {

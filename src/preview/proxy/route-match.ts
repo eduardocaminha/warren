@@ -30,6 +30,7 @@ export const PREVIEW_PATH_PREFIX = "/p";
  * removal both surface here as a failed assertion.
  */
 export const WARREN_API_PATH_PREFIXES: readonly string[] = [
+	"/alerts",
 	"/analytics",
 	"/conversations",
 	"/mcp",
