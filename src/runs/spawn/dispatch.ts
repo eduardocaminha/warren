@@ -193,7 +193,6 @@ export async function spawnRun(input: SpawnRunInput): Promise<SpawnRunResult> {
 	// error.
 	const placement = await input.burrowClientPool.placeFor({ projectId: projectAfterRefresh.id });
 	logPlacement(input.logger, placement.workerName, projectAfterRefresh.id);
-
 	const run = await input.repos.runs.create({
 		agentName: agent.name,
 		projectId: projectAfterRefresh.id,
@@ -207,6 +206,7 @@ export async function spawnRun(input: SpawnRunInput): Promise<SpawnRunResult> {
 		...(input.parentRunId !== undefined && input.parentRunId !== ""
 			? { parentRunId: input.parentRunId, cloneKind: input.cloneKind ?? "continue" }
 			: {}),
+		...(input.resumeAttempts !== undefined ? { resumeAttempts: input.resumeAttempts } : {}),
 		now: input.now?.(),
 	});
 

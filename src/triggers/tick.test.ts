@@ -406,6 +406,7 @@ describe("startScheduler", () => {
 				triggers: {} as never,
 				runs: {} as never,
 				events: {} as never,
+				planRuns: {} as never,
 			},
 			loadWarrenConfig: async () => emptyConfig(),
 			listScheduledSeeds: async () => ({ scheduled: [], errors: [] }),
@@ -437,6 +438,7 @@ describe("startScheduler", () => {
 				triggers: {} as never,
 				runs: {} as never,
 				events: {} as never,
+				planRuns: {} as never,
 			},
 			loadWarrenConfig: async () =>
 				new Promise<LoadedWarrenConfig>((resolve) => {
@@ -465,6 +467,7 @@ describe("startScheduler", () => {
 				triggers: {} as never,
 				runs: {} as never,
 				events: {} as never,
+				planRuns: {} as never,
 			},
 			loadWarrenConfig: async () => emptyConfig(),
 			listScheduledSeeds: async () => ({ scheduled: [], errors: [] }),

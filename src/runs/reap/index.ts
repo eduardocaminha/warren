@@ -35,7 +35,7 @@
 
 export { mergeMulchFile } from "./mulch.ts";
 export { mergePlotEventsFile, mergePlotJsonFile } from "./plot-merge.ts";
-export { reapRun } from "./run.ts";
+export { MAX_RATE_LIMIT_RESUME_ATTEMPTS, reapRun } from "./run.ts";
 export type {
 	ReapExec,
 	ReapFs,

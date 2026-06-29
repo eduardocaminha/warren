@@ -31,6 +31,8 @@ import {
 	type DispatchSpawnFn,
 	type DispatchSpawnInput,
 	type DispatchSpawnResult,
+	type RateLimitedRetrySpawnFn,
+	type RateLimitedRetrySpawnInput,
 	type SchedulerHandle,
 	type SchedulerTimerHandle,
 	startScheduler,
@@ -140,6 +142,36 @@ export function bootScheduler(input: BootSchedulerInput): SchedulerHandle {
 		return { runId: result.run.id };
 	};
 
+	// warren-3f64: rate-limited retry dispatch. Spawns a replicate run for
+	// runs that hit a 429 session-limit and have a scheduled resume_at. Mirrors
+	// ciFixerSpawn: wraps spawnRun with `cloneKind: "replicate"`, pins
+	// `trigger: "rate_limited_retry"`, and bridges the new run immediately.
+	const rateLimitedRetrySpawn: RateLimitedRetrySpawnFn = async (
+		args: RateLimitedRetrySpawnInput,
+	): Promise<{ runId: string }> => {
+		const result = await spawnRunFn({
+			repos: input.repos,
+			burrowClientPool: input.burrowClientPool,
+			agentName: args.agentName,
+			projectId: args.projectId,
+			prompt: args.prompt,
+			trigger: "rate_limited_retry",
+			parentRunId: args.parentRunId,
+			cloneKind: "replicate",
+			resumeAttempts: args.resumeAttempts,
+			projectsConfig: input.projectsConfig,
+			projectSpawn: input.projectSpawn,
+			warrenConfigs: input.warrenConfigs,
+			seedsCli: seedsDeps,
+			...(input.runBranchPrefixDefault !== undefined
+				? { runBranchPrefixDefault: input.runBranchPrefixDefault }
+				: {}),
+			...(input.now !== undefined ? { now: input.now } : {}),
+		});
+		input.bridges.start(result.run.id, result.burrowRun.id, result.burrow.id);
+		return { runId: result.run.id };
+	};
+
 	return startScheduler({
 		tickMs: input.config.tickMs,
 		disabled: input.config.disabled,
@@ -149,6 +181,7 @@ export function bootScheduler(input: BootSchedulerInput): SchedulerHandle {
 		updateExtensions: (projectPath, seedId, extensions) =>
 			updateExtensions(seedsDeps, projectPath, seedId, extensions),
 		spawn: spawnDispatch,
+		retryRateLimited: rateLimitedRetrySpawn,
 		ciFixer: {
 			githubToken: input.githubToken ?? "",
 			spawn: ciFixerSpawn,

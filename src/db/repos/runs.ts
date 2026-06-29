@@ -10,7 +10,7 @@
  * the burrow IDs are written back once we have them.
  */
 
-import { and, asc, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, lte, sql } from "drizzle-orm";
 import { NotFoundError, StateTransitionError, ValidationError } from "../../core/errors.ts";
 import { generateId } from "../../core/ids.ts";
 import type { SqliteDrizzleDb } from "../client.ts";
@@ -94,6 +94,13 @@ export interface CreateRunInput {
 	 * (warren-1f81, #419). Null/omitted = no explicit target branch.
 	 */
 	targetBranch?: string | null;
+	/**
+	 * Inherited retry depth for rate-limited retries (warren-3f64). Set to
+	 * `parent.resumeAttempts + 1` when spawning a rate-limited replicate;
+	 * 0 (default) for root runs. The scheduler caps at
+	 * `MAX_RATE_LIMIT_RESUME_ATTEMPTS`.
+	 */
+	resumeAttempts?: number;
 	now?: Date;
 }
 
@@ -164,6 +171,8 @@ export class RunsRepo {
 			mode: input.mode ?? "batch",
 			pausedAt: null,
 			pausedQuestionEventId: null,
+			resumeAt: null,
+			resumeAttempts: input.resumeAttempts ?? 0,
 		};
 		await this.adapter.runWrite(this.db.insert(this.runs).values(row));
 		return row;
@@ -411,6 +420,45 @@ export class RunsRepo {
 			this.db.update(this.runs).set({ prUrl }).where(eq(this.runs.id, id)),
 		);
 		return { ...current, prUrl };
+	}
+
+	/**
+	 * Set or clear the rate-limited retry timestamp (warren-3f64). Called by
+	 * reap when it detects a 429-terminal and the run is within the retry cap.
+	 * Cleared by the scheduler tick after spawning the replicate, preventing
+	 * double-dispatch on the next tick.
+	 */
+	async attachResumeAt(id: string, resumeAt: Date | null): Promise<void> {
+		await this.adapter.runWrite(
+			this.db
+				.update(this.runs)
+				.set({ resumeAt: resumeAt !== null ? resumeAt.toISOString() : null })
+				.where(eq(this.runs.id, id)),
+		);
+	}
+
+	/**
+	 * Find `failed/rate_limited` runs in this project whose `resume_at` is in
+	 * the past (warren-3f64). Called by the scheduler tick to kick off
+	 * rate-limited replicate spawns. Only returns runs with `resume_at IS NOT
+	 * NULL` — runs whose retry cap has been exhausted (no resume_at) are
+	 * intentionally excluded.
+	 */
+	async listRateLimitedDue(projectId: string, now: Date): Promise<RunRow[]> {
+		return this.adapter.pickAll(
+			this.db
+				.select()
+				.from(this.runs)
+				.where(
+					and(
+						eq(this.runs.projectId, projectId),
+						eq(this.runs.state, "failed"),
+						eq(this.runs.failureReason, "rate_limited"),
+						isNotNull(this.runs.resumeAt),
+						lte(this.runs.resumeAt, now.toISOString()),
+					),
+				),
+		);
 	}
 
 	/**

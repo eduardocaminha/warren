@@ -234,6 +234,19 @@ export class PlanRunsRepo {
 		return out;
 	}
 
+	/**
+	 * Fetch the plan-run child row whose `run_id` matches the given warren run
+	 * id (warren-3f64). Returns null when the run is not a plan-run child.
+	 * Used by the rate-limited retry scheduler to re-point the child to the
+	 * newly spawned replicate run.
+	 */
+	async getChildForRunId(runId: string): Promise<PlanRunChildRow | null> {
+		const row = await this.adapter.pickOne(
+			this.db.select().from(this.planRunChildren).where(eq(this.planRunChildren.runId, runId)),
+		);
+		return row ?? null;
+	}
+
 	async listChildren(planRunId: string): Promise<PlanRunChildRow[]> {
 		return this.adapter.pickAll(
 			this.db

@@ -312,6 +312,9 @@ export const INDEX_NAMES = {
 	// project. Index the column the poller filters on so the per-tick attempt
 	// count stays a covered lookup instead of a full-table scan.
 	runsPrUrl: "runs_pr_url_idx",
+	// warren-3f64: sparse index on resume_at for the scheduler's
+	// rate-limited-retry pass (WHERE resume_at IS NOT NULL AND resume_at <= ?).
+	runsResumeAt: "runs_resume_at_idx",
 	eventsRunSeq: "events_run_seq_idx",
 	eventsRunTs: "events_run_ts_idx",
 	triggersProject: "triggers_project_idx",

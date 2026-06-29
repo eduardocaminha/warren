@@ -347,6 +347,21 @@ export async function handleInFlight(input: HandleInFlightInput): Promise<Handle
 		return await handleNonTerminalRun(input, run);
 	}
 	if (run.state === "failed" || run.state === "cancelled") {
+		// warren-3f64: a rate-limited child run with a scheduled retry should
+		// not fail the plan-run immediately. Wait until the scheduler tick
+		// spawns a replicate and updates child.runId to the new run. The
+		// coordinator returns noop as long as resume_at is set (either future
+		// or recently past); once the scheduler fires it clears resume_at AND
+		// updates the child's runId, so the next tick follows the new run.
+		if (run.failureReason === "rate_limited" && run.resumeAt !== null) {
+			return {
+				kind: "result",
+				result: {
+					kind: "noop",
+					reason: `child_rate_limited_waiting:${run.resumeAt}`,
+				},
+			};
+		}
 		return await failChild(input, run, `child_${run.failureReason ?? run.state}`);
 	}
 	// run.state === 'succeeded': advance to pr_open, then poll the PR.
