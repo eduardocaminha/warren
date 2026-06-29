@@ -184,8 +184,19 @@ export interface BridgeRunStreamResult {
 	 * runtime-terminal event (warren-a69a). The registry layer uses this
 	 * as the signal to call `reapRun` with the inferred outcome. Absent
 	 * for bridges that ended via abort, error, or natural source close.
+	 *
+	 * `rateLimited: true` (warren-395e) is set when the terminal was a Claude
+	 * session-limit 429; `resumeAt` carries the reset epoch when the structured
+	 * `rate_limit_event.resetsAt` was present. The pause+resume path
+	 * (warren-3f64) uses these to re-queue the run instead of failing it.
 	 */
-	readonly terminalDetected?: { readonly outcome: RunTerminalState };
+	readonly terminalDetected?: {
+		readonly outcome: RunTerminalState;
+		/** True when `detectRateLimitTerminal` matched (warren-395e). */
+		readonly rateLimited?: true;
+		/** Epoch when the session limit resets; defined only when rateLimited. */
+		readonly resumeAt?: Date;
+	};
 	/**
 	 * Set when burrow returned 404 / NotFoundError for the run's
 	 * `burrow_run_id` while polling the stream (warren-b1a9). Indicates a

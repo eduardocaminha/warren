@@ -131,6 +131,13 @@ export type CloneKind = (typeof CLONE_KINDS)[number];
  *     which stays `succeeded`. Marking the run `failed` keeps a dropped
  *     commit from masquerading as success and, on plan-runs, fails the
  *     plan instead of silently auto-merging/advancing past the child.
+ *   - `rate_limited` (warren-395e) means the runtime result carried a
+ *     Claude session-limit 429 (`api_error_status: 429`, a
+ *     `rate_limit_event` with `status: "rejected"`, or the "session
+ *     limit … resets" text). Distinct from `crashed` — the agent hit the
+ *     shared subscription ceiling, not a code bug. The run is failed now;
+ *     warren-3f64 re-queues it with `resume_at = resetsAt` so it retries
+ *     after the window resets.
  *
  * Null on succeeded/cancelled rows.
  */
@@ -142,6 +149,7 @@ export const RUN_FAILURE_REASONS = [
 	"burrow_run_lost",
 	"burrow_unreachable",
 	"dropped_commit",
+	"rate_limited",
 ] as const;
 export type RunFailureReason = (typeof RUN_FAILURE_REASONS)[number];
 

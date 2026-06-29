@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import type { RunEvent } from "@os-eco/burrow-cli";
-import { detectRuntimeTerminal, isClaudeAgentEnd, isPiAgentEnd } from "./terminal-detect.ts";
+import {
+	detectRateLimitTerminal,
+	detectRuntimeTerminal,
+	isClaudeAgentEnd,
+	isPiAgentEnd,
+} from "./terminal-detect.ts";
 
 /**
  * warren-6fcc / pl-5516 step 2: focused unit coverage for
@@ -209,5 +214,205 @@ describe("isPiAgentEnd", () => {
 		const ev = envelope({ type: "agent_end" });
 		expect(isPiAgentEnd({ ...ev, payload: null })).toBe(false);
 		expect(isPiAgentEnd({ ...ev, payload: 42 })).toBe(false);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// detectRateLimitTerminal (warren-395e)
+// ---------------------------------------------------------------------------
+
+describe("detectRateLimitTerminal", () => {
+	const RESETS_AT_MS = 1_800_000_000_000; // 2027-01-15 ~ epoch ms
+	const RESETS_AT_S = 1_800_000_000; // same in epoch seconds
+
+	// Helper: state_change/system envelope (claude-code batch)
+	function rl(payload: Record<string, unknown>): RunEvent {
+		return {
+			id: 0,
+			burrowId: "bur_x",
+			runId: "run_x",
+			seq: 2,
+			kind: "state_change",
+			stream: "system",
+			payload,
+			ts: new Date(2026, 4, 27, 12, 0, 0),
+		};
+	}
+
+	// Helper: agent_end/system envelope (claude-code-chat)
+	function chatEnd(payload: Record<string, unknown>): RunEvent {
+		return { ...rl(payload), kind: "agent_end" };
+	}
+
+	describe("Signal 1 — api_error_status === 429 in result envelope", () => {
+		test("api_error_status=429 is rate-limited", () => {
+			expect(
+				detectRateLimitTerminal(rl({ type: "result", is_error: true, api_error_status: 429 })),
+			).not.toBeNull();
+		});
+
+		test("api_error_status=429 on agent_end carrier (chat)", () => {
+			expect(
+				detectRateLimitTerminal(chatEnd({ type: "result", is_error: true, api_error_status: 429 })),
+			).not.toBeNull();
+		});
+
+		test("api_error_status=429 extracts resumeAt from rate_limit_event.resetsAt (epoch ms)", () => {
+			const result = detectRateLimitTerminal(
+				rl({
+					type: "result",
+					is_error: true,
+					api_error_status: 429,
+					rate_limit_event: { status: "rejected", resetsAt: RESETS_AT_MS },
+				}),
+			);
+			expect(result).not.toBeNull();
+			expect(result?.resumeAt?.getTime()).toBe(RESETS_AT_MS);
+		});
+
+		test("api_error_status=429 extracts resumeAt from rate_limit_event.resetsAt (epoch seconds)", () => {
+			const result = detectRateLimitTerminal(
+				rl({
+					type: "result",
+					is_error: true,
+					api_error_status: 429,
+					rate_limit_event: { status: "rejected", resetsAt: RESETS_AT_S },
+				}),
+			);
+			expect(result).not.toBeNull();
+			expect(result?.resumeAt?.getTime()).toBe(RESETS_AT_S * 1000);
+		});
+
+		test("api_error_status=429 extracts resumeAt from ISO string", () => {
+			const iso = new Date(RESETS_AT_MS).toISOString();
+			const result = detectRateLimitTerminal(
+				rl({
+					type: "result",
+					is_error: true,
+					api_error_status: 429,
+					rate_limit_event: { status: "rejected", resetsAt: iso },
+				}),
+			);
+			expect(result?.resumeAt?.getTime()).toBe(new Date(iso).getTime());
+		});
+
+		test("api_error_status=429 with no resetsAt yields resumeAt=undefined", () => {
+			const result = detectRateLimitTerminal(
+				rl({ type: "result", is_error: true, api_error_status: 429 }),
+			);
+			expect(result).not.toBeNull();
+			expect(result?.resumeAt).toBeUndefined();
+		});
+
+		test("api_error_status=500 is not rate-limited", () => {
+			expect(
+				detectRateLimitTerminal(rl({ type: "result", is_error: true, api_error_status: 500 })),
+			).toBeNull();
+		});
+
+		test("result without is_error=true and without api_error_status=429 is not rate-limited", () => {
+			expect(detectRateLimitTerminal(rl({ type: "result", is_error: false }))).toBeNull();
+		});
+	});
+
+	describe("Signal 2 — standalone rate_limit_event envelope", () => {
+		test("rate_limit_event with status=rejected is rate-limited", () => {
+			expect(
+				detectRateLimitTerminal(
+					rl({ type: "rate_limit_event", status: "rejected", resetsAt: RESETS_AT_MS }),
+				),
+			).not.toBeNull();
+		});
+
+		test("rate_limit_event with status=rejected extracts resumeAt", () => {
+			const result = detectRateLimitTerminal(
+				rl({ type: "rate_limit_event", status: "rejected", resetsAt: RESETS_AT_MS }),
+			);
+			expect(result?.resumeAt?.getTime()).toBe(RESETS_AT_MS);
+		});
+
+		test("rate_limit_event with status=allowed is not rate-limited", () => {
+			expect(
+				detectRateLimitTerminal(rl({ type: "rate_limit_event", status: "allowed" })),
+			).toBeNull();
+		});
+	});
+
+	describe("Signal 3 — text fallback", () => {
+		test("result text with 'session limit' + 'resets' is rate-limited", () => {
+			expect(
+				detectRateLimitTerminal(
+					rl({
+						type: "result",
+						is_error: true,
+						result: "You've hit your session limit. Your session will resets at 10pm.",
+					}),
+				),
+			).not.toBeNull();
+		});
+
+		test("text match is case-insensitive", () => {
+			expect(
+				detectRateLimitTerminal(
+					rl({
+						type: "result",
+						is_error: true,
+						result: "SESSION LIMIT exceeded. It RESETS soon.",
+					}),
+				),
+			).not.toBeNull();
+		});
+
+		test("text with only 'session limit' (no 'resets') is not rate-limited", () => {
+			expect(
+				detectRateLimitTerminal(
+					rl({ type: "result", is_error: true, result: "session limit exceeded." }),
+				),
+			).toBeNull();
+		});
+
+		test("text fallback yields resumeAt=undefined when no structured resetsAt", () => {
+			const result = detectRateLimitTerminal(
+				rl({
+					type: "result",
+					is_error: true,
+					result: "You've hit your session limit. It resets tomorrow.",
+				}),
+			);
+			expect(result).not.toBeNull();
+			expect(result?.resumeAt).toBeUndefined();
+		});
+	});
+
+	describe("stream / kind guards", () => {
+		test("non-system stream is ignored", () => {
+			expect(
+				detectRateLimitTerminal({
+					...rl({ type: "result", is_error: true, api_error_status: 429 }),
+					stream: "stdout",
+				}),
+			).toBeNull();
+		});
+
+		test("non-state_change non-agent_end kind is ignored", () => {
+			expect(
+				detectRateLimitTerminal({
+					...rl({ type: "result", is_error: true, api_error_status: 429 }),
+					kind: "text",
+				}),
+			).toBeNull();
+		});
+
+		test("null payload is ignored", () => {
+			expect(detectRateLimitTerminal({ ...rl({ type: "result" }), payload: null })).toBeNull();
+		});
+	});
+
+	describe("detectRuntimeTerminal still returns 'failed' for 429", () => {
+		test("api_error_status=429 result maps to 'failed' (regression lock)", () => {
+			expect(
+				detectRuntimeTerminal(rl({ type: "result", is_error: true, api_error_status: 429 })),
+			).toBe("failed");
+		});
 	});
 });

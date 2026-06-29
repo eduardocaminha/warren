@@ -63,10 +63,19 @@ export interface ReapRunInput {
 	 * `never_started`, `running` with no assistant output ⇒
 	 * `no_model_response`, `running` with assistant output ⇒ `crashed`.
 	 * Pass an explicit value when a higher-level caller has better
-	 * information (e.g. a deadline-based reaper passing `timed_out`).
+	 * information (e.g. a deadline-based reaper passing `timed_out`, or
+	 * bridge-reconnect passing `rate_limited` on a 429 terminal).
 	 * Ignored when `outcome !== "failed"`.
 	 */
 	readonly failureReason?: RunFailureReason;
+	/**
+	 * When the failure was a Claude session-limit 429 (warren-395e), the epoch
+	 * at which the limit resets. Forwarded to `reap.completed` so the
+	 * pause+resume path (warren-3f64) can re-queue the run at `resumeAt`.
+	 * Undefined when not rate-limited or when `resetsAt` was absent from the
+	 * terminal event.
+	 */
+	readonly resumeAt?: Date;
 	/**
 	 * Auto-open-PR config (warren-f6af). When omitted or `enabled: false`,
 	 * the `pr_open` sub-step is skipped entirely (no event emitted, no

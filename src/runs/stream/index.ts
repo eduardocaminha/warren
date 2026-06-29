@@ -87,7 +87,12 @@ export {
 	type RecoverActiveRunStreamsResult,
 	recoverActiveRunStreams,
 } from "./recover.ts";
-export { detectRuntimeTerminal, isPiAgentEnd } from "./terminal-detect.ts";
+export {
+	detectRateLimitTerminal,
+	detectRuntimeTerminal,
+	isPiAgentEnd,
+	type RateLimitTerminalInfo,
+} from "./terminal-detect.ts";
 export {
 	type BridgeLogger,
 	type BridgeRunStreamInput,

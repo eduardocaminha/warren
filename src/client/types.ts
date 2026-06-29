@@ -19,7 +19,8 @@ export type RunFailureReason =
 	| "crashed"
 	| "timed_out"
 	| "burrow_run_lost"
-	| "burrow_unreachable";
+	| "burrow_unreachable"
+	| "rate_limited";
 
 export type PreviewState = "starting" | "live" | "failed" | "torn-down";
 

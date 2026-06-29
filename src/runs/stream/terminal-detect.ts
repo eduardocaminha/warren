@@ -1,11 +1,16 @@
 /**
  * Runtime-terminal envelope detection (warren-a69a, warren-2687,
- * warren-36c0, warren-8b7c). Pure functions — given a single `RunEvent`,
- * classify whether it represents the runtime's terminal lifecycle envelope.
+ * warren-36c0, warren-8b7c, warren-395e). Pure functions — given a single
+ * `RunEvent`, classify whether it represents the runtime's terminal lifecycle
+ * envelope.
  *
- * Three roles:
+ * Four roles:
  *   - `detectRuntimeTerminal` returns the warren-side outcome to reap
  *     with (or `null`) and powers the bridge's "break on terminal" loop.
+ *   - `detectRateLimitTerminal` (warren-395e) recognises a 429 session-limit
+ *     terminal distinct from a generic crash, and extracts `resumeAt` from the
+ *     structured `rate_limit_event.resetsAt`. Called alongside
+ *     `detectRuntimeTerminal` in the bridge.
  *   - `isPiAgentEnd` distinguishes pi's `agent_end` envelope for the
  *     piStats out-of-band snapshot branch — both shapes ride the same
  *     state_change/system carrier, but only pi's `agent_end` should
@@ -109,4 +114,100 @@ export function isPiAgentEnd(event: RunEvent): boolean {
  */
 export function isClaudeAgentEnd(event: RunEvent): boolean {
 	return event.kind === "agent_end" && event.stream === "system";
+}
+
+/**
+ * Info extracted from a rate-limited (429 session-limit) terminal event
+ * (warren-395e).
+ */
+export interface RateLimitTerminalInfo {
+	/** Epoch when the Claude session limit resets, extracted from `resetsAt`. */
+	readonly resumeAt?: Date;
+}
+
+/**
+ * Detect a rate-limited (429 session-limit) terminal event from claude-code
+ * (warren-395e). Returns non-null when the event carries a 429 signal;
+ * returns `null` for normal failures and non-terminal events.
+ *
+ * Three signals are matched (in priority order):
+ *   1. `result` envelope with `api_error_status === 429` — primary signal
+ *      from burrow's jsonl-claude parser.
+ *   2. Standalone `rate_limit_event` envelope with `status === "rejected"` —
+ *      burrow may surface this as a `kind="state_change"` event.
+ *   3. Text fallback: `payload.result` contains "session limit" and "resets" —
+ *      covers variants where no structured error code is present.
+ *
+ * `resumeAt` is extracted from `payload.rate_limit_event.resetsAt` (preferred)
+ * or `payload.resetsAt` (top-level). Both epoch-ms numbers and ISO strings are
+ * accepted; epoch-second numbers (< 1e12) are upscaled to ms.
+ *
+ * Call this alongside `detectRuntimeTerminal` — both receive the same event.
+ * `detectRuntimeTerminal` still returns `"failed"` for 429 events so the
+ * bridge's break-on-terminal loop is unaffected; this function adds the
+ * rate-limit classification and `resumeAt` for the pause+resume path
+ * (warren-3f64).
+ */
+export function detectRateLimitTerminal(event: RunEvent): RateLimitTerminalInfo | null {
+	if (event.stream !== "system") return null;
+	if (event.kind !== "state_change" && event.kind !== "agent_end") return null;
+	const payload = event.payload;
+	if (payload === null || typeof payload !== "object") return null;
+	return extractRateLimitFromPayload(payload as Record<string, unknown>);
+}
+
+function extractRateLimitFromPayload(env: Record<string, unknown>): RateLimitTerminalInfo | null {
+	if (env.type === "result") return extractRateLimitFromResult(env);
+	if (env.type === "rate_limit_event" && env.status === "rejected") {
+		return { resumeAt: extractResetsAt(env) };
+	}
+	return null;
+}
+
+function extractRateLimitFromResult(env: Record<string, unknown>): RateLimitTerminalInfo | null {
+	// Signal 1: api_error_status === 429 (primary — structured)
+	if (env.api_error_status === 429) return { resumeAt: extractResetsAt(env) };
+	// Signal 3: text fallback — "session limit" + "resets" in result body
+	if (env.is_error === true && isSessionLimitText(env.result)) {
+		return { resumeAt: extractResetsAt(env) };
+	}
+	return null;
+}
+
+function isSessionLimitText(result: unknown): boolean {
+	if (typeof result !== "string") return false;
+	const t = result.toLowerCase();
+	return t.includes("session limit") && t.includes("resets");
+}
+
+/** Extract a reset timestamp from the most-specific location in the payload. */
+function extractResetsAt(env: Record<string, unknown>): Date | undefined {
+	// Prefer nested rate_limit_event.resetsAt (e.g. inside a result envelope)
+	const rle = env.rate_limit_event;
+	if (rle !== null && typeof rle === "object") {
+		const d = parseResetsAt((rle as Record<string, unknown>).resetsAt);
+		if (d !== undefined) return d;
+	}
+	// Fall back to top-level resetsAt (rate_limit_event envelope itself)
+	return parseResetsAt(env.resetsAt);
+}
+
+/**
+ * Normalise a `resetsAt` value to a `Date`. Accepts:
+ *   - epoch-ms number (>= 1e12)
+ *   - epoch-second number (< 1e12, upscaled ×1000)
+ *   - ISO date string
+ * Returns `undefined` for missing, zero, or unparseable values.
+ */
+function parseResetsAt(value: unknown): Date | undefined {
+	if (typeof value === "number" && value > 0) {
+		const ms = value >= 1e12 ? value : value * 1000;
+		const d = new Date(ms);
+		return Number.isNaN(d.getTime()) ? undefined : d;
+	}
+	if (typeof value === "string" && value.length > 0) {
+		const d = new Date(value);
+		return Number.isNaN(d.getTime()) ? undefined : d;
+	}
+	return undefined;
 }

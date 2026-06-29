@@ -137,6 +137,8 @@ export async function reapRun(input: ReapRunInput): Promise<ReapRunResult> {
 	await emit("reap.completed", {
 		state: finalState,
 		failureReason,
+		// warren-395e: carry resumeAt so warren-3f64 can re-queue rate-limited runs.
+		...(input.resumeAt !== undefined ? { resumeAt: input.resumeAt.toISOString() } : {}),
 		mulch: {
 			updated: state.mulchUpdated,
 			skipped: state.mulchSkipped,

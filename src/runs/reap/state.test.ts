@@ -155,6 +155,83 @@ describe("reapRun failure-reason inference (warren-3c40 / warren-5165)", () => {
 		expect((await ctx.repos.runs.require(ctx.runId)).failureReason).toBeNull();
 	});
 
+	test("classifies running-on-entry with model output AND api_error_status=429 as rate_limited (warren-395e)", async () => {
+		// Model output event (so it's not no_model_response)
+		await ctx.repos.events.append({
+			runId: ctx.runId,
+			burrowEventSeq: 1,
+			ts: new Date().toISOString(),
+			kind: "text",
+			stream: "stdout",
+			payload: { text: "thinking..." },
+		});
+		// 429 terminal event in system stream
+		await ctx.repos.events.append({
+			runId: ctx.runId,
+			burrowEventSeq: 2,
+			ts: new Date().toISOString(),
+			kind: "state_change",
+			stream: "system",
+			payload: { type: "result", is_error: true, api_error_status: 429 },
+		});
+
+		const result = await reapRun({
+			runId: ctx.runId,
+			outcome: "failed",
+			repos: ctx.repos,
+			burrowClientPool: await makePool(fakeBurrowClient(makeBurrow()), ctx.repos),
+			fs: fakeFs().fs,
+			exec: fakeExec().exec,
+		});
+
+		expect(result.failureReason).toBe("rate_limited");
+		expect((await ctx.repos.runs.require(ctx.runId)).failureReason).toBe("rate_limited");
+	});
+
+	test("classifies running-on-entry with rate_limit_event/rejected as rate_limited (warren-395e)", async () => {
+		await ctx.repos.events.append({
+			runId: ctx.runId,
+			burrowEventSeq: 1,
+			ts: new Date().toISOString(),
+			kind: "text",
+			stream: "stdout",
+			payload: { text: "thinking..." },
+		});
+		await ctx.repos.events.append({
+			runId: ctx.runId,
+			burrowEventSeq: 2,
+			ts: new Date().toISOString(),
+			kind: "state_change",
+			stream: "system",
+			payload: { type: "rate_limit_event", status: "rejected", resetsAt: 1_800_000_000_000 },
+		});
+
+		const result = await reapRun({
+			runId: ctx.runId,
+			outcome: "failed",
+			repos: ctx.repos,
+			burrowClientPool: await makePool(fakeBurrowClient(makeBurrow()), ctx.repos),
+			fs: fakeFs().fs,
+			exec: fakeExec().exec,
+		});
+
+		expect(result.failureReason).toBe("rate_limited");
+	});
+
+	test("explicit failureReason='rate_limited' override wins (warren-395e)", async () => {
+		const result = await reapRun({
+			runId: ctx.runId,
+			outcome: "failed",
+			failureReason: "rate_limited",
+			repos: ctx.repos,
+			burrowClientPool: await makePool(fakeBurrowClient(makeBurrow()), ctx.repos),
+			fs: fakeFs().fs,
+			exec: fakeExec().exec,
+		});
+		expect(result.failureReason).toBe("rate_limited");
+		expect((await ctx.repos.runs.require(ctx.runId)).failureReason).toBe("rate_limited");
+	});
+
 	test("explicit failureReason override wins over inference (warren-3c40)", async () => {
 		const result = await reapRun({
 			runId: ctx.runId,
