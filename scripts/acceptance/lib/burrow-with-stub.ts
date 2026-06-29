@@ -215,6 +215,30 @@ function buildClaudeAcceptanceRuntime(): AgentRuntime {
 	};
 }
 
+// 429-rate-limit stub (warren-016a). Emits a claude-code result with
+// api_error_status=429 on first invocation, success on retry. Uses a flag
+// file (WARREN_ACCEPT_38_FLAG env var) to distinguish first vs retry run.
+// Registered under the unique `claude-code-429` id so it doesn't override
+// the existing claude-code stub used by other scenarios.
+const CLAUDE_429_AGENT_CONFIG = {
+	id: "claude-code-429",
+	displayName: "Claude Code 429 Stub (acceptance)",
+	command: "bash",
+	args: ["./tools/claude-code-429-stub-agent.sh", "{{prompt}}"],
+	promptDelivery: "arg" as const,
+	outputFormat: "raw-text" as const,
+	supportsResume: false,
+	inboxDelivery: "none" as const,
+};
+
+function buildClaude429AcceptanceRuntime(): AgentRuntime {
+	const base = loadAgentConfig(CLAUDE_429_AGENT_CONFIG);
+	return {
+		...base,
+		parseEvents: (line: string) => parseJsonlClaude(line),
+	};
+}
+
 // Claude-code-chat stub (warren-c985 / pl-e118 step 4). The built-in
 // `claude-code-chat` runtime spawns the real `claude` CLI with `-p` and
 // `--output-format stream-json`, which requires an Anthropic API key.
@@ -280,6 +304,10 @@ async function main(): Promise<number> {
 		// Override claude-code-chat with a stub so spawn-per-turn conversation
 		// scenarios can run without an Anthropic API key (warren-c985).
 		client.agents.register(buildClaudeChatAcceptanceRuntime());
+		// Register the 429-rate-limit stub under claude-code-429 so scenario
+		// 38 can dispatch a run that pauses with rate_limited on first fire and
+		// succeeds on retry (warren-016a).
+		client.agents.register(buildClaude429AcceptanceRuntime());
 
 		const serveOpts: Parameters<typeof runServeCommand>[0]["options"] = {};
 		if (args.socket !== undefined) serveOpts.socket = args.socket;

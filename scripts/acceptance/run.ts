@@ -71,6 +71,7 @@ import { scenario as scenario34 } from "./scenarios/34-warden-conversation-accep
 import { scenario as scenario35 } from "./scenarios/35-ci-fixer-roundtrip.ts";
 import { scenario as scenario36 } from "./scenarios/36-ready-to-dispatch-plans.ts";
 import { scenario as scenario37 } from "./scenarios/37-claude-code-chat-conversation.ts";
+import { scenario as scenario38 } from "./scenarios/38-rate-limit-resilience.ts";
 
 const SCENARIOS: readonly Scenario[] = [
 	scenario01,
@@ -111,6 +112,7 @@ const SCENARIOS: readonly Scenario[] = [
 	scenario35,
 	scenario36,
 	scenario37,
+	scenario38,
 ];
 
 interface ParsedArgs {

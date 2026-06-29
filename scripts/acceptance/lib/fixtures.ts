@@ -136,6 +136,59 @@ async function buildCanopyRepo(repoPath: string): Promise<void> {
 		],
 		env,
 	);
+
+	// report-only-stub (warren-016a): canopy agent with report_only=true in
+	// frontmatter and runtime=stub-shell. The stub-shell agent writes files
+	// but never commits, producing a dirty workspace. Reap should classify
+	// the run as succeeded (not dropped_commit) because report_only exempts
+	// it (warren-4e30).
+	await runIn(
+		repoPath,
+		[
+			"cn",
+			"create",
+			"--name",
+			"report-only-stub",
+			"--tag",
+			"agent",
+			"--description",
+			"Report-only stub agent — writes files, never commits (warren-016a)",
+			"--fm",
+			"report_only=true",
+			"--fm",
+			"runtime=stub-shell",
+			"--section",
+			`system=${systemSection}`,
+			"--section",
+			`burrow_config=${burrowConfigSection}`,
+		],
+		env,
+	);
+
+	// rate-limit-stub (warren-016a): canopy agent with runtime=claude-code-429.
+	// The 429 stub script emits api_error_status=429 on first invocation and
+	// success on retry, exercising the pause→resume scheduler path.
+	await runIn(
+		repoPath,
+		[
+			"cn",
+			"create",
+			"--name",
+			"rate-limit-stub",
+			"--tag",
+			"agent",
+			"--description",
+			"Rate-limit stub agent — emits 429 first run, success on retry (warren-016a)",
+			"--fm",
+			"runtime=claude-code-429",
+			"--section",
+			`system=${systemSection}`,
+			"--section",
+			`burrow_config=${burrowConfigSection}`,
+		],
+		env,
+	);
+
 	// `cn sync` stages and commits .canopy/ if available; fall back to a
 	// plain `git add . && git commit` if cn doesn't expose it.
 	try {
@@ -223,6 +276,13 @@ async function buildSampleProject(repoPath: string): Promise<void> {
 	const targetClaudeChatScript = join(repoPath, "tools", "claude-code-chat-stub-agent.sh");
 	await copyFile(harnessClaudeChatScript, targetClaudeChatScript);
 
+	// 429-rate-limit stub agent (warren-016a) — emits a claude-code result
+	// with api_error_status=429 on first invocation, success on retry.
+	// Registered as the `claude-code-429` runtime in burrow-with-stub.ts.
+	const harness429Script = new URL("./stub-agent/claude-code-429-agent.sh", import.meta.url);
+	const target429Script = join(repoPath, "tools", "claude-code-429-stub-agent.sh");
+	await copyFile(harness429Script, target429Script);
+
 	// Seed the project's .seeds/issues.jsonl with one open seed the stub
 	// agent will close — gives reap's seeds-close-mirror sub-step
 	// something to mirror.
@@ -250,6 +310,7 @@ async function buildSampleProject(repoPath: string): Promise<void> {
 	await runIn(repoPath, ["chmod", "+x", "tools/pi-stub-agent.sh"], env);
 	await runIn(repoPath, ["chmod", "+x", "tools/claude-code-stub-agent.sh"], env);
 	await runIn(repoPath, ["chmod", "+x", "tools/claude-code-chat-stub-agent.sh"], env);
+	await runIn(repoPath, ["chmod", "+x", "tools/claude-code-429-stub-agent.sh"], env);
 	await runIn(repoPath, ["git", "add", "."], env);
 	await runIn(repoPath, ["git", "commit", "-m", "init: sample project fixture"], env);
 }
