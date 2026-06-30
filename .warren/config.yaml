@@ -31,7 +31,10 @@ interactiveAgents:
 ciFixer:
   enabled: true
   role: cam-pr-fixer
-  maxRetries: 6
+  # 10 (max): #148 accumulated 7 dead never_started attempts in the broken-spawn
+  # era (pre-rebuild), which capped it at the prior maxRetries=6. 10 gives the
+  # now-working fixer room to retry it. cam-pr-fixer normally fixes in 1-2.
+  maxRetries: 10
   cooldownMinutes: 5
 
 # ── Optional knobs (uncomment to set) ───────────────────────────────────
