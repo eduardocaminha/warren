@@ -23,17 +23,15 @@ interactiveAgents:
 
 # CI-fixer (src/ci-fixer/): each scheduler tick warren polls this project's
 # own failing PRs and dispatches the fixer on the PR branch to repair CI.
-# RE-ENABLED 2026-06-29 after the ZimaOS rebuild that deployed warren-a993
-# (targetBranch persist + checkout) + VERSION 0.9.8. Before the rebuild every
-# ci-fixer run spawn_failed (git worktree add -b on an existing PR branch).
-# role MUST be cam-pr-fixer (claude-code/subscription): the builtin pr-fixer
-# is runtime:pi/API and never_starts on this subscription box.
+# DISABLED 2026-06-30: even on v0.9.8 the fixer run gets targetBranch=None and
+# spawn_fails with `git worktree add -b <existing-PR-branch> ... main` (CREATE
+# collision). warren-a993 is NOT effective here — the worktree-add (burrow side)
+# doesn't checkout an existing branch, so the ci-fixer can NEVER push to a PR
+# branch on this stack. Left ON it loops ~1 dispatch/min/red-PR (60+ dead runs).
+# Keep OFF until the burrow worktree-add is fixed to checkout existing branches.
 ciFixer:
-  enabled: true
+  enabled: false
   role: cam-pr-fixer
-  # 10 (max): #148 accumulated 7 dead never_started attempts in the broken-spawn
-  # era (pre-rebuild), which capped it at the prior maxRetries=6. 10 gives the
-  # now-working fixer room to retry it. cam-pr-fixer normally fixes in 1-2.
   maxRetries: 10
   cooldownMinutes: 5
 
