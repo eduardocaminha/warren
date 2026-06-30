@@ -1,5 +1,6 @@
 import type { BurrowClient } from "../../burrow-client/client.ts";
 import { withTransportMapping } from "../../burrow-client/client.ts";
+import { formatError } from "../../core/errors.ts";
 import type { EventRow, RunFailureReason, RunTerminalState } from "../../db/schema.ts";
 import { readReportOnly } from "../../registry/schema.ts";
 import { bindBridgeLogger } from "../stream/index.ts";
@@ -55,7 +56,7 @@ export async function reapRun(input: ReapRunInput): Promise<ReapRunResult> {
 		return row;
 	};
 	const fail = async (step: ReapStep, err: unknown, path?: string): Promise<void> => {
-		const message = err instanceof Error ? err.message : String(err);
+		const message = formatError(err);
 		const stepError: ReapStepError =
 			path !== undefined ? { step, message, path } : { step, message };
 		errors.push(stepError);
@@ -164,7 +165,7 @@ export async function reapRun(input: ReapRunInput): Promise<ReapRunResult> {
 			log.error(
 				{
 					event: "reap.resume_at_failed",
-					err: err instanceof Error ? err.message : String(err),
+					err: formatError(err),
 				},
 				"failed to stamp resume_at on rate-limited run",
 			);

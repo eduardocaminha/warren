@@ -49,6 +49,7 @@
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { PlotEvent, PlotStatus } from "@os-eco/plot-cli";
+import { formatError } from "../core/errors.ts";
 import type { ProjectRow, RunRow } from "../db/schema.ts";
 import { UserPlotClient } from "../plot-client/index.ts";
 import type { Logger } from "../server/types.ts";
@@ -351,7 +352,7 @@ export function createPlotAggregator(opts: PlotAggregatorOptions): PlotAggregato
 				{
 					plotId: summary.id,
 					projectId: summary.project_id,
-					err: err instanceof Error ? err.message : String(err),
+					err: formatError(err),
 				},
 				"plots.needs_attention_events_failed",
 			);
@@ -388,10 +389,7 @@ async function pausedPlotIds(
 		}
 		return set;
 	} catch (err) {
-		logger.warn(
-			{ err: err instanceof Error ? err.message : String(err) },
-			"plots.needs_attention_paused_query_failed",
-		);
+		logger.warn({ err: formatError(err) }, "plots.needs_attention_paused_query_failed");
 		return new Set();
 	}
 }
@@ -437,7 +435,7 @@ async function fetchProjectSummaries(
 		logger.warn(
 			{
 				projectId: project.id,
-				err: err instanceof Error ? err.message : String(err),
+				err: formatError(err),
 			},
 			"plots.aggregate_project_failed",
 		);

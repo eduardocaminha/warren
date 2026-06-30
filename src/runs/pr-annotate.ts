@@ -27,6 +27,7 @@
  * events so a GitHub outage never fails the run.
  */
 
+import { formatError } from "../core/errors.ts";
 import { PREVIEW_FRAGMENT_END, PREVIEW_FRAGMENT_START } from "./pr.ts";
 import { buildHeaders, GITHUB_API_BASE, readJson, readText, truncate } from "./pr-checks.ts";
 
@@ -84,7 +85,7 @@ export async function annotatePrPreview(
 		return {
 			ok: false,
 			reason: "network",
-			message: err instanceof Error ? err.message : String(err),
+			message: formatError(err),
 		};
 	}
 	if (!getRes.ok) {
@@ -115,7 +116,7 @@ export async function annotatePrPreview(
 		return {
 			ok: false,
 			reason: "network",
-			message: err instanceof Error ? err.message : String(err),
+			message: formatError(err),
 		};
 	}
 	if (!patchRes.ok) {

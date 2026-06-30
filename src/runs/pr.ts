@@ -1,3 +1,4 @@
+import { formatError } from "../core/errors.ts";
 import {
 	buildHeaders,
 	GH_FETCH_OVERRIDE_ENV,
@@ -117,7 +118,7 @@ export async function openPullRequest(
 		return {
 			ok: false,
 			reason: "network",
-			message: err instanceof Error ? err.message : String(err),
+			message: formatError(err),
 		};
 	}
 

@@ -1,6 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { formatError } from "../../core/errors.ts";
 import type { ReapExec } from "./types.ts";
 
 /* ----------------------------------------------------------------------- */
@@ -202,7 +203,7 @@ function isNonFastForward(msg: string): boolean {
 }
 
 function errMsg(err: unknown): string {
-	return err instanceof Error ? err.message : String(err);
+	return formatError(err);
 }
 
 async function defaultMkTmpDir(): Promise<string> {

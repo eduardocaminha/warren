@@ -17,6 +17,7 @@ import {
 	type CiFixerSpawnInput,
 	pollProjectCiFixer,
 } from "../ci-fixer/poller.ts";
+import { formatError } from "../core/errors.ts";
 import type { Repos } from "../db/repos/index.ts";
 import type { ProjectRow } from "../db/schema.ts";
 import { resolveRunBranchPrefix } from "../runs/branch.ts";
@@ -155,7 +156,7 @@ async function appendDispatchedEvent(
 		});
 	} catch (err) {
 		logger?.error(
-			{ runId: result.parentRunId, reason: err instanceof Error ? err.message : String(err) },
+			{ runId: result.parentRunId, reason: formatError(err) },
 			"scheduler.ci_fixer_event_failed",
 		);
 	}

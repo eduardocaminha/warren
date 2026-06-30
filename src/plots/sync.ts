@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { warrenCommitIdentityArgs } from "../bot-identity.ts";
+import { formatError } from "../core/errors.ts";
 import type { SpawnFn } from "../projects/index.ts";
 import { parseGitHubUrl } from "../projects/url.ts";
 import { openPullRequest, parsePullRequestRef } from "../runs/pr.ts";
@@ -47,9 +48,7 @@ async function trySpawn(
 	try {
 		return await spawn(cmd, opts);
 	} catch (err) {
-		throw new Error(
-			`failed to spawn ${cmd.join(" ")}: ${err instanceof Error ? err.message : String(err)}`,
-		);
+		throw new Error(`failed to spawn ${cmd.join(" ")}: ${formatError(err)}`);
 	}
 }
 

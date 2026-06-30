@@ -6,6 +6,7 @@
  * `./orchestrate.ts` via `./helpers.ts`.
  */
 
+import { formatError } from "../../core/errors.ts";
 import { captureFailureTail, headTruncate, safeDeleteSidecar } from "./helpers.ts";
 import { type LaunchPreviewInput, PREVIEW_FAILURE_TAIL_BYTES } from "./types.ts";
 
@@ -35,7 +36,7 @@ export async function runSetupStep(args: {
 		});
 		setupSidecarId = created.id;
 	} catch (err) {
-		const message = err instanceof Error ? err.message : String(err);
+		const message = formatError(err);
 		return {
 			ok: false,
 			reason: "setup_failed",

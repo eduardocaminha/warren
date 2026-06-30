@@ -1,3 +1,5 @@
+import { formatError } from "../core/errors.ts";
+
 /**
  * GitHub check-run polling for the CI-fixer (warren-05ea).
  *
@@ -78,7 +80,7 @@ export async function fetchCheckRuns(input: FetchCheckRunsInput): Promise<FetchC
 		return {
 			kind: "http_error",
 			status: 0,
-			message: err instanceof Error ? err.message : String(err),
+			message: formatError(err),
 		};
 	}
 

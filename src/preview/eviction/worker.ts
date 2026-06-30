@@ -7,6 +7,7 @@
  * so teardown doesn't race the next `sidecars.delete`.
  */
 
+import { formatError } from "../../core/errors.ts";
 import { runPreviewEvictionTick } from "./tick.ts";
 import type { PreviewEvictionTickInput, PreviewEvictionTickResult } from "./types.ts";
 
@@ -68,10 +69,7 @@ export function startPreviewEvictionWorker(
 			ticks += 1;
 			return result;
 		} catch (err) {
-			input.logger?.error(
-				{ err: err instanceof Error ? err.message : String(err) },
-				"preview_eviction.tick_failed",
-			);
+			input.logger?.error({ err: formatError(err) }, "preview_eviction.tick_failed");
 			return null;
 		} finally {
 			inFlight = null;

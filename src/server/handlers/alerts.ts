@@ -20,7 +20,7 @@
  * sender's retry logic. A dispatch returns 202 with the new run id.
  */
 
-import { ValidationError } from "../../core/errors.ts";
+import { formatError, ValidationError } from "../../core/errors.ts";
 import type { EventsRepo } from "../../db/repos/events.ts";
 import {
 	buildHealPrompt,
@@ -213,9 +213,6 @@ async function stampDispatchedEvent(
 			},
 		});
 	} catch (err) {
-		deps.logger.error(
-			{ runId, reason: err instanceof Error ? err.message : String(err) },
-			"alerts.heal_event_failed",
-		);
+		deps.logger.error({ runId, reason: formatError(err) }, "alerts.heal_event_failed");
 	}
 }

@@ -8,6 +8,7 @@
  * module-level walkthrough and contract.
  */
 
+import { formatError } from "../../core/errors.ts";
 import { PORT_EXHAUSTED_REASON } from "../port-allocator.ts";
 import {
 	captureFailureTail,
@@ -90,7 +91,7 @@ export async function launchPreview(input: LaunchPreviewInput): Promise<LaunchPr
 		});
 		sidecarId = created.id;
 	} catch (err) {
-		const message = err instanceof Error ? err.message : String(err);
+		const message = formatError(err);
 		await input.repos.runs.attachPreview(input.runId, {
 			previewState: "failed",
 			previewPort: null,

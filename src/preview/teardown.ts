@@ -38,6 +38,7 @@
  */
 
 import type { BurrowClientPool } from "../burrow-client/pool.ts";
+import { formatError } from "../core/errors.ts";
 import type { Repos } from "../db/repos/index.ts";
 import type { PreviewState } from "../db/schema.ts";
 import type { RunEventBroker } from "../runs/events.ts";
@@ -185,7 +186,7 @@ async function stopSidecarsBestEffort(input: StopSidecarsInput): Promise<void> {
 						runId: input.runId,
 						burrowId: input.burrowId,
 						sidecarId: sc.id,
-						err: err instanceof Error ? err.message : String(err),
+						err: formatError(err),
 					},
 					"preview_teardown.sidecar_delete_failed",
 				);
@@ -196,7 +197,7 @@ async function stopSidecarsBestEffort(input: StopSidecarsInput): Promise<void> {
 			{
 				runId: input.runId,
 				burrowId: input.burrowId,
-				err: err instanceof Error ? err.message : String(err),
+				err: formatError(err),
 			},
 			"preview_teardown.sidecar_stop_failed",
 		);
@@ -237,7 +238,7 @@ async function emitTornDownEvent(input: EmitTornDownInput): Promise<void> {
 		input.logger?.error(
 			{
 				runId: input.runId,
-				err: err instanceof Error ? err.message : String(err),
+				err: formatError(err),
 			},
 			"preview_teardown.event_emit_failed",
 		);

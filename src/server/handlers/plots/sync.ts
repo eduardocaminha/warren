@@ -4,6 +4,7 @@
  * Extracted from `src/server/handlers/plots.ts` (warren-3f46 / pl-3255 step 1).
  */
 
+import { formatError } from "../../../core/errors.ts";
 import { defaultPlotSyncer } from "../../../plots/index.ts";
 import { loadWarrenConfig } from "../../../warren-config/index.ts";
 import { jsonResponse } from "../../response.ts";
@@ -42,7 +43,7 @@ function triggerBackgroundSync(
 				{
 					projectId: project.id,
 					plotId,
-					error: err instanceof Error ? err.message : String(err),
+					error: formatError(err),
 				},
 				"background plot sync failed",
 			);

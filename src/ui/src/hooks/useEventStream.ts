@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { streamRunEvents, UnauthorizedError } from "@/api/client.ts";
 import type { RunEvent } from "@/api/types.ts";
+import { formatError } from "@/lib/format-error";
 
 export type StreamStatus = "idle" | "connecting" | "live" | "ended" | "error";
 
@@ -57,7 +58,7 @@ export function useEventStream(runId: string, follow: boolean): State {
 						setState((s) => ({ ...s, status: "error", error: err.message }));
 						return;
 					}
-					const msg = err instanceof Error ? err.message : String(err);
+					const msg = formatError(err);
 					setState((s) => ({ ...s, status: "error", error: msg }));
 					if (!follow) {
 						return;

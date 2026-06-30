@@ -44,6 +44,7 @@
 import { NotFoundError as BurrowNotFoundError } from "@os-eco/burrow-cli";
 import { withTransportMapping } from "../burrow-client/client.ts";
 import type { BurrowClientPool } from "../burrow-client/pool.ts";
+import { formatError } from "../core/errors.ts";
 import type { Repos } from "../db/repos/index.ts";
 import type { RunMode } from "../db/schema.ts";
 import type { PreviewLaunchConfig } from "../preview/launch/index.ts";
@@ -243,7 +244,7 @@ export function createBridgeRegistry(input: CreateBridgeRegistryInput): BridgeRe
 		// in its current state for the reaper to finalize.
 		void done
 			.catch(async (err) => {
-				const message = err instanceof Error ? err.message : String(err);
+				const message = formatError(err);
 				input.logger?.error?.(
 					{ runId, burrowRunId, burrowId, err: message },
 					"bridge crashed with unhandled error",
@@ -263,7 +264,7 @@ export function createBridgeRegistry(input: CreateBridgeRegistryInput): BridgeRe
 					input.logger?.error?.(
 						{
 							runId,
-							err: eventErr instanceof Error ? eventErr.message : String(eventErr),
+							err: formatError(eventErr),
 						},
 						"failed to write bridge_fatal event",
 					);
@@ -397,7 +398,7 @@ export async function bootBridges(input: CreateBridgeRegistryInput): Promise<Boo
 				{
 					runId: run.id,
 					burrowRunId: run.burrowRunId,
-					err: err instanceof Error ? err.message : String(err),
+					err: formatError(err),
 				},
 				"bootBridges reconcile probe failed (non-404); starting bridge anyway",
 			);

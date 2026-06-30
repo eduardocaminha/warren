@@ -35,6 +35,7 @@ import {
 	parseEnvDuration,
 	parseEnvPositiveInt,
 } from "../../core/env-parse.ts";
+import { formatError } from "../../core/errors.ts";
 import type { BurrowRow, RunRow, RunState } from "../../db/schema.ts";
 
 /** Non-terminal run states — a burrow with one of these is never GC'd. */
@@ -285,7 +286,7 @@ async function destroyOne(
 			{
 				burrowId: candidate.burrowId,
 				workerId: candidate.workerId,
-				err: err instanceof Error ? err.message : String(err),
+				err: formatError(err),
 			},
 			"workspace_gc.destroy_failed",
 		);
@@ -338,10 +339,7 @@ export function startWorkspaceGcWorker(
 			ticks += 1;
 			return result;
 		} catch (err) {
-			input.logger?.error(
-				{ err: err instanceof Error ? err.message : String(err) },
-				"workspace_gc.tick_failed",
-			);
+			input.logger?.error({ err: formatError(err) }, "workspace_gc.tick_failed");
 			return null;
 		} finally {
 			inFlight = null;

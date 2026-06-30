@@ -10,6 +10,7 @@
  * signal that disk is leaking.
  */
 
+import { formatError } from "../core/errors.ts";
 import type { BurrowRow, RunRow, RunState } from "../db/schema.ts";
 import {
 	buildBurrowActivity,
@@ -42,7 +43,7 @@ export async function checkStaleBurrowWorkspaces(deps: {
 		return {
 			name: "stale_burrow_workspaces",
 			ok: false,
-			message: err instanceof Error ? err.message : String(err),
+			message: formatError(err),
 			hint: "verify the database is reachable and the burrows/runs tables exist",
 		};
 	}

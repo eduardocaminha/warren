@@ -12,6 +12,7 @@
  * layer.
  */
 
+import { formatError } from "../../core/errors.ts";
 import type { Repos } from "../../db/repos/index.ts";
 import type { RunEventBroker } from "../../runs/events.ts";
 import type { WarrenConfigCache } from "../../warren-config/index.ts";
@@ -188,7 +189,7 @@ async function tryLoadWarrenConfig(
 			{
 				runId: input.row.runId,
 				projectId,
-				err: err instanceof Error ? err.message : String(err),
+				err: formatError(err),
 			},
 			"preview_eviction.warren_config_load_failed",
 		);
@@ -211,7 +212,7 @@ function parseOverrideDuration(
 				runId: input.row.runId,
 				projectId,
 				value: raw,
-				err: err instanceof Error ? err.message : String(err),
+				err: formatError(err),
 			},
 			logMsg,
 		);
@@ -283,7 +284,7 @@ async function stopSidecarsForRow(input: ApplyEvictionInput): Promise<void> {
 			{
 				runId: input.row.runId,
 				burrowId,
-				err: err instanceof Error ? err.message : String(err),
+				err: formatError(err),
 			},
 			"preview_eviction.sidecar_stop_failed",
 		);
@@ -304,7 +305,7 @@ async function deleteSidecarSafely(
 				runId: input.row.runId,
 				burrowId,
 				sidecarId,
-				err: err instanceof Error ? err.message : String(err),
+				err: formatError(err),
 			},
 			"preview_eviction.sidecar_delete_failed",
 		);
@@ -331,7 +332,7 @@ async function emitEvictedEvent(input: ApplyEvictionInput): Promise<void> {
 		input.logger?.error(
 			{
 				runId: input.row.runId,
-				err: err instanceof Error ? err.message : String(err),
+				err: formatError(err),
 			},
 			"preview_eviction.event_emit_failed",
 		);

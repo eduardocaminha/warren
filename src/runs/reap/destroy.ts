@@ -1,6 +1,7 @@
 import type { DestroyBurrowResult } from "@os-eco/burrow-cli";
 import type { BurrowClient } from "../../burrow-client/client.ts";
 import { withTransportMapping } from "../../burrow-client/client.ts";
+import { formatError } from "../../core/errors.ts";
 import type { PreviewState, RunMode } from "../../db/schema.ts";
 
 /* ----------------------------------------------------------------------- */
@@ -171,7 +172,7 @@ export async function destroyBurrowWorkspaceById(
 		await input.emit("reap.workspace_destroy_failed", {
 			burrowId: input.burrowId,
 			step: "resolve_worker",
-			message: err instanceof Error ? err.message : String(err),
+			message: formatError(err),
 		});
 		return false;
 	}
@@ -189,7 +190,7 @@ export async function destroyBurrowWorkspaceById(
 		await input.emit("reap.workspace_destroy_failed", {
 			burrowId: input.burrowId,
 			step: "destroy",
-			message: err instanceof Error ? err.message : String(err),
+			message: formatError(err),
 		});
 		return false;
 	}

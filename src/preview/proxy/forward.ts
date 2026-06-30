@@ -10,6 +10,7 @@
  * here only when the caller supplies a non-null `pathPrefix`.
  */
 
+import { formatError } from "../../core/errors.ts";
 import type { Repos } from "../../db/repos/index.ts";
 import type { RunRow } from "../../db/schema.ts";
 import { previewError } from "./responses.ts";
@@ -75,7 +76,7 @@ export async function forwardToUpstream(
 	try {
 		upstream = await fetchImpl(upstreamUrl, init);
 	} catch (err) {
-		const message = err instanceof Error ? err.message : String(err);
+		const message = formatError(err);
 		return previewError(
 			502,
 			"preview_upstream_unreachable",

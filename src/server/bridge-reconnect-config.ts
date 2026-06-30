@@ -6,6 +6,7 @@
  * feature) on any miss — the reap sub-step gates on the result.
  */
 
+import { formatError } from "../core/errors.ts";
 import type { BoundBridgeLogger } from "../runs/index.ts";
 import type { PrTemplateOverrides } from "../runs/pr-template.ts";
 import type { ServerPreviewConfig } from "../warren-config/index.ts";
@@ -44,7 +45,7 @@ export async function resolveProjectPreviewConfig(
 			{
 				event: "bridge.preview_config_failed",
 				projectId: project.id,
-				err: err instanceof Error ? err.message : String(err),
+				err: formatError(err),
 			},
 			"preview config load failed; skipping preview launch",
 		);
@@ -81,7 +82,7 @@ export async function resolveProjectPrTemplate(
 			{
 				event: "bridge.pr_template_failed",
 				projectId: project.id,
-				err: err instanceof Error ? err.message : String(err),
+				err: formatError(err),
 			},
 			"pr-template load failed; falling back to built-in defaults",
 		);

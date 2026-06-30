@@ -13,6 +13,7 @@
 
 import { join } from "node:path";
 import type { BurrowClient } from "../../burrow-client/client.ts";
+import { formatError } from "../../core/errors.ts";
 import type { EventRow, ProjectRow, RunRow } from "../../db/schema.ts";
 import { openPullRequest } from "../pr.ts";
 import type { BoundBridgeLogger } from "../stream/index.ts";
@@ -345,7 +346,7 @@ async function commitsAheadStep(ctx: ReapPipelineContext, state: ReapPipelineSta
 		const parsed = Number.parseInt(out.stdout.trim(), 10);
 		state.commitsAhead = Number.isFinite(parsed) ? parsed : null;
 	} catch (err) {
-		const reason = err instanceof Error ? err.message : String(err);
+		const reason = formatError(err);
 		ctx.log.info(
 			{ event: "reap.commits_ahead_failed", err: reason },
 			"reap commits-ahead count failed",

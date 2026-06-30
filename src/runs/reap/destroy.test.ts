@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { DestroyBurrowResult } from "@os-eco/burrow-cli";
 import type { BurrowClient } from "../../burrow-client/client.ts";
+import { formatError } from "../../core/errors.ts";
 import type { PreviewState, RunMode } from "../../db/schema.ts";
 import { destroyBurrowWorkspaceById, runWorkspaceDestroy } from "./destroy.ts";
 
@@ -44,7 +45,7 @@ function deps(h: Harness) {
 			h.events.push({ kind, payload });
 		},
 		fail: async (step: "workspace_destroy", err: unknown) => {
-			h.failures.push({ step, message: err instanceof Error ? err.message : String(err) });
+			h.failures.push({ step, message: formatError(err) });
 		},
 	};
 }

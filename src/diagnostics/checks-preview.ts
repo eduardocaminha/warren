@@ -9,6 +9,7 @@
  * the global cap, and signed-cookie token strength.
  */
 
+import { formatError } from "../core/errors.ts";
 import { PREVIEW_MAX_LIVE_WARN_RATIO } from "../preview/eviction/index.ts";
 import { type PortUsage, PREVIEW_PORT_USAGE_WARN_RATIO } from "../preview/port-allocator.ts";
 import type { DiagnosticCheck, EnvLike } from "./checks.ts";
@@ -37,7 +38,7 @@ export async function checkPreviewPortAllocator(deps: {
 		return {
 			name: "preview_port_allocator",
 			ok: false,
-			message: err instanceof Error ? err.message : String(err),
+			message: formatError(err),
 			hint: "verify WARREN_DB_URL is reachable and the runs table has the preview columns (migration 0009)",
 		};
 	}
@@ -80,7 +81,7 @@ export async function checkPreviewMaxLive(deps: {
 		return {
 			name: "preview_max_live",
 			ok: false,
-			message: err instanceof Error ? err.message : String(err),
+			message: formatError(err),
 			hint: "verify WARREN_DB_URL is reachable and the runs table has the preview columns (migration 0009)",
 		};
 	}

@@ -22,6 +22,7 @@
  * without spawning real processes or installing real signal handlers.
  */
 
+import { formatError } from "../core/errors.ts";
 import { backoffMs, RestartBudget } from "./budget.ts";
 import { defaultGitCredentialsRun, installGitCredentials } from "./git-credentials.ts";
 import { defaultGitIdentityRun, installGitAuthor } from "./git-identity.ts";
@@ -428,10 +429,7 @@ if (import.meta.main) {
 			);
 			process.exit(1);
 		}
-		logger.error(
-			{ err: err instanceof Error ? err.message : String(err) },
-			"supervisor: failed to validate burrow auth tokens",
-		);
+		logger.error({ err: formatError(err) }, "supervisor: failed to validate burrow auth tokens");
 		process.exit(1);
 	}
 	try {
@@ -443,10 +441,7 @@ if (import.meta.main) {
 			},
 		);
 	} catch (err) {
-		logger.error(
-			{ err: err instanceof Error ? err.message : String(err) },
-			"supervisor: failed to install git insteadOf rule",
-		);
+		logger.error({ err: formatError(err) }, "supervisor: failed to install git insteadOf rule");
 		process.exit(1);
 	}
 	try {
@@ -459,10 +454,7 @@ if (import.meta.main) {
 			},
 		);
 	} catch (err) {
-		logger.error(
-			{ err: err instanceof Error ? err.message : String(err) },
-			"supervisor: failed to install git identity",
-		);
+		logger.error({ err: formatError(err) }, "supervisor: failed to install git identity");
 		process.exit(1);
 	}
 	runSupervisor(productionDeps({ logger }), {
@@ -475,7 +467,7 @@ if (import.meta.main) {
 			process.exit(result.exitCode);
 		})
 		.catch((err) => {
-			logger.error({ err: err instanceof Error ? err.message : String(err) }, "supervisor crashed");
+			logger.error({ err: formatError(err) }, "supervisor crashed");
 			process.exit(1);
 		});
 }
