@@ -7,6 +7,73 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.9] — 2026-06-30
+
+### Added
+
+- **`feat(rate-limit)`** — warren now detects the claude-code rate-limit terminal result and
+  re-queues the run with a `resume_after` delay instead of terminating it; the rate-limit
+  signal is recognized via a dedicated terminal detector (PR #170 / PR #172).
+- **`feat(plot)`** — `stagePlotForCommit` + plot-sync `auto`/`immediate` modes now land
+  directly on `main` via the new rebase-push helper instead of staging a run-branch commit
+  (PR #168 / warren-cd37).
+- **`feat(seeds)`** — `stageSeedsForCommit` lands seeds state directly on `main`, not on the
+  run branch, eliminating merge conflicts on the seeds JSONL carrier (PR #167).
+- **`feat(reap)`** — report-only signal in agent frontmatter exempts a run from the standard
+  reap path; coding runs that detect a dirty state emit a `drop` signal rather than
+  proceeding (PR #163).
+- **`feat(alerts)`** — closed-loop alert healer resolves `/mcp` conflict alerts automatically;
+  `UnparseableAlertError` (unreachable branch) removed (PR #159 / PR #160).
+- **`feat(plan-run)`** — plan-run `ready`→`active` Plot promotion seam wired up so plan runs
+  transition Plot state on first dispatch (PR #157 / cherry-pick 0dc4c97).
+- **`feat(runs)`** — `runs.target_branch` nullable column added to the schema with migration;
+  `targetBranch` field surfaced in client `RunRow` type and UI `RunRow` type
+  (PR #138 / PR #146 / PR #147).
+- **`feat(ci)`** — `check:ci-parity` gate added to the CI workflow; every `bun run <X>` step
+  in `.github/workflows/ci*.yml` must now be reachable from the `GATES` manifest
+  (PR #137 / warren-b46b).
+- **`feat(git)`** — `.gitattributes` gains `merge=union` for `.plot/*.events.jsonl` to reduce
+  merge conflicts on append-only Plot event logs (PR #162).
+
+### Fixed
+
+- **`fix(env-parse)`** — `parseIntEnv` in `src/core/env-parse.ts` and the env-parse helpers
+  in `src/runs/watchdog.ts` and `src/server/probe.ts` now throw `ValidationError` instead of
+  bare `Error`, consistent with every other env-parse site (PR #148 / PR #175 / warren-a4ea).
+- **`fix(steer)`** — `POST /runs/:id/steer` now validates the `priority` field against the
+  `MessagePriority` union (`low`|`normal`|`high`|`urgent`) and returns `400 ValidationError`
+  on an unrecognised value; previously the raw string was cast and forwarded to burrow
+  (PR #177 / warren-463d).
+- **`fix(triggers)`** — `dispatchScheduledSeed` no-role path now correctly resolves the
+  agent; the previous code reached the wrong branch when no role was set on the trigger
+  (PR #136 / cherry-pick c60d833).
+- **`fix(reap)`** — bookkeeping commits (`stageSeedsForCommit`, `stagePlotForCommit`) now use
+  `git add -- <path>` to path-limit staging, preventing unrelated worktree files from being
+  accidentally included (PR #134 / PR #135).
+- **`fix(ui-types)`** — stale `RunRow.mode` union corrected; dead `DispatchRunBody.mode` and
+  `interactiveAgent` fields removed from UI dispatch types (PR #144 / PR #145).
+
+### Changed
+
+- **`refactor(ops-stats)`** — private `parseEnvPositiveInt` and `isTruthy` copies in
+  `src/runs/ops-stats.ts` removed; callers now import the canonical exports from
+  `src/core/env-parse.ts` (PR #176 / warren-68ec).
+- **`refactor(errors)`** — 94 inline `err instanceof Error ? err.message : String(err)`
+  ternaries across 30+ server/runs files replaced with `formatError(err)` from
+  `src/core/errors.ts` (PR #178 / warren-64f0).
+- **`refactor(bookkeeping)`** — reap dirty-detection now runs `PR DIRTY` only against
+  bookkeeping files, not the full worktree, eliminating false-positive dirty signals from
+  coding-run artefacts (PR #174).
+- **`refactor(reap)`** — `rebase-push-helper` extracted as a standalone utility
+  (`fetch`+`rebase`+`push-to-main` with retry ceiling and tests) used by the direct-push
+  paths (PR #165).
+- **`refactor(jsonl)`** — `dedup-jsonl` last-write-wins dedup utility extracted with tests;
+  used by both seeds and plot carrier-file reconciliation (PR #164).
+- **`test(coverage)`** — coverage lines floor raised from 91.54 % → 92.90 % after test
+  additions in this cycle (PR #150).
+- **`test(bridges)`** — `bridges.test.ts` split; scenario 20, 26, and 28 helper extraction;
+  grandfathered file-size budget entries removed (PR #153–156).
+
 ## [0.9.8] — 2026-06-28
 
 ### Fixed
