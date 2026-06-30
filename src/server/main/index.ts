@@ -31,6 +31,7 @@
 
 import { join } from "node:path";
 import { BurrowClientPool } from "../../burrow-client/index.ts";
+import { formatError } from "../../core/errors.ts";
 import { openDatabase } from "../../db/client.ts";
 import { DrizzleAdapter } from "../../db/repos/drizzle-adapter.ts";
 import { createRepos } from "../../db/repos/index.ts";
@@ -346,10 +347,7 @@ export async function bootServer(opts: BootServerOptions = {}): Promise<WarrenSe
 							);
 							return null;
 						} catch (err) {
-							logger.warn(
-								{ runId, reason: err instanceof Error ? err.message : String(err) },
-								"plan_run.reopen_pr_error",
-							);
+							logger.warn({ runId, reason: formatError(err) }, "plan_run.reopen_pr_error");
 							return null;
 						}
 					}
@@ -553,7 +551,7 @@ export async function bootServer(opts: BootServerOptions = {}): Promise<WarrenSe
  */
 if (import.meta.main) {
 	bootServer().catch(async (err) => {
-		const message = err instanceof Error ? err.message : String(err);
+		const message = formatError(err);
 		await captureBootFailure(err);
 		console.error(`warren: ${message}`);
 		process.exit(1);

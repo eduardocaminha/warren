@@ -28,6 +28,7 @@ import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { formatError } from "../core/errors.ts";
 import type { SpawnFn, SpawnOptions, SpawnResult } from "./clone.ts";
 import type { ProjectsConfig } from "./config.ts";
 import { ProjectUnavailableError } from "./errors.ts";
@@ -283,10 +284,9 @@ async function trySpawn(
 	try {
 		return await spawn(cmd, opts);
 	} catch (err) {
-		throw new ProjectUnavailableError(
-			`failed to spawn ${cmd.join(" ")}: ${err instanceof Error ? err.message : String(err)}`,
-			{ cause: err },
-		);
+		throw new ProjectUnavailableError(`failed to spawn ${cmd.join(" ")}: ${formatError(err)}`, {
+			cause: err,
+		});
 	}
 }
 

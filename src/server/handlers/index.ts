@@ -30,7 +30,7 @@
  * progress channel onto this route.
  */
 
-import { ValidationError } from "../../core/errors.ts";
+import { formatError, ValidationError } from "../../core/errors.ts";
 import { isValidPlotIdFormat, PlotIdInvalidError, PlotIdNotFoundError } from "../../plots/index.ts";
 import type { SpawnFn, SpawnOptions, SpawnResult } from "../../projects/clone.ts";
 import type { Route, RouteContext, RouteHandler, ServerDeps } from "../types.ts";
@@ -154,9 +154,7 @@ export async function readJsonBodyOrEmpty(
 	try {
 		parsed = JSON.parse(raw);
 	} catch (err) {
-		throw new ValidationError(
-			`request body must be JSON: ${err instanceof Error ? err.message : String(err)}`,
-		);
+		throw new ValidationError(`request body must be JSON: ${formatError(err)}`);
 	}
 	if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
 		throw new ValidationError("request body must be a JSON object");

@@ -8,7 +8,7 @@
  * (mx-3df5c5, mx-99ad0d).
  */
 
-import { NotFoundError, ValidationError } from "../../core/errors.ts";
+import { formatError, NotFoundError, ValidationError } from "../../core/errors.ts";
 import type { AgentRow } from "../../db/schema.ts";
 import { type AgentSource, readAgentSource } from "../../registry/builtins/index.ts";
 import { CanopyClient } from "../../registry/canopy.ts";
@@ -159,7 +159,7 @@ export function refreshAgentsHandler(deps: ServerDeps): RouteHandler {
 				projectErrors.push({
 					projectId: project.id,
 					code: errorCode(err),
-					message: err instanceof Error ? err.message : String(err),
+					message: formatError(err),
 				});
 			}
 		}

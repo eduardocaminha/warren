@@ -15,6 +15,7 @@
 import type { Burrow } from "@os-eco/burrow-cli";
 import type { BurrowClient } from "../../burrow-client/client.ts";
 import { withTransportMapping } from "../../burrow-client/client.ts";
+import { formatError } from "../../core/errors.ts";
 import type { SpawnLogger, SpawnRunInput } from "./types.ts";
 
 /**
@@ -96,7 +97,7 @@ export function logSpawnFailed(log: SpawnLogger, burrowId: string | null, err: u
 }
 
 function errorMessage(err: unknown): string {
-	return err instanceof Error ? err.message : String(err);
+	return formatError(err);
 }
 
 /**

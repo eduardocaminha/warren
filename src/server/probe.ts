@@ -29,7 +29,7 @@
  */
 
 import type { BurrowClientPool, ProbeResult } from "../burrow-client/pool.ts";
-import { ValidationError } from "../core/errors.ts";
+import { formatError, ValidationError } from "../core/errors.ts";
 import type { WorkersRepo } from "../db/repos/workers.ts";
 import type { WorkerState } from "../db/schema.ts";
 import { parseTrueEnv } from "./main/utils.ts";
@@ -160,10 +160,7 @@ export function startWorkerProbe(input: StartWorkerProbeInput): WorkerProbeHandl
 				ticks += 1;
 				return result;
 			} catch (err) {
-				input.logger?.error?.(
-					{ err: err instanceof Error ? err.message : String(err) },
-					"worker_probe.tick_failed",
-				);
+				input.logger?.error?.({ err: formatError(err) }, "worker_probe.tick_failed");
 				return null;
 			} finally {
 				inFlight = null;

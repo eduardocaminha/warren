@@ -44,7 +44,7 @@
 import { NotFoundError as BurrowNotFoundError, type Run as BurrowRun } from "@os-eco/burrow-cli";
 import { withTransportMapping } from "../burrow-client/client.ts";
 import type { BurrowClientPool } from "../burrow-client/pool.ts";
-import { ValidationError } from "../core/errors.ts";
+import { formatError, ValidationError } from "../core/errors.ts";
 import type { Repos } from "../db/repos/index.ts";
 import { RUN_TERMINAL_STATES, type RunState, type RunTerminalState } from "../db/schema.ts";
 import type { RunEventBroker } from "./events.ts";
@@ -185,7 +185,7 @@ export async function cancelRun(input: CancelRunInput): Promise<CancelRunResult>
 				{
 					runId: run.id,
 					burrowRunId,
-					err: err instanceof Error ? err.message : String(err),
+					err: formatError(err),
 				},
 				"reap threw out of cancel terminal-detect path",
 			);

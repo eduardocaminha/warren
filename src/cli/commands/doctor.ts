@@ -19,7 +19,7 @@
 import { existsSync } from "node:fs";
 import { BurrowClient } from "../../burrow-client/client.ts";
 import { loadBurrowClientConfigFromEnv } from "../../burrow-client/config.ts";
-import { ValidationError } from "../../core/errors.ts";
+import { formatError, ValidationError } from "../../core/errors.ts";
 import type { AnyWarrenDb } from "../../db/client.ts";
 import { DrizzleAdapter } from "../../db/repos/drizzle-adapter.ts";
 import { createRepos } from "../../db/repos/index.ts";
@@ -155,7 +155,7 @@ function projectsRootCheck(env: EnvLike, exists: (path: string) => boolean): Doc
 	try {
 		config = loadProjectsConfigFromEnv(env);
 	} catch (err) {
-		const message = err instanceof Error ? err.message : String(err);
+		const message = formatError(err);
 		return { name: "projects_root", ok: false, message };
 	}
 	// Missing root is non-fatal — addProject will mkdirp on first use. Just
@@ -180,7 +180,7 @@ async function staleBurrowWorkspacesCheck(
 		return {
 			name: "stale_burrow_workspaces",
 			ok: false,
-			message: err instanceof Error ? err.message : String(err),
+			message: formatError(err),
 		};
 	}
 	if (db === undefined) {
@@ -217,7 +217,7 @@ async function previewPortAllocatorCheck(
 		return {
 			name: "preview_port_allocator",
 			ok: false,
-			message: err instanceof Error ? err.message : String(err),
+			message: formatError(err),
 		};
 	}
 	if (db === undefined) {
@@ -253,7 +253,7 @@ async function burrowCheck(
 			return {
 				name: "burrow_reachable",
 				ok: false,
-				message: err instanceof Error ? err.message : String(err),
+				message: formatError(err),
 				hint: "check that burrow serve is running and WARREN_BURROW_SOCKET / WARREN_BURROW_HOST point to it",
 			};
 		}
@@ -274,7 +274,7 @@ async function burrowCheck(
 		return {
 			name: "burrow_reachable",
 			ok: false,
-			message: err instanceof Error ? err.message : String(err),
+			message: formatError(err),
 			hint: "check that burrow serve is running and WARREN_BURROW_SOCKET / WARREN_BURROW_HOST point to it",
 		};
 	}

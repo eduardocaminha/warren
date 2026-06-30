@@ -12,6 +12,7 @@
  * swallowed so a cost-write error never fails the bridge or the run.
  */
 
+import { formatError } from "../../core/errors.ts";
 import type { Repos } from "../../db/repos/index.ts";
 import type { SessionStatsAccumulator } from "../usage-aggregate.ts";
 import type { BridgeLogger, PiStatsClient, SessionStats } from "./types.ts";
@@ -37,7 +38,7 @@ export async function snapshotStats(
 				runId,
 				burrowRunId,
 				phase,
-				err: err instanceof Error ? err.message : String(err),
+				err: formatError(err),
 			},
 			"pi get_session_stats failed; cost columns will stay null",
 		);
@@ -106,7 +107,7 @@ export async function persistPiStatsDelta(input: PersistPiStatsInput): Promise<v
 			{
 				runId: input.runId,
 				burrowRunId: input.burrowRunId,
-				err: err instanceof Error ? err.message : String(err),
+				err: formatError(err),
 			},
 			"attachStats threw; cost columns may be inconsistent",
 		);
@@ -157,7 +158,7 @@ export async function persistInStreamUsage(input: PersistInStreamUsageInput): Pr
 				runId: input.runId,
 				burrowRunId: input.burrowRunId,
 				runtime: input.runtime,
-				err: err instanceof Error ? err.message : String(err),
+				err: formatError(err),
 			},
 			"attachStats threw on in-stream usage; cost columns may stay null",
 		);

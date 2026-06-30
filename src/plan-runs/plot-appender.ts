@@ -20,6 +20,7 @@
  * plot-transition.ts can fire when the plan-run completes.
  */
 
+import { formatError } from "../core/errors.ts";
 import { UserPlotClient } from "../plot-client/index.ts";
 import type { Logger } from "../server/types.ts";
 
@@ -171,7 +172,7 @@ export async function promotePlotToActiveOnDispatch(
 			handle: input.handle,
 		});
 	} catch (err) {
-		const reason = err instanceof Error ? err.message : String(err);
+		const reason = formatError(err);
 		input.logger.warn(
 			{ planRunId: input.planRunId, plotId: input.plotId, err: reason },
 			"plan_run.plot_activation_failed",
@@ -232,7 +233,7 @@ export async function emitPlanRunDispatchedToPlot(
 			{
 				planRunId: input.planRunId,
 				plotId: input.plotId,
-				err: err instanceof Error ? err.message : String(err),
+				err: formatError(err),
 			},
 			"plan_run.plot_append_failed",
 		);

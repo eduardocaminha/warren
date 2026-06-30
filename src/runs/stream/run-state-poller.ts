@@ -12,6 +12,7 @@
 
 import type { BurrowClient } from "../../burrow-client/client.ts";
 import { withTransportMapping } from "../../burrow-client/client.ts";
+import { formatError } from "../../core/errors.ts";
 import type { RunTerminalState } from "../../db/schema.ts";
 import type { BridgeLogger, BurrowTerminalSnapshot, RunStateProbe } from "./types.ts";
 
@@ -73,7 +74,7 @@ export async function runStatePoller(input: RunStatePollerInput): Promise<void> 
 				{
 					runId,
 					burrowRunId,
-					err: err instanceof Error ? err.message : String(err),
+					err: formatError(err),
 				},
 				"run-state poller probe failed; retrying",
 			);

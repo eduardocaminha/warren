@@ -12,6 +12,7 @@ import { existsSync } from "node:fs";
 import type { BurrowClient } from "../burrow-client/client.ts";
 import { withTransportMapping } from "../burrow-client/client.ts";
 import type { BurrowClientPool } from "../burrow-client/pool.ts";
+import { formatError } from "../core/errors.ts";
 import type { SpawnFn } from "../projects/clone.ts";
 import { type CanopyRegistryConfig, loadCanopyRegistryConfigFromEnv } from "../registry/config.ts";
 import type { DiagnosticCheck, EnvLike, ExistsFn } from "./checks.ts";
@@ -49,7 +50,7 @@ export async function checkBwrap(deps: {
 		return {
 			name: "bwrap",
 			ok: false,
-			message: err instanceof Error ? err.message : String(err),
+			message: formatError(err),
 			hint: "install bwrap (e.g. apt-get install bubblewrap) and ensure it is on $PATH",
 		};
 	}
@@ -72,7 +73,7 @@ export function checkCanopyClone(deps: {
 	try {
 		config = loadCanopyRegistryConfigFromEnv(deps.env);
 	} catch (err) {
-		const message = err instanceof Error ? err.message : String(err);
+		const message = formatError(err);
 		return {
 			name: "canopy_clone",
 			ok: false,
@@ -116,7 +117,7 @@ export async function checkCanopyClean(deps: {
 	try {
 		config = loadCanopyRegistryConfigFromEnv(deps.env);
 	} catch (err) {
-		const message = err instanceof Error ? err.message : String(err);
+		const message = formatError(err);
 		return {
 			name: "canopy_clean",
 			ok: false,
@@ -167,7 +168,7 @@ export async function checkCanopyClean(deps: {
 		return {
 			name: "canopy_clean",
 			ok: false,
-			message: err instanceof Error ? err.message : String(err),
+			message: formatError(err),
 			hint: "POST /agents/refresh to hard-reset the canopy clone to origin/HEAD",
 		};
 	}
@@ -191,7 +192,7 @@ export async function checkBurrowReachable(deps: {
 		return {
 			name: "burrow_reachable",
 			ok: false,
-			message: err instanceof Error ? err.message : String(err),
+			message: formatError(err),
 			hint: "check that burrow serve is running and WARREN_BURROW_SOCKET / WARREN_BURROW_HOST point to it",
 		};
 	}

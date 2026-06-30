@@ -20,6 +20,7 @@
  */
 
 import { existsSync } from "node:fs";
+import { formatError } from "../core/errors.ts";
 import type { SpawnFn, SpawnResult } from "./canopy.ts";
 import type { CanopyRegistryConfig } from "./config.ts";
 import { CanopyUnavailableError } from "./errors.ts";
@@ -142,10 +143,9 @@ async function trySpawn(
 	try {
 		return await spawn(cmd, opts);
 	} catch (err) {
-		throw new CanopyUnavailableError(
-			`failed to spawn ${cmd.join(" ")}: ${err instanceof Error ? err.message : String(err)}`,
-			{ cause: err },
-		);
+		throw new CanopyUnavailableError(`failed to spawn ${cmd.join(" ")}: ${formatError(err)}`, {
+			cause: err,
+		});
 	}
 }
 

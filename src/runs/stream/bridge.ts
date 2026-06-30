@@ -20,6 +20,7 @@
 import { NotFoundError as BurrowNotFoundError, type RunEvent } from "@os-eco/burrow-cli";
 import type { BurrowClient } from "../../burrow-client/client.ts";
 import { withTransportMapping } from "../../burrow-client/client.ts";
+import { formatError } from "../../core/errors.ts";
 import type { EventStream, RunTerminalState } from "../../db/schema.ts";
 import { EVENT_STREAMS } from "../../db/schema.ts";
 import { resolveCostCapUsd } from "../cost-cap.ts";
@@ -353,7 +354,7 @@ export async function bridgeRunStream(input: BridgeRunStreamInput): Promise<Brid
 					runId,
 					burrowRunId,
 					burrowState: probedTerminal.value.state,
-					err: err instanceof Error ? err.message : String(err),
+					err: formatError(err),
 				},
 				"run stream bridge: stream aborted by run-state poller after terminal observation",
 			);
@@ -365,7 +366,7 @@ export async function bridgeRunStream(input: BridgeRunStreamInput): Promise<Brid
 					burrowRunId,
 					written,
 					skipped,
-					err: err instanceof Error ? err.message : String(err),
+					err: formatError(err),
 				},
 				"run stream bridge errored",
 			);
@@ -461,7 +462,7 @@ async function resolveBridgeCostCap(
 		return resolveCostCapUsd(run.renderedAgentJson);
 	} catch (err) {
 		logger?.warn?.(
-			{ runId, err: err instanceof Error ? err.message : String(err) },
+			{ runId, err: formatError(err) },
 			"failed to resolve spend cap; proceeding without enforcement",
 		);
 		return null;

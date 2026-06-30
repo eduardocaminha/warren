@@ -28,6 +28,7 @@
 
 import { join } from "node:path";
 import type { RunEvent } from "@os-eco/burrow-cli";
+import { formatError } from "../../core/errors.ts";
 import type { Repos } from "../../db/repos/index.ts";
 import {
 	createPlotsProjectionSink,
@@ -81,7 +82,7 @@ export function createConversationTurnHandler(
 				});
 			} catch (err) {
 				deps.logger?.warn?.(
-					{ runId, err: err instanceof Error ? err.message : String(err) },
+					{ runId, err: formatError(err) },
 					"conversation-turn: failed to persist assistant turn",
 				);
 			}
@@ -103,7 +104,7 @@ export function createConversationTurnHandler(
 				});
 			} catch (err) {
 				deps.logger?.warn?.(
-					{ runId, err: err instanceof Error ? err.message : String(err) },
+					{ runId, err: formatError(err) },
 					"conversation-turn: failed to apply propose_intent patch",
 				);
 			}

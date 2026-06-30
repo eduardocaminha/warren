@@ -16,6 +16,7 @@
  */
 
 import { isTruthy, parseEnvPositiveInt } from "../core/env-parse.ts";
+import { formatError } from "../core/errors.ts";
 import type { DrizzleAdapter } from "../db/repos/drizzle-adapter.ts";
 import {
 	aggregateRunCost,
@@ -168,10 +169,7 @@ export function startOpsStatsWorker(input: StartOpsStatsWorkerInput): OpsStatsWo
 			ticks += 1;
 			return snapshot;
 		} catch (err) {
-			input.logger?.error(
-				{ err: err instanceof Error ? err.message : String(err) },
-				"ops.stats.tick_failed",
-			);
+			input.logger?.error({ err: formatError(err) }, "ops.stats.tick_failed");
 			return null;
 		} finally {
 			inFlight = null;

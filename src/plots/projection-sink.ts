@@ -26,6 +26,7 @@
  */
 
 import type { Plot } from "@os-eco/plot-cli";
+import { formatError } from "../core/errors.ts";
 import type { PlotsRepo } from "../db/repos/plots.ts";
 import type { PlotProjectionSink } from "../plot-client/index.ts";
 import type { Logger } from "../server/types.ts";
@@ -53,7 +54,7 @@ export function createPlotsProjectionSink(opts: PlotsProjectionSinkOptions): Plo
 				});
 			} catch (err) {
 				logger?.warn(
-					{ plotId: plot.id, projectId, err: err instanceof Error ? err.message : String(err) },
+					{ plotId: plot.id, projectId, err: formatError(err) },
 					"plots projection upsert failed; row will be stale until the next read/write or rebuild",
 				);
 			}

@@ -10,6 +10,7 @@
  */
 
 import type { BurrowClientPool } from "../burrow-client/pool.ts";
+import { formatError } from "../core/errors.ts";
 import type { Repos } from "../db/repos/index.ts";
 import type { EventRow, RunFailureReason, RunMode, RunState } from "../db/schema.ts";
 import type { PreviewLaunchConfig } from "../preview/launch/index.ts";
@@ -205,7 +206,7 @@ export async function runWithReconnect(
 				log.error(
 					{
 						event: "bridge.reap_threw",
-						err: err instanceof Error ? err.message : String(err),
+						err: formatError(err),
 					},
 					"reap threw out of bridge terminal-detect path",
 				);
@@ -328,7 +329,7 @@ async function emitBridgeSystemEvent(input: EmitBridgeSystemEventInput): Promise
 			{
 				event: "bridge.system_event_failed",
 				kind: input.kind,
-				err: err instanceof Error ? err.message : String(err),
+				err: formatError(err),
 			},
 			"failed to emit bridge system event",
 		);
@@ -405,7 +406,7 @@ export async function reconcileLostBurrowRun(input: ReconcileLostBurrowRunInput)
 		log.error(
 			{
 				event: "bridge.reconcile_finalize_failed",
-				err: err instanceof Error ? err.message : String(err),
+				err: formatError(err),
 			},
 			"reconcileLostBurrowRun: failed to finalize run",
 		);
@@ -429,7 +430,7 @@ export async function reconcileLostBurrowRun(input: ReconcileLostBurrowRunInput)
 		log.error(
 			{
 				event: "bridge.lost_event_failed",
-				err: err instanceof Error ? err.message : String(err),
+				err: formatError(err),
 			},
 			"reconcileLostBurrowRun: failed to emit bridge_lost event",
 		);
@@ -462,7 +463,7 @@ export async function reconcileLostBurrowRun(input: ReconcileLostBurrowRunInput)
 			log.error(
 				{
 					event: "bridge.workspace_destroy_failed",
-					err: err instanceof Error ? err.message : String(err),
+					err: formatError(err),
 				},
 				"reconcileLostBurrowRun: best-effort workspace destroy threw",
 			);

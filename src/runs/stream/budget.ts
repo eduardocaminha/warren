@@ -19,6 +19,7 @@
  * logged and swallowed so enforcement never throws out of the bridge.
  */
 
+import { formatError } from "../../core/errors.ts";
 import type { Repos } from "../../db/repos/index.ts";
 import { isOverBudget } from "../cost-cap.ts";
 import type { RunEventBroker } from "../events.ts";
@@ -78,7 +79,7 @@ export async function enforceBudgetCap(input: EnforceBudgetCapInput): Promise<bo
 			{
 				runId: input.runId,
 				burrowRunId: input.burrowRunId,
-				err: err instanceof Error ? err.message : String(err),
+				err: formatError(err),
 			},
 			"budget-cap burrow cancel failed; reap will finalize from terminal-detect",
 		);
@@ -104,7 +105,7 @@ async function emitBudgetEvent(
 		input.broker.publish(input.runId, row);
 	} catch (err) {
 		input.logger?.error?.(
-			{ runId: input.runId, err: err instanceof Error ? err.message : String(err) },
+			{ runId: input.runId, err: formatError(err) },
 			"failed to emit budget.exceeded event",
 		);
 	}

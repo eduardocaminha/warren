@@ -1,4 +1,5 @@
 import { dirname, join } from "node:path";
+import { formatError } from "../../core/errors.ts";
 import type { EventRow } from "../../db/schema.ts";
 import type { ReapFs, ReapStep } from "./types.ts";
 import { splitLines } from "./util.ts";
@@ -120,7 +121,7 @@ export async function mergeMulchFile(
 		} catch (err) {
 			await emit("reap_failed", {
 				step: "mulch_merge",
-				message: `expertise/${domain}.jsonl: invalid JSON (${err instanceof Error ? err.message : String(err)})`,
+				message: `expertise/${domain}.jsonl: invalid JSON (${formatError(err)})`,
 			});
 			continue;
 		}

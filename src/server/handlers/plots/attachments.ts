@@ -12,7 +12,7 @@
 
 import { join } from "node:path";
 import { ATTACHMENT_TYPES, type AttachmentType } from "@os-eco/plot-cli";
-import { ValidationError } from "../../../core/errors.ts";
+import { formatError, ValidationError } from "../../../core/errors.ts";
 import { defaultPlotAttacher, defaultPlotPrMerger } from "../../../plots/index.ts";
 import { refreshProject } from "../../../projects/index.ts";
 import { resolveDispatcherHandle } from "../../../runs/index.ts";
@@ -328,7 +328,7 @@ function scheduleRefreshAfterMerge(
 					projectId,
 					plotId,
 					ref,
-					err: err instanceof Error ? err.message : String(err),
+					err: formatError(err),
 				},
 				"background project refresh after PR merge failed",
 			);

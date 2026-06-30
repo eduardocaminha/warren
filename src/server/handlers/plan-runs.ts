@@ -11,7 +11,7 @@
  */
 
 import { join } from "node:path";
-import { NotFoundError, ValidationError } from "../../core/errors.ts";
+import { formatError, NotFoundError, ValidationError } from "../../core/errors.ts";
 import {
 	PlanHasNoOpenChildrenError,
 	ProjectLacksPlotError,
@@ -347,7 +347,7 @@ export function cancelPlanRunHandler(deps: ServerDeps): RouteHandler {
 					{
 						planRunId: planRun.id,
 						childRunId: inFlight.runId,
-						err: err instanceof Error ? err.message : String(err),
+						err: formatError(err),
 					},
 					"plan_run.cancel_child_failed",
 				);

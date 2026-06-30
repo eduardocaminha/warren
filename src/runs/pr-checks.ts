@@ -1,3 +1,4 @@
+import { formatError } from "../core/errors.ts";
 /**
  * `src/runs/pr-checks.ts` — the PR-merge / URL-parse group split out of
  * `src/runs/pr.ts` (warren-db9a / pl-88bb step 1) to keep both files under
@@ -115,7 +116,7 @@ export async function checkPullRequestMerged(
 		return {
 			kind: "http_error",
 			status: 0,
-			message: err instanceof Error ? err.message : String(err),
+			message: formatError(err),
 		};
 	}
 
@@ -279,7 +280,7 @@ export async function mergePullRequest(
 	} catch (err) {
 		return {
 			kind: "network",
-			message: err instanceof Error ? err.message : String(err),
+			message: formatError(err),
 		};
 	}
 

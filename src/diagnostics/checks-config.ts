@@ -8,7 +8,7 @@
  * resolved DB dialect, and a live `SELECT 1` reachability probe.
  */
 
-import { ValidationError } from "../core/errors.ts";
+import { formatError, ValidationError } from "../core/errors.ts";
 import { type AnyWarrenDb, pingDatabase } from "../db/client.ts";
 import { parseDatabaseUrl, sqliteUrlForPath } from "../db/url.ts";
 import {
@@ -111,7 +111,7 @@ function configLoadFailureMessage(err: unknown): string {
 	if (err instanceof WarrenConfigUnavailableError) {
 		return err.message;
 	}
-	return err instanceof Error ? err.message : String(err);
+	return formatError(err);
 }
 
 /**
@@ -249,7 +249,7 @@ function warrenDbFromUrl(effective: string): DiagnosticCheck {
 		return {
 			name: "warren_db",
 			ok: false,
-			message: err instanceof Error ? err.message : String(err),
+			message: formatError(err),
 		};
 	}
 }
@@ -275,7 +275,7 @@ export async function checkDatabaseReachable(deps: {
 		return {
 			name: "db_reachable",
 			ok: false,
-			message: err instanceof Error ? err.message : String(err),
+			message: formatError(err),
 			hint:
 				deps.db.dialect === "postgres"
 					? "verify WARREN_DB_URL points at a reachable Postgres and the role can SELECT"

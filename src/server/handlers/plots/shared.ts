@@ -9,7 +9,7 @@
  */
 
 import { join } from "node:path";
-import { NotFoundError } from "../../../core/errors.ts";
+import { formatError, NotFoundError } from "../../../core/errors.ts";
 import type { ProjectRow } from "../../../db/schema.ts";
 import { ProjectLacksPlotError } from "../../../plan-runs/errors.ts";
 import type { PlotProjectionSink } from "../../../plot-client/index.ts";
@@ -172,7 +172,7 @@ export async function reconcilePlanChildAttachments(
 			{
 				plotId,
 				projectId: project.id,
-				err: err instanceof Error ? err.message : String(err),
+				err: formatError(err),
 			},
 			"plot.plan_child_adopt_failed",
 		);

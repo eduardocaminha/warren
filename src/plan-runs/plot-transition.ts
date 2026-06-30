@@ -21,6 +21,7 @@
  * trampers an operator-driven transition mid-PlanRun (pl-7937 risk #4).
  */
 
+import { formatError } from "../core/errors.ts";
 import { UserPlotClient } from "../plot-client/index.ts";
 import type { Logger } from "../server/types.ts";
 
@@ -85,7 +86,7 @@ export async function autoTransitionPlotToDone(
 			handle: input.handle,
 		});
 	} catch (err) {
-		const reason = err instanceof Error ? err.message : String(err);
+		const reason = formatError(err);
 		input.logger.warn(
 			{ planRunId: input.planRunId, plotId: input.plotId, err: reason },
 			"plan_run.plot_auto_done_failed",
