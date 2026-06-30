@@ -1,4 +1,5 @@
 import type { MessagePriority } from "@os-eco/burrow-cli";
+import { ValidationError } from "../../../core/errors.ts";
 import { cancelRun, steerRun } from "../../../runs/index.ts";
 import { jsonResponse } from "../../response.ts";
 import type { RouteHandler, ServerDeps } from "../../types.ts";
@@ -10,19 +11,30 @@ import {
 	requireString,
 } from "../index.ts";
 
+const MESSAGE_PRIORITIES = ["low", "normal", "high", "urgent"] as const;
+
+function parseMessagePriority(raw: string | undefined): MessagePriority | undefined {
+	if (raw === undefined) return undefined;
+	if (!(MESSAGE_PRIORITIES as readonly string[]).includes(raw)) {
+		throw new ValidationError(
+			`priority must be one of ${MESSAGE_PRIORITIES.join(", ")}; got '${raw}'`,
+		);
+	}
+	return raw as MessagePriority;
+}
+
 export function steerRunHandler(deps: ServerDeps): RouteHandler {
 	return async (ctx) => {
 		const id = requireParam(ctx, "id");
 		const body = await readJsonBody(ctx);
+		const priority = parseMessagePriority(optionalString(body, "priority"));
 		const result = await steerRun({
 			runId: id,
 			body: requireString(body, "body"),
 			repos: deps.repos,
 			burrowClientPool: deps.burrowClientPool,
 			broker: deps.broker,
-			...(optionalString(body, "priority") !== undefined
-				? { priority: optionalString(body, "priority") as MessagePriority }
-				: {}),
+			...(priority !== undefined ? { priority } : {}),
 			...(optionalString(body, "fromActor") !== undefined
 				? { fromActor: optionalString(body, "fromActor") as string }
 				: {}),
