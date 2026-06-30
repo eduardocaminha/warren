@@ -29,6 +29,7 @@
  */
 
 import type { BurrowClientPool, ProbeResult } from "../burrow-client/pool.ts";
+import { ValidationError } from "../core/errors.ts";
 import type { WorkersRepo } from "../db/repos/workers.ts";
 import type { WorkerState } from "../db/schema.ts";
 import { parseTrueEnv } from "./main/utils.ts";
@@ -84,7 +85,7 @@ function parsePositiveInt(raw: string | undefined, label: string): number | unde
 	if (raw === undefined || raw === "") return undefined;
 	const n = Number.parseInt(raw, 10);
 	if (!Number.isInteger(n) || n <= 0 || String(n) !== raw) {
-		throw new Error(`${label} must be a positive integer; got '${raw}'`);
+		throw new ValidationError(`${label} must be a positive integer; got '${raw}'`);
 	}
 	return n;
 }

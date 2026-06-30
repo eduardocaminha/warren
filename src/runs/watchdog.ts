@@ -49,7 +49,7 @@
 import { NotFoundError as BurrowNotFoundError } from "@os-eco/burrow-cli";
 import { withTransportMapping } from "../burrow-client/client.ts";
 import type { BurrowClientPool } from "../burrow-client/pool.ts";
-import { formatError } from "../core/errors.ts";
+import { formatError, ValidationError } from "../core/errors.ts";
 import type { Repos } from "../db/repos/index.ts";
 import type { RunRow } from "../db/schema.ts";
 import type { RunEventBroker } from "./events.ts";
@@ -292,7 +292,7 @@ function parseNonNegativeInt(raw: string | undefined, name: string, fallback: nu
 	if (raw === undefined || raw.trim() === "") return fallback;
 	const n = Number(raw);
 	if (!Number.isInteger(n) || n < 0) {
-		throw new Error(`${name} must be a non-negative integer, got "${raw}"`);
+		throw new ValidationError(`${name} must be a non-negative integer, got "${raw}"`);
 	}
 	return n;
 }
@@ -301,7 +301,7 @@ function parsePositiveInt(raw: string | undefined, name: string, fallback: numbe
 	if (raw === undefined || raw.trim() === "") return fallback;
 	const n = Number(raw);
 	if (!Number.isInteger(n) || n <= 0) {
-		throw new Error(`${name} must be a positive integer, got "${raw}"`);
+		throw new ValidationError(`${name} must be a positive integer, got "${raw}"`);
 	}
 	return n;
 }
