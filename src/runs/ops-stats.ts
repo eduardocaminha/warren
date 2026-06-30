@@ -15,7 +15,7 @@
  * `stop()` that awaits the in-flight tick so teardown doesn't race.
  */
 
-import { ValidationError } from "../core/errors.ts";
+import { isTruthy, parseEnvPositiveInt } from "../core/env-parse.ts";
 import type { DrizzleAdapter } from "../db/repos/drizzle-adapter.ts";
 import {
 	aggregateRunCost,
@@ -50,22 +50,6 @@ export function loadOpsStatsConfigFromEnv(env: EnvLike = process.env): OpsStatsC
 	const tickMs = parseEnvPositiveInt(env, WARREN_OPS_STATS_TICK_MS_ENV, DEFAULT_OPS_STATS_TICK_MS);
 	const disabled = isTruthy(env[WARREN_OPS_STATS_DISABLED_ENV]);
 	return { tickMs, disabled };
-}
-
-function parseEnvPositiveInt(env: EnvLike, name: string, fallback: number): number {
-	const raw = env[name];
-	if (raw === undefined || raw.trim() === "") return fallback;
-	const parsed = Number.parseInt(raw, 10);
-	if (!Number.isInteger(parsed) || parsed <= 0 || String(parsed) !== raw.trim()) {
-		throw new ValidationError(`${name} must be a positive integer (got ${JSON.stringify(raw)})`);
-	}
-	return parsed;
-}
-
-function isTruthy(raw: string | undefined): boolean {
-	if (raw === undefined) return false;
-	const lower = raw.trim().toLowerCase();
-	return lower === "1" || lower === "true" || lower === "yes" || lower === "on";
 }
 
 /* ----------------------------------------------------------------------- */
