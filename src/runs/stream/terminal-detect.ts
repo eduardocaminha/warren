@@ -33,13 +33,13 @@ import type { RunTerminalState } from "../../db/schema.ts";
  * Three runtime terminal shapes are recognised:
  *
  *   - claude-code (batch): burrow's jsonl-claude parser emits
- *     `kind="state_change"`, `payload.type === "result"`. The `is_error`
- *     field distinguishes a clean exit from a crash; `is_error: true` →
- *     `failed`, anything else → `succeeded`.
+ *     `kind="state_change"`, `payload.type === "result"`. `is_error: true`,
+ *     `stopReason === "error"`, or a non-empty `errorMessage` → `failed`;
+ *     absent all three → `succeeded` (warren-470f).
  *   - claude-code-chat (spawn-per-turn): burrow's jsonl-claude-chat parser
  *     maps the `result` line to `kind="agent_end"` (NOT `state_change`) so
  *     the session_id in the payload can be forwarded to the next `--resume`.
- *     The same `is_error` discriminator applies.
+ *     Same three-signal failure detection as the batch path (warren-470f).
  *   - pi: burrow's pi parser emits `payload.type === "agent_end"` on the
  *     `kind="state_change"` carrier as the final lifecycle envelope.
  *     `stopReason === "error"` or a non-empty `errorMessage` → `failed`
@@ -63,14 +63,26 @@ function detectClaudeAgentEndOutcome(payload: unknown): RunTerminalState | null 
 	if (payload === null || typeof payload !== "object") return null;
 	const env = payload as Record<string, unknown>;
 	if (env.type !== "result") return null;
-	return env.is_error === true ? "failed" : "succeeded";
+	const err = env.errorMessage;
+	const failed =
+		env.is_error === true ||
+		env.stopReason === "error" ||
+		(typeof err === "string" && err.length > 0);
+	return failed ? "failed" : "succeeded";
 }
 
 /** claude-code (batch) + pi carrier: kind="state_change". */
 function detectStateChangeOutcome(payload: unknown): RunTerminalState | null {
 	if (payload === null || typeof payload !== "object") return null;
 	const env = payload as Record<string, unknown>;
-	if (env.type === "result") return env.is_error === true ? "failed" : "succeeded";
+	if (env.type === "result") {
+		const err = env.errorMessage;
+		const failed =
+			env.is_error === true ||
+			env.stopReason === "error" ||
+			(typeof err === "string" && err.length > 0);
+		return failed ? "failed" : "succeeded";
+	}
 	if (env.type === "agent_end") {
 		const err = env.errorMessage;
 		const failed = env.stopReason === "error" || (typeof err === "string" && err.length > 0);
