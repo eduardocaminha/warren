@@ -30,5 +30,3 @@ export async function resolveCoordinationProject(
 	}
 	return repos.projects.require(seedProjectId);
 }
-
-export { formatError } from "../../core/errors.ts";
