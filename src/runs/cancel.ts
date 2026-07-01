@@ -96,7 +96,7 @@ export interface CancelRunResult {
 export async function cancelRun(input: CancelRunInput): Promise<CancelRunResult> {
 	const run = await input.repos.runs.require(input.runId);
 
-	if (isTerminal(run.state)) {
+	if (isTerminalRunState(run.state)) {
 		return { state: run.state, burrowRun: null, alreadyTerminal: true };
 	}
 
@@ -215,8 +215,4 @@ async function emitCancelEvent(
 		payload,
 	});
 	input.broker?.publish(runId, row);
-}
-
-function isTerminal(state: string): boolean {
-	return state === "succeeded" || state === "failed" || state === "cancelled";
 }
