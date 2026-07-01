@@ -28,6 +28,7 @@ export function steerRunHandler(deps: ServerDeps): RouteHandler {
 		const id = requireParam(ctx, "id");
 		const body = await readJsonBody(ctx);
 		const priority = parseMessagePriority(optionalString(body, "priority"));
+		const fromActor = optionalString(body, "fromActor");
 		const result = await steerRun({
 			runId: id,
 			body: requireString(body, "body"),
@@ -35,9 +36,7 @@ export function steerRunHandler(deps: ServerDeps): RouteHandler {
 			burrowClientPool: deps.burrowClientPool,
 			broker: deps.broker,
 			...(priority !== undefined ? { priority } : {}),
-			...(optionalString(body, "fromActor") !== undefined
-				? { fromActor: optionalString(body, "fromActor") as string }
-				: {}),
+			...(fromActor !== undefined ? { fromActor } : {}),
 			...(deps.now !== undefined ? { now: deps.now } : {}),
 		});
 		return jsonResponse(200, { message: result.message });
