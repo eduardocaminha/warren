@@ -73,7 +73,8 @@ export function parseCron(input: ParseCronInput): ParseCronResult {
 			previousRun: (now) => {
 				try {
 					const runs = job.previousRuns(1, now);
-					return runs.length > 0 ? (runs[0] as Date) : null;
+					const first = runs[0];
+					return first instanceof Date ? first : null;
 				} catch {
 					return null;
 				}
