@@ -138,6 +138,19 @@ export type CloneKind = (typeof CLONE_KINDS)[number];
  *     shared subscription ceiling, not a code bug. The run is failed now;
  *     warren-3f64 re-queues it with `resume_at = resetsAt` so it retries
  *     after the window resets.
+ *   - `provider_error` (warren-edc3) means the agent's terminal model
+ *     turn ended with `stopReason === "error"` and a non-empty provider
+ *     `errorMessage` (e.g. Anthropic `400` "Your credit balance is too
+ *     low to access the Anthropic API"). Burrow sees the agent process
+ *     exit 0 and marks the run `succeeded`, so the in-stream terminal
+ *     detect (warren-e281 / pl-5516, which keys off the `agent_end`
+ *     envelope) misses it when the error signal rides the per-turn
+ *     `turn_end` envelope instead. Reap's safety net scans the persisted
+ *     event log for the terminal error turn and flips an otherwise-
+ *     `succeeded` run to `failed`, blocking the bookkeeping-only PR /
+ *     seed close / plan-run advance. The provider message is surfaced on
+ *     the `reap.provider_error` event; `failure_reason` carries only the
+ *     discriminator (the column is enum-narrowed, not free text).
  *
  * Null on succeeded/cancelled rows.
  */
@@ -149,6 +162,7 @@ export const RUN_FAILURE_REASONS = [
 	"burrow_run_lost",
 	"burrow_unreachable",
 	"dropped_commit",
+	"provider_error",
 	"rate_limited",
 ] as const;
 export type RunFailureReason = (typeof RUN_FAILURE_REASONS)[number];
