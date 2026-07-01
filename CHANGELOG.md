@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.10] — 2026-07-01
+
+### Fixed
+
+- **`fix(runs)`** — result-type terminal detection now checks `stopReason === "error"` and a
+  non-empty `errorMessage` as additional failure signals in both the batch (`state_change`)
+  and chat (`agent_end`) carriers; previously a credit-balance 400 error with `is_error: false`
+  was incorrectly recorded as `succeeded` (PR #187 / warren-470f).
+- **`fix(seeds-cli)`** — `closeSeed` and `updateExtensions` now attach a `recoveryHint` to
+  their `SeedsCliError` on non-zero exit, consistent with other seeds-cli error sites
+  (PR #183).
+
+### Changed
+
+- **`refactor(runs)`** — `cancel.ts` now uses the shared `isTerminalRunState` helper; the
+  private duplicate `isTerminal` function is removed (PR #182).
+- **`refactor(runs)`** — `steerRunHandler` double `optionalString` call and needless cast
+  eliminated (PR #184).
+- **`refactor(triggers)`** — cron `previousRun` guarded with `instanceof Date` instead of an
+  unsafe cast (PR #185).
+- **`docs(plots)`** — `projection-sink.ts` upsert double-cast comment added to explain why
+  `Plot` must go via `unknown` before `Record<string, unknown>` (PR #186).
+- **`test(terminal-detect)`** — regression tests added for the `stopReason`/`errorMessage`
+  failure signals in result-type terminals on both carriers; coverage lines floor raised
+  91.9 % → 92.10 % (PR #188 / warren-2446).
+
 ## [0.9.9] — 2026-06-30
 
 ### Added
