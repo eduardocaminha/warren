@@ -22,3 +22,9 @@
 {"type":"attachment_added","actor":"user:operator","at":"2026-06-24T03:54:53.536Z","data":{"id":"att-005","type":"seeds_issue","ref":"warren-2501","role":"tracks"}}
 {"type":"attachment_added","actor":"user:operator","at":"2026-06-24T03:54:53.545Z","data":{"id":"att-006","type":"seeds_issue","ref":"warren-1312","role":"tracks"}}
 {"type":"attachment_added","actor":"user:operator","at":"2026-06-24T03:54:53.549Z","data":{"id":"att-007","type":"seeds_issue","ref":"warren-796b","role":"tracks"}}
+{"type":"attachment_added","actor":"user:operator","at":"2026-07-01T08:52:11.461Z","data":{"id":"att-002","type":"seeds_issue","ref":"warren-8639","role":"tracks"}}
+{"type":"attachment_added","actor":"user:operator","at":"2026-07-01T08:52:11.473Z","data":{"id":"att-003","type":"seeds_issue","ref":"warren-ff55","role":"tracks"}}
+{"type":"attachment_added","actor":"user:operator","at":"2026-07-01T08:52:11.476Z","data":{"id":"att-004","type":"seeds_issue","ref":"warren-e568","role":"tracks"}}
+{"type":"attachment_added","actor":"user:operator","at":"2026-07-01T08:52:11.485Z","data":{"id":"att-005","type":"seeds_issue","ref":"warren-2501","role":"tracks"}}
+{"type":"attachment_added","actor":"user:operator","at":"2026-07-01T08:52:11.490Z","data":{"id":"att-006","type":"seeds_issue","ref":"warren-1312","role":"tracks"}}
+{"type":"attachment_added","actor":"user:operator","at":"2026-07-01T08:52:11.493Z","data":{"id":"att-007","type":"seeds_issue","ref":"warren-796b","role":"tracks"}}
