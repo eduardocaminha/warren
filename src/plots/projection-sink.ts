@@ -50,6 +50,9 @@ export function createPlotsProjectionSink(opts: PlotsProjectionSinkOptions): Plo
 					status: plot.status,
 					title: plot.name,
 					updatedAt: plot.updated_at,
+					// `Plot` is a typed external interface; cast via `unknown` because TypeScript
+					// can't widen a concrete interface to `Record<string, unknown>` directly,
+					// yet the blob is JSON-serializable and stored verbatim in `state_json`.
 					state: plot as unknown as Record<string, unknown>,
 				});
 			} catch (err) {
