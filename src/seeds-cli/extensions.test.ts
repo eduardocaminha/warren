@@ -1,7 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import type { SpawnFn, SpawnResult } from "../projects/clone.ts";
 import { SeedsCliError } from "./errors.ts";
-import { clearScheduledFor, listScheduledSeeds, updateExtensions } from "./extensions.ts";
+import {
+	clearScheduledFor,
+	closeSeed,
+	listScheduledSeeds,
+	updateExtensions,
+} from "./extensions.ts";
 
 function ok(stdout: string): SpawnResult {
 	return { stdout, stderr: "", exitCode: 0 };
@@ -60,6 +65,32 @@ describe("listScheduledSeeds", () => {
 		const spawn: SpawnFn = async () => ok(JSON.stringify({ success: true }));
 		await expect(listScheduledSeeds({ spawn, sdBinary: "sd" }, "/p")).rejects.toBeInstanceOf(
 			SeedsCliError,
+		);
+	});
+});
+
+describe("closeSeed", () => {
+	test("shells out to sd close with the seed id", async () => {
+		const calls: { cmd: readonly string[]; cwd: string }[] = [];
+		const spawn: SpawnFn = async (cmd, opts) => {
+			calls.push({ cmd, cwd: opts.cwd });
+			return ok("");
+		};
+		await closeSeed({ spawn, sdBinary: "/opt/sd" }, "/data/projects/x/y", "warren-abc");
+		expect(calls).toEqual([{ cmd: ["/opt/sd", "close", "warren-abc"], cwd: "/data/projects/x/y" }]);
+	});
+
+	test("throws SeedsCliError with a recoveryHint on a non-zero exit", async () => {
+		const spawn: SpawnFn = async () => fail("seeds: no such issue");
+		let caught: unknown;
+		try {
+			await closeSeed({ spawn, sdBinary: "sd" }, "/p", "warren-abc");
+		} catch (e) {
+			caught = e;
+		}
+		expect(caught).toBeInstanceOf(SeedsCliError);
+		expect((caught as SeedsCliError).recoveryHint).toBe(
+			"run `sd show warren-abc` in /p to diagnose",
 		);
 	});
 });
@@ -179,14 +210,21 @@ describe("updateExtensions", () => {
 		expect(calls).toEqual([]);
 	});
 
-	test("throws SeedsCliError on a non-zero exit", async () => {
+	test("throws SeedsCliError with a recoveryHint on a non-zero exit", async () => {
 		const spawn: SpawnFn = async () => fail("seeds: no such issue warren-abc");
-		await expect(
-			updateExtensions({ spawn, sdBinary: "sd" }, "/p", "warren-abc", {
+		let caught: unknown;
+		try {
+			await updateExtensions({ spawn, sdBinary: "sd" }, "/p", "warren-abc", {
 				role: "claude-code",
 				trigger: "manual",
-			}),
-		).rejects.toBeInstanceOf(SeedsCliError);
+			});
+		} catch (e) {
+			caught = e;
+		}
+		expect(caught).toBeInstanceOf(SeedsCliError);
+		expect((caught as SeedsCliError).recoveryHint).toBe(
+			"run `sd show warren-abc` in /p to diagnose",
+		);
 	});
 
 	test("clearScheduledFor still merges {scheduledFor:null, lastScheduledRun} via updateExtensions", async () => {
