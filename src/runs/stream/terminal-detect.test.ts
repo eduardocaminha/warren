@@ -100,6 +100,127 @@ describe("detectRuntimeTerminal — claude-code result", () => {
 	});
 });
 
+// ---------------------------------------------------------------------------
+// warren-470f: stopReason/errorMessage failure signals in result terminals
+// Regression lock: credit-balance 400 errors must fail the run, not succeed.
+// Both carriers (state_change = batch, agent_end = chat) are tested.
+// ---------------------------------------------------------------------------
+
+describe("detectRuntimeTerminal — result stopReason/errorMessage (warren-470f, state_change carrier)", () => {
+	// Exact scenario from the bug report: Anthropic 400 credit balance too low.
+	test("credit-balance scenario: is_error=false, stopReason='error', errorMessage set → failed", () => {
+		expect(
+			detectRuntimeTerminal(
+				envelope({
+					type: "result",
+					is_error: false,
+					stopReason: "error",
+					errorMessage: "Your credit balance is too low to access the Anthropic API",
+				}),
+			),
+		).toBe("failed");
+	});
+
+	test("stopReason='error' alone (no errorMessage) → failed", () => {
+		expect(
+			detectRuntimeTerminal(envelope({ type: "result", is_error: false, stopReason: "error" })),
+		).toBe("failed");
+	});
+
+	test("non-empty errorMessage alone (no stopReason) → failed", () => {
+		expect(
+			detectRuntimeTerminal(
+				envelope({
+					type: "result",
+					is_error: false,
+					errorMessage: "credit balance too low",
+				}),
+			),
+		).toBe("failed");
+	});
+
+	test("empty errorMessage + no stopReason → succeeded (zero-token noop is not a failure)", () => {
+		expect(
+			detectRuntimeTerminal(
+				envelope({ type: "result", is_error: false, stopReason: "end_turn", errorMessage: "" }),
+			),
+		).toBe("succeeded");
+	});
+
+	test("clean exit (is_error absent, no stopReason/errorMessage) → succeeded", () => {
+		expect(detectRuntimeTerminal(envelope({ type: "result" }))).toBe("succeeded");
+	});
+});
+
+describe("detectRuntimeTerminal — result stopReason/errorMessage (warren-470f, agent_end carrier)", () => {
+	function chatResultEnd(payload: Record<string, unknown>): RunEvent {
+		return {
+			id: 0,
+			burrowId: "bur_x",
+			runId: "run_x",
+			seq: 1,
+			kind: "agent_end",
+			stream: "system",
+			payload,
+			ts: new Date(2026, 4, 27, 12, 0, 0),
+		};
+	}
+
+	// Exact scenario from the bug report on the chat carrier.
+	test("credit-balance scenario: is_error=false, stopReason='error', errorMessage set → failed", () => {
+		expect(
+			detectRuntimeTerminal(
+				chatResultEnd({
+					type: "result",
+					is_error: false,
+					stopReason: "error",
+					errorMessage: "Your credit balance is too low to access the Anthropic API",
+				}),
+			),
+		).toBe("failed");
+	});
+
+	test("stopReason='error' alone (no errorMessage) → failed", () => {
+		expect(
+			detectRuntimeTerminal(
+				chatResultEnd({ type: "result", is_error: false, stopReason: "error" }),
+			),
+		).toBe("failed");
+	});
+
+	test("non-empty errorMessage alone (no stopReason) → failed", () => {
+		expect(
+			detectRuntimeTerminal(
+				chatResultEnd({
+					type: "result",
+					is_error: false,
+					errorMessage: "credit balance too low",
+				}),
+			),
+		).toBe("failed");
+	});
+
+	test("empty errorMessage + no stopReason → succeeded", () => {
+		expect(
+			detectRuntimeTerminal(
+				chatResultEnd({
+					type: "result",
+					is_error: false,
+					stopReason: "end_turn",
+					errorMessage: "",
+					session_id: "s1",
+				}),
+			),
+		).toBe("succeeded");
+	});
+
+	test("clean exit (is_error=false, no stopReason/errorMessage) → succeeded", () => {
+		expect(
+			detectRuntimeTerminal(chatResultEnd({ type: "result", is_error: false, session_id: "s1" })),
+		).toBe("succeeded");
+	});
+});
+
 describe("detectRuntimeTerminal — claude-code-chat agent_end (warren-8b7c)", () => {
 	function chatAgentEnd(payload: Record<string, unknown>): RunEvent {
 		return {

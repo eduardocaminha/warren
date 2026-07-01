@@ -20,6 +20,7 @@
 		"src/server/integration.multi-worker.test.ts": 553,
 		"src/server/server.test.ts": 536,
 		"src/db/repos/runs.ts": 547,
-		"src/triggers/tick.ts": 511
+		"src/triggers/tick.ts": 511,
+		"src/runs/stream/terminal-detect.test.ts": 539
 	}
 }
