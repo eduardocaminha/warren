@@ -99,6 +99,7 @@ export async function closeSeed(
 	if (result.exitCode !== 0) {
 		throw new SeedsCliError(
 			`sd close ${seedId} exited ${result.exitCode}: ${truncateSdOutput(result.stderr || result.stdout)}`,
+			{ recoveryHint: `run \`${deps.sdBinary} show ${seedId}\` in ${projectPath} to diagnose` },
 		);
 	}
 }
@@ -156,6 +157,7 @@ export async function updateExtensions(
 	if (result.exitCode !== 0) {
 		throw new SeedsCliError(
 			`sd update ${seedId} exited ${result.exitCode}: ${truncateSdOutput(result.stderr || result.stdout)}`,
+			{ recoveryHint: `run \`${deps.sdBinary} show ${seedId}\` in ${projectPath} to diagnose` },
 		);
 	}
 }
