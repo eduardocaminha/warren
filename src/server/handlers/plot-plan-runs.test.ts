@@ -178,6 +178,74 @@ describe("POST /plot-plan-runs", () => {
 		expect(activateCalls[0]?.handle).toBe("alice");
 	});
 
+	test("refreshes the project clone before reading the Plot + synthesizing (warren-6d60)", async () => {
+		const order: string[] = [];
+		const sdSpawn = makeSdSpawn(
+			[],
+			[
+				{
+					match: (cmd) => cmd[1] === "show" && cmd[2] === "warren-a",
+					result: seedShowResult("warren-a", "open"),
+				},
+				{
+					match: (cmd) => cmd[1] === "plan" && cmd[2] === "show" && cmd[3] === "pl-fresh",
+					result: planShowResult("pl-fresh", "approved", ["warren-a"]),
+				},
+			],
+		);
+		const refreshedIds: string[] = [];
+		const baseSynthesizer = makeSynthesizer({
+			result: { parentSeedId: "wa-parent", planId: "pl-fresh", children: ["warren-a"] },
+		});
+		const deps = await depsFor({
+			repos,
+			sdSpawn,
+			spawn: sdSpawn,
+			refreshProjectFn: async (input) => {
+				order.push("refresh");
+				refreshedIds.push(input.id);
+				const project = await repos.projects.require(input.id);
+				return { project, headSha: "deadbeef", ref: input.ref ?? project.defaultBranch };
+			},
+			planSynthesizer: {
+				async synthesize(input) {
+					order.push("synthesize");
+					return baseSynthesizer.synthesize(input);
+				},
+			},
+			plotReader: {
+				async read(_req) {
+					order.push("plot-read");
+					return plotEnvelope({
+						attachments: [makeAttachment("att-001", "seeds_issue", "warren-a")],
+					});
+				},
+			},
+			plotResolver: makePlotResolver({ "plot-deadbeef": plottedProject }),
+		});
+		handle = startServer(deps, {
+			transport: { kind: "tcp", hostname: "127.0.0.1", port: 0 },
+			auth: NO_AUTH,
+			logger: silentLogger,
+		});
+
+		const res = await fetch(`${tcpUrl(handle)}/plot-plan-runs`, {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({
+				plot_id: "plot-deadbeef",
+				project_id: plottedProject.id,
+				agent_name: "claude-code",
+			}),
+		});
+		expect(res.status).toBe(201);
+		expect(refreshedIds).toEqual([plottedProject.id]);
+		// Refresh fires first, before the Plot envelope read and synthesis.
+		expect(order[0]).toBe("refresh");
+		expect(order.indexOf("refresh")).toBeLessThan(order.indexOf("plot-read"));
+		expect(order.indexOf("refresh")).toBeLessThan(order.indexOf("synthesize"));
+	});
+
 	test("filters closed seeds + sd_plan attachments before synthesis", async () => {
 		const sdSpawn = makeSdSpawn(
 			[],

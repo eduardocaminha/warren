@@ -331,6 +331,105 @@ describe("POST /plan-runs", () => {
 		expect(body.planRun.plotId).toBeNull();
 	});
 
+	test("refreshes the project clone before walking the plan (warren-6d60)", async () => {
+		const order: string[] = [];
+		const calls: SdCall[] = [];
+		const sdSpawn = makeSdSpawn(calls, [
+			{
+				match: (cmd) => {
+					order.push("plan-show");
+					return cmd[1] === "plan" && cmd[2] === "show";
+				},
+				result: planShowResult("pl-fresh", "active", ["wa-a"]),
+			},
+			{
+				match: (cmd) => cmd[1] === "show" && cmd[2] === "wa-a",
+				result: seedShowResult("wa-a", "open"),
+			},
+		]);
+		const refreshedIds: string[] = [];
+		const deps = await depsFor({
+			repos,
+			sdSpawn,
+			// Wire the git spawn seam so the handler attempts a refresh; the
+			// stub below stands in for the real `refreshProject` so we never
+			// shell out to git.
+			spawn: sdSpawn,
+			refreshProjectFn: async (input) => {
+				order.push("refresh");
+				refreshedIds.push(input.id);
+				const project = await repos.projects.require(input.id);
+				return { project, headSha: "deadbeef", ref: input.ref ?? project.defaultBranch };
+			},
+		});
+		handle = startServer(deps, {
+			transport: { kind: "tcp", hostname: "127.0.0.1", port: 0 },
+			auth: NO_AUTH,
+			logger: silentLogger,
+		});
+
+		const res = await fetch(`${tcpUrl(handle)}/plan-runs`, {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({
+				project: seedyProjectId,
+				planId: "pl-fresh",
+				agent: "claude-code",
+			}),
+		});
+		expect(res.status).toBe(201);
+		// The refresh fired against the dispatched project, and it ran before
+		// the seeds-CLI plan walk read any on-disk state.
+		expect(refreshedIds).toEqual([seedyProjectId]);
+		expect(order[0]).toBe("refresh");
+		expect(order).toContain("plan-show");
+		expect(order.indexOf("refresh")).toBeLessThan(order.indexOf("plan-show"));
+	});
+
+	test("skips refresh when the git spawn seam is unwired (warren-6d60)", async () => {
+		let refreshCalled = false;
+		const sdSpawn = makeSdSpawn(
+			[],
+			[
+				{
+					match: (cmd) => cmd[1] === "plan" && cmd[2] === "show",
+					result: planShowResult("pl-noref", "active", ["wa-a"]),
+				},
+				{
+					match: (cmd) => cmd[1] === "show" && cmd[2] === "wa-a",
+					result: seedShowResult("wa-a", "open"),
+				},
+			],
+		);
+		const deps = await depsFor({
+			repos,
+			sdSpawn,
+			// No `spawn` wired → refresh is skipped even if a refresher is present.
+			refreshProjectFn: async (input) => {
+				refreshCalled = true;
+				const project = await repos.projects.require(input.id);
+				return { project, headSha: "deadbeef", ref: project.defaultBranch };
+			},
+		});
+		handle = startServer(deps, {
+			transport: { kind: "tcp", hostname: "127.0.0.1", port: 0 },
+			auth: NO_AUTH,
+			logger: silentLogger,
+		});
+
+		const res = await fetch(`${tcpUrl(handle)}/plan-runs`, {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({
+				project: seedyProjectId,
+				planId: "pl-noref",
+				agent: "claude-code",
+			}),
+		});
+		expect(res.status).toBe(201);
+		expect(refreshCalled).toBe(false);
+	});
+
 	test("404 when project doesn't exist", async () => {
 		const sdSpawn = makeSdSpawn([], []);
 		const deps = await depsFor({ repos, sdSpawn });

@@ -54,12 +54,12 @@ import { readyzHandler } from "./diagnostics.ts";
 import { mcpHandler } from "./mcp.ts";
 import { healthzHandler, previewConfigHandler, versionHandler } from "./meta.ts";
 import { metricsHandler } from "./metrics.ts";
+import { streamPlanRunEventsHandler } from "./plan-runs.stream.ts";
 import {
 	cancelPlanRunHandler,
 	createPlanRunHandler,
 	getPlanRunHandler,
 	listPlanRunsHandler,
-	streamPlanRunEventsHandler,
 } from "./plan-runs.ts";
 import { createPlotPlanRunHandler } from "./plot-plan-runs.ts";
 import {

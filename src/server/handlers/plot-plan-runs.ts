@@ -31,6 +31,7 @@ import { resolveDispatcherHandle } from "../../runs/index.ts";
 import { showPlan, showSeed } from "../../seeds-cli/index.ts";
 import { jsonResponse } from "../response.ts";
 import type { RouteHandler, ServerDeps } from "../types.ts";
+import { refreshDispatchProject } from "./dispatch-refresh.ts";
 import { optionalString, readJsonBody, requireString } from "./index.ts";
 
 /**
@@ -145,10 +146,18 @@ function createPlotPlanRunHandler(deps: ServerDeps): RouteHandler {
 			}
 		}
 
+		// (5b) warren-6d60: refresh the project host clone before reading
+		// the Plot envelope + walking seed statuses + synthesizing the plan,
+		// so a seed attached/pushed moments earlier is seen without a manual
+		// project refresh. The refresh runs before any local `sd plan submit`
+		// writes, so it never clobbers synthesis output. See
+		// `refreshDispatchProject` for the gate + failure posture.
+		const dispatchProject = await refreshDispatchProject(deps, project, ref);
+
 		// (6) read the Plot envelope and filter to dispatchable candidates.
 		const reader = deps.plotReader ?? defaultPlotReader;
 		const envelope = await reader.read({
-			plotDir: join(project.localPath, ".plot"),
+			plotDir: join(dispatchProject.localPath, ".plot"),
 			plotId,
 		});
 		const seedsCandidates = envelope.attachments.filter(
@@ -171,7 +180,7 @@ function createPlotPlanRunHandler(deps: ServerDeps): RouteHandler {
 		// each call is shell + filesystem read.
 		const statuses = await Promise.all(
 			seedsCandidates.map((a) =>
-				showSeed(seedsCli, project.localPath, a.ref).then((s) => ({
+				showSeed(seedsCli, dispatchProject.localPath, a.ref).then((s) => ({
 					ref: a.ref,
 					status: s.status,
 				})),
@@ -200,7 +209,7 @@ function createPlotPlanRunHandler(deps: ServerDeps): RouteHandler {
 			});
 		}
 		const synthesized = await deps.planSynthesizer.synthesize({
-			projectPath: project.localPath,
+			projectPath: dispatchProject.localPath,
 			plotId,
 			candidateSeedIds: dispatchableRefs,
 		});
@@ -210,7 +219,7 @@ function createPlotPlanRunHandler(deps: ServerDeps): RouteHandler {
 		// one is open. (This double-read is paid against the just-
 		// committed plan, so it always succeeds in practice; keeping the
 		// reuse of POST /plan-runs's contract is worth the extra read.)
-		const plan = await showPlan(seedsCli, project.localPath, synthesized.planId);
+		const plan = await showPlan(seedsCli, dispatchProject.localPath, synthesized.planId);
 		if (plan.children.length === 0) {
 			throw new PlanHasNoOpenChildrenError(
 				`synthesized plan ${synthesized.planId} has no children; nothing to dispatch`,
@@ -250,7 +259,7 @@ function createPlotPlanRunHandler(deps: ServerDeps): RouteHandler {
 		await emitPlanRunDispatchedToPlot({
 			appender: deps.planRunPlotAppender ?? defaultPlanRunPlotAppender,
 			logger: deps.logger,
-			plotDir: join(project.localPath, ".plot"),
+			plotDir: join(dispatchProject.localPath, ".plot"),
 			plotId,
 			handle: resolveDispatcherHandle(result.planRun.dispatcherHandle),
 			planRunId: result.planRun.id,
@@ -264,7 +273,7 @@ function createPlotPlanRunHandler(deps: ServerDeps): RouteHandler {
 		await promotePlotToActiveOnDispatch({
 			activator: deps.planRunPlotActivator ?? defaultPlanRunPlotActivator,
 			logger: deps.logger,
-			plotDir: join(project.localPath, ".plot"),
+			plotDir: join(dispatchProject.localPath, ".plot"),
 			plotId,
 			handle: resolveDispatcherHandle(result.planRun.dispatcherHandle),
 			planRunId: result.planRun.id,
