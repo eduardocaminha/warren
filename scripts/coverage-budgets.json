@@ -1,5 +1,5 @@
 {
-	"_comment": "Coverage floors enforced by scripts/check-coverage.ts (warren-e4b1, pl-7b06 step 17). Set just below the current baseline (functions 89.79%, lines 92.35% as of 2026-06-30 on bun 1.2.23 full-install; CI bun 1.3.14 measured 93.15%, ratchetwatch) to absorb measurement noise. The ratchet only goes UP — raise these numbers as coverage improves; never lower them. To grow past a budget: add tests first, then raise the floor.",
+	"_comment": "Coverage floors enforced by scripts/check-coverage.ts (warren-e4b1, pl-7b06 step 17). Set just below the current baseline (functions 89.71%, lines 93.22%, ratchetwatch 2026-07-02 on bun 1.2.23) to absorb measurement noise. The ratchet only goes UP — raise these numbers as coverage improves; never lower them. To grow past a budget: add tests first, then raise the floor.",
 	"functions": 89.36,
-	"lines": 92.1
+	"lines": 92.97
 }
