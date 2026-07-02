@@ -6,6 +6,7 @@ import type {
 	PlanRunPlotActivator,
 	PlanRunPlotAppender,
 } from "../../plan-runs/plot-appender.ts";
+import type { SpawnFn } from "../../projects/clone.ts";
 import { RunEventBroker } from "../../runs/index.ts";
 import { createBridgeRegistry } from "../bridges.ts";
 import type { BridgeRegistry, Logger, ServerDeps } from "../types.ts";
@@ -30,6 +31,10 @@ export interface BuildDepsInput {
 	planRunPlotActivator?: PlanRunPlotActivator;
 	logger?: Logger;
 	plotResolver?: import("../../plots/index.ts").PlotResolver;
+	/** Wire the git `spawn` seam so the plan-run handler refreshes the clone (warren-6d60). */
+	spawn?: SpawnFn;
+	/** Stub the project refresher so tests assert the refresh without shelling out (warren-6d60). */
+	refreshProjectFn?: ServerDeps["refreshProjectFn"];
 }
 
 export async function depsFor(input: BuildDepsInput): Promise<ServerDeps> {
@@ -58,6 +63,8 @@ export async function depsFor(input: BuildDepsInput): Promise<ServerDeps> {
 			? { planRunPlotActivator: input.planRunPlotActivator }
 			: {}),
 		...(input.plotResolver !== undefined ? { plotResolver: input.plotResolver } : {}),
+		...(input.spawn !== undefined ? { spawn: input.spawn } : {}),
+		...(input.refreshProjectFn !== undefined ? { refreshProjectFn: input.refreshProjectFn } : {}),
 	};
 }
 
