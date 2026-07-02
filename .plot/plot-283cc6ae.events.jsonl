@@ -23,3 +23,6 @@
 {"type":"plan_run_dispatched","actor":"user:operator","at":"2026-06-28T14:56:54.520Z","data":{"plan_run_id":"plnr_ymdk2sq0k7gf","plan_id":"pl-d43b","children_count":15}}
 {"type":"status_changed","actor":"user:operator","at":"2026-06-28T14:56:54.523Z","data":{"from":"ready","to":"active"}}
 {"type":"run_dispatched","actor":"user:operator","at":"2026-06-28T14:57:02.864Z","data":{"run_id":"run_ythhmjt9y5wy","agent":"claude-code","model":"claude-sonnet-4-6","project":"prj_74w0r1ytsqqc"}}
+{"type":"run_dispatched","actor":"user:operator","at":"2026-07-01T10:14:41.480Z","data":{"run_id":"run_s9w70tvd7e23","agent":"leveret","model":"claude-opus-4-8","project":"prj_74w0r1ytsqqc"}}
+{"type":"run_dispatched","actor":"user:operator","at":"2026-07-01T10:14:55.559Z","data":{"run_id":"run_1ra7wp32gpew","agent":"leveret","model":"claude-opus-4-8","project":"prj_74w0r1ytsqqc"}}
+{"type":"run_dispatched","actor":"user:operator","at":"2026-07-01T10:15:07.365Z","data":{"run_id":"run_kdvr5r17a7wr","agent":"leveret","model":"claude-opus-4-8","project":"prj_74w0r1ytsqqc"}}
