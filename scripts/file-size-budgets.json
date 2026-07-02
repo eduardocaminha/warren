@@ -6,7 +6,6 @@
 		"src/runs/reap/run.test.ts": 570,
 		"src/runs/reap/stage.test.ts": 551,
 		"src/server/handlers/conversations.ts": 600,
-		"scripts/acceptance/scenarios/25-plot-roundtrip.ts": 556,
 		"src/client/client.ts": 569,
 		"src/runs/spawn/dispatch.ts": 522,
 		"src/db/schema/sqlite.ts": 564,
